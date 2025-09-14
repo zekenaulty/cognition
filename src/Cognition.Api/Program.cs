@@ -92,7 +92,14 @@ builder.Services.AddHangfire(config =>
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtSecret = jwtSection["Secret"]
     ?? Environment.GetEnvironmentVariable("JWT__Secret")
-    ?? "dev-secret-change-me-please-change-32bytes!dev"; // ensure >= 32 bytes
+    ?? JwtOptions.DevFallbackSecret; // ensure >= 32 bytes
+
+// Guard: never allow dev fallback secret in production
+if (builder.Environment.IsProduction() && string.Equals(jwtSecret, JwtOptions.DevFallbackSecret, StringComparison.Ordinal))
+{
+    throw new InvalidOperationException("JWT secret is using the development fallback in Production. Configure Jwt:Secret or JWT__Secret.");
+}
+
 JwtOptions.Secret = jwtSecret; // expose for token issuance
 var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
 builder.Services.AddAuthentication(options =>
@@ -103,8 +110,13 @@ builder.Services.AddAuthentication(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
     {
-        ValidateIssuer = false,
-        ValidateAudience = false,
+        // Enable lifetime validation so expired tokens are rejected
+        ValidateLifetime = true,
+        // Optionally wire issuer/audience when configured
+        ValidateIssuer = !string.IsNullOrWhiteSpace(jwtSection["Issuer"]),
+        ValidIssuer = jwtSection["Issuer"],
+        ValidateAudience = !string.IsNullOrWhiteSpace(jwtSection["Audience"]),
+        ValidAudience = jwtSection["Audience"],
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = key,
         ClockSkew = TimeSpan.FromMinutes(2)

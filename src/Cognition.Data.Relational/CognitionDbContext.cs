@@ -75,4 +75,72 @@ public class CognitionDbContext : DbContext
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(CognitionDbContext).Assembly);
     }
+
+    public override int SaveChanges()
+    {
+        ValidateBeforeSaveAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        return SaveChangesInternalAsync(cancellationToken);
+    }
+
+    private async Task<int> SaveChangesInternalAsync(CancellationToken cancellationToken)
+    {
+        await ValidateBeforeSaveAsync(cancellationToken);
+        return await base.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task ValidateBeforeSaveAsync(CancellationToken cancellationToken)
+    {
+        // Enforce KnowledgeEmbedding invariants at application level
+        var embeddingEntries = ChangeTracker.Entries<Cognition.Data.Relational.Modules.Knowledge.KnowledgeEmbedding>()
+            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
+            .Select(e => e.Entity)
+            .ToList();
+
+        foreach (var e in embeddingEntries)
+        {
+            var vector = e.Vector ?? Array.Empty<float>();
+            if (e.Dimensions.HasValue)
+            {
+                if (vector.Length != e.Dimensions.Value)
+                {
+                    throw new InvalidOperationException($"KnowledgeEmbedding vector length ({vector.Length}) does not match Dimensions ({e.Dimensions}).");
+                }
+            }
+
+            if (e.Normalized == true)
+            {
+                // If VectorL2Norm provided, validate ~1.0; otherwise compute for validation
+                double l2 = e.VectorL2Norm ?? Math.Sqrt(vector.Sum(v => v * (double)v));
+                if (Math.Abs(l2 - 1.0) > 1e-3)
+                {
+                    throw new InvalidOperationException($"KnowledgeEmbedding marked Normalized but L2 norm ≈ {l2:0.########} (expected ~1.0).");
+                }
+                if (e.VectorL2Norm == null)
+                {
+                    e.VectorL2Norm = l2;
+                }
+            }
+
+            // Optional uniqueness check when identifiers are present
+            if (e.Model != null && e.ModelVersion != null && e.ChunkIndex.HasValue)
+            {
+                var exists = await Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeEmbedding>()
+                    .AsNoTracking()
+                    .AnyAsync(x => x.KnowledgeItemId == e.KnowledgeItemId
+                                   && x.Model == e.Model
+                                   && x.ModelVersion == e.ModelVersion
+                                   && x.ChunkIndex == e.ChunkIndex
+                                   && x.Id != e.Id, cancellationToken);
+                if (exists)
+                {
+                    throw new InvalidOperationException("Duplicate KnowledgeEmbedding for (KnowledgeItemId, Model, ModelVersion, ChunkIndex).");
+                }
+            }
+        }
+    }
 }

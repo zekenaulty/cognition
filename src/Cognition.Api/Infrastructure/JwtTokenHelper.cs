@@ -11,8 +11,6 @@ namespace Cognition.Api.Infrastructure;
 
 public static class JwtTokenHelper
 {
-    private const string DevFallbackSecret = "dev-secret-change-me-please-change-32bytes!dev"; // >= 32 bytes
-
     private static string ResolveSecret()
     {
         // Prefer the value chosen during app startup
@@ -23,7 +21,7 @@ public static class JwtTokenHelper
         if (!string.IsNullOrEmpty(env)) return env;
 
         // Final fallback for development
-        return DevFallbackSecret;
+        return JwtOptions.DevFallbackSecret;
     }
 
     public static (string AccessToken, DateTime ExpiresAt) IssueAccessToken(Data.Relational.Modules.Users.User user)
@@ -50,7 +48,23 @@ public static class JwtTokenHelper
 
     public static async Task<(string AccessToken, DateTime ExpiresAt, string RefreshToken)?> RotateRefreshAsync(CognitionDbContext db, string refreshToken)
     {
-        var token = await db.Set<RefreshToken>().FirstOrDefaultAsync(t => t.Token == refreshToken && t.RevokedAtUtc == null);
+        // Hash the provided token and look up by hash first
+        var hashed = HashToken(refreshToken);
+        var token = await db.Set<RefreshToken>()
+            .FirstOrDefaultAsync(t => t.Token == hashed && t.RevokedAtUtc == null);
+
+        // Backward-compatibility: fall back to plaintext lookup if not found (older rows)
+        if (token == null)
+        {
+            token = await db.Set<RefreshToken>()
+                .FirstOrDefaultAsync(t => t.Token == refreshToken && t.RevokedAtUtc == null);
+            if (token != null)
+            {
+                // Upgrade stored value to hashed form
+                token.Token = hashed;
+                await db.SaveChangesAsync();
+            }
+        }
         if (token == null || token.ExpiresAtUtc < DateTime.UtcNow) return null;
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == token.UserId);
         if (user == null) return null;
@@ -58,14 +72,15 @@ public static class JwtTokenHelper
         var newToken = new RefreshToken
         {
             UserId = user.Id,
-            Token = GenerateSecureToken(),
+            // Store only the hash; return the plaintext separately
+            Token = HashToken(GenerateSecureToken(out var plaintext)),
             ExpiresAtUtc = DateTime.UtcNow.AddDays(14),
             CreatedAtUtc = DateTime.UtcNow
         };
         db.Set<RefreshToken>().Add(newToken);
         await db.SaveChangesAsync();
         var (access, exp) = IssueAccessToken(user);
-        return (access, exp, newToken.Token);
+        return (access, exp, plaintext);
     }
 
     public static async Task<(string Token, DateTime ExpiresAt)> IssueRefreshTokenAsync(CognitionDbContext db, Data.Relational.Modules.Users.User user)
@@ -73,18 +88,34 @@ public static class JwtTokenHelper
         var token = new RefreshToken
         {
             UserId = user.Id,
-            Token = GenerateSecureToken(),
+            // Store hash; return plaintext to caller
+            Token = HashToken(GenerateSecureToken(out var plaintext)),
             ExpiresAtUtc = DateTime.UtcNow.AddDays(14),
             CreatedAtUtc = DateTime.UtcNow
         };
         db.Set<RefreshToken>().Add(token);
         await db.SaveChangesAsync();
-        return (token.Token, token.ExpiresAtUtc);
+        return (plaintext, token.ExpiresAtUtc);
     }
 
     private static string GenerateSecureToken()
     {
         var bytes = RandomNumberGenerator.GetBytes(32);
         return Convert.ToBase64String(bytes);
+    }
+
+    private static string GenerateSecureToken(out string plaintext)
+    {
+        plaintext = GenerateSecureToken();
+        return plaintext;
+    }
+
+    private static string HashToken(string token)
+    {
+        // SHA-256 hash, returned as Base64 for compact storage
+        using var sha = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(token);
+        var hash = sha.ComputeHash(bytes);
+        return Convert.ToBase64String(hash);
     }
 }
