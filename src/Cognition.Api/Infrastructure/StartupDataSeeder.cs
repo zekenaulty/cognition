@@ -15,9 +15,13 @@ public static class StartupDataSeeder
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CognitionDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        // Apply EF Core migrations to create/update schema
+        await db.Database.MigrateAsync();
 
         var user = await EnsureUserAsync(db, logger, username: "Zythis", password: "root");
+
+        // Seed default client profiles
+        await EnsureClientProfilesAsync(db, logger);
 
         // Seed personas from reference files if present
         var contentRoot = scope.ServiceProvider.GetRequiredService<IHostEnvironment>().ContentRootPath;
@@ -115,11 +119,112 @@ public static class StartupDataSeeder
         }
     }
 
+    private static async Task EnsureClientProfilesAsync(CognitionDbContext db, ILogger logger)
+    {
+        // OpenAI default
+        var openAi = await db.Providers.AsNoTracking().FirstOrDefaultAsync(p => p.Name == "OpenAI");
+        if (openAi != null)
+        {
+            var model = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ProviderId == openAi.Id && m.Name == "gpt-4o");
+            if (!await db.ClientProfiles.AnyAsync(cp => cp.Name == "Default OpenAI"))
+            {
+                db.ClientProfiles.Add(new Cognition.Data.Relational.Modules.LLM.ClientProfile
+                {
+                    Name = "Default OpenAI",
+                    ProviderId = openAi.Id,
+                    ModelId = model?.Id,
+                    MaxTokens = 8192,
+                    Temperature = 0.7,
+                    TopP = 0.95,
+                    PresencePenalty = 0.2,
+                    FrequencyPenalty = 0.1,
+                    Stream = true,
+                    LoggingEnabled = false,
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync();
+                logger.LogInformation("Seeded ClientProfile: Default OpenAI");
+            }
+        }
+
+        // Gemini default
+        var gemini = await db.Providers.AsNoTracking().FirstOrDefaultAsync(p => p.Name == "Gemini");
+        if (gemini != null)
+        {
+            var model = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ProviderId == gemini.Id && (m.Name == "gemini-2.5-flash" || m.Name == "gemini-2.0-flash"));
+            if (!await db.ClientProfiles.AnyAsync(cp => cp.Name == "Default Gemini"))
+            {
+                db.ClientProfiles.Add(new Cognition.Data.Relational.Modules.LLM.ClientProfile
+                {
+                    Name = "Default Gemini",
+                    ProviderId = gemini.Id,
+                    ModelId = model?.Id,
+                    MaxTokens = 8192,
+                    Temperature = 0.7,
+                    TopP = 0.95,
+                    PresencePenalty = 0.0,
+                    FrequencyPenalty = 0.0,
+                    Stream = true,
+                    LoggingEnabled = false,
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync();
+                logger.LogInformation("Seeded ClientProfile: Default Gemini");
+            }
+        }
+
+        // Ollama default
+        var ollama = await db.Providers.AsNoTracking().FirstOrDefaultAsync(p => p.Name == "Ollama");
+        if (ollama != null)
+        {
+            var model = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ProviderId == ollama.Id && m.Name == "llama3.2:3b");
+            if (!await db.ClientProfiles.AnyAsync(cp => cp.Name == "Default Ollama"))
+            {
+                db.ClientProfiles.Add(new Cognition.Data.Relational.Modules.LLM.ClientProfile
+                {
+                    Name = "Default Ollama",
+                    ProviderId = ollama.Id,
+                    ModelId = model?.Id,
+                    MaxTokens = 8192,
+                    Temperature = 0.5,
+                    TopP = 0.9,
+                    PresencePenalty = 0.0,
+                    FrequencyPenalty = 0.0,
+                    Stream = false,
+                    LoggingEnabled = false,
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync();
+                logger.LogInformation("Seeded ClientProfile: Default Ollama");
+            }
+        }
+    }
     private static async Task<User> EnsureUserAsync(CognitionDbContext db, ILogger logger, string username, string password)
     {
         var norm = username.ToUpperInvariant();
         var user = await db.Users.FirstOrDefaultAsync(u => u.NormalizedUsername == norm);
-        if (user != null) return user;
+        if (user != null)
+        {
+            if (user.PrimaryPersonaId == null)
+            {
+                var persona = new Persona
+                {
+                    Name = user.Username,
+                    Nickname = user.Username,
+                    Role = "User",
+                    Type = PersonaType.User,
+                    OwnerUserId = user.Id,
+                    IsPublic = false,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                db.Personas.Add(persona);
+                await db.SaveChangesAsync();
+                user.PrimaryPersonaId = persona.Id;
+                db.UserPersonas.Add(new UserPersona { UserId = user.Id, PersonaId = persona.Id, IsDefault = true, Label = persona.Nickname, CreatedAtUtc = DateTime.UtcNow });
+                await db.SaveChangesAsync();
+            }
+            return user;
+        }
 
         var salt = RandomNumberGenerator.GetBytes(16);
         var hash = HashPasswordPbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, 32);
@@ -137,7 +242,23 @@ public static class StartupDataSeeder
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
-        logger.LogInformation("Seeded default user {Username}", username);
+
+        var p = new Persona
+        {
+            Name = username,
+            Nickname = username,
+            Role = "User",
+            Type = PersonaType.User,
+            OwnerUserId = user.Id,
+            IsPublic = false,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        db.Personas.Add(p);
+        await db.SaveChangesAsync();
+        user.PrimaryPersonaId = p.Id;
+        db.UserPersonas.Add(new UserPersona { UserId = user.Id, PersonaId = p.Id, IsDefault = true, Label = p.Nickname, CreatedAtUtc = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+        logger.LogInformation("Seeded default user {Username} with persona {Persona}", username, p.Id);
         return user;
     }
 

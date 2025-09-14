@@ -8,6 +8,8 @@ Icon?
 .Spotlight-V100
 .Trashes
 
+reference
+
 # ---- IDEs / Editors ----
 .vs/
 .vscode/
