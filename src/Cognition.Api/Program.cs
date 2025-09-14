@@ -22,6 +22,7 @@ builder.Services.AddCognitionDb(builder.Configuration);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddCognitionClients();
+builder.Services.AddCognitionTools();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {

@@ -2,6 +2,7 @@ using System.Text;
 using Cognition.Clients.LLM;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
+using Cognition.Data.Relational.Modules.Tools;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cognition.Clients.Agents;
@@ -31,6 +32,18 @@ public class AgentService : IAgentService
         return await client.GenerateAsync(prompt, track: false);
     }
 
+    // Non-interface helper: include a Tool Index in the system message
+    public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools, bool rolePlay = false)
+    {
+        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId);
+        var sys = BuildSystemMessage(persona, rolePlay);
+        var toolIndex = BuildToolIndexSection(tools);
+        var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
+        var client = await _factory.CreateAsync(providerId, modelId);
+        var prompt = string.IsNullOrWhiteSpace(fullSys) ? input : $"{fullSys}\n\nUser: {input}";
+        return await client.GenerateAsync(prompt, track: false);
+    }
+
     private static string BuildSystemMessage(Persona p, bool rolePlay)
     {
         var sb = new StringBuilder();
@@ -50,5 +63,30 @@ public class AgentService : IAgentService
         if (p.DomainExpertise is { Length: > 0 }) sb.AppendLine($"DomainExpertise: {string.Join(", ", p.DomainExpertise)}");
         return sb.ToString();
     }
-}
 
+    private static string BuildToolIndexSection(IEnumerable<Tool> tools)
+    {
+        var list = tools?.ToList() ?? new List<Tool>();
+        if (list.Count == 0) return string.Empty;
+        var sb = new StringBuilder();
+        sb.AppendLine("Tool Index:");
+        sb.AppendLine("- You may optionally call exactly one tool by returning pure JSON only on a single line:");
+        sb.AppendLine("  {\"toolId\":\"<GUID>\",\"args\":{...}} OR {\"toolName\":\"<NAME>\",\"args\":{...}}");
+        sb.AppendLine("- If no tool is needed, answer normally without JSON.");
+        sb.AppendLine("- Arguments must match the schema below (required marked with *).");
+        sb.AppendLine("Available tools:");
+        foreach (var t in list)
+        {
+            sb.Append("- ").Append(t.Name).Append(" (id: ").Append(t.Id).Append(")");
+            if (!string.IsNullOrWhiteSpace(t.Description)) sb.Append(" - ").Append(t.Description);
+            var inputs = t.Parameters.Where(p => p.Direction == Cognition.Data.Relational.Modules.Common.ToolParamDirection.Input).ToList();
+            if (inputs.Count > 0)
+            {
+                sb.Append(" | args: ");
+                sb.Append(string.Join(", ", inputs.Select(p => $"{p.Name}:{p.Type}{(p.Required ? "*" : "")}")));
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+}
