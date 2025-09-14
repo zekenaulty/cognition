@@ -60,8 +60,28 @@ public class KnowledgeEmbeddingConfiguration : IEntityTypeConfiguration<Knowledg
         b.Property(x => x.Label).HasColumnName("label");
         b.Property(x => x.Metadata).HasColumnName("metadata").HasColumnType("jsonb");
         b.Property(x => x.Vector).HasColumnName("vector");
+        // Typed descriptors
+        b.Property(x => x.Provider).HasColumnName("provider");
+        b.Property(x => x.Model).HasColumnName("model");
+        b.Property(x => x.ModelVersion).HasColumnName("model_version");
+        b.Property(x => x.Dimensions).HasColumnName("dimensions");
+        b.Property(x => x.Space).HasColumnName("space").HasConversion<string>();
+        b.Property(x => x.Normalized).HasColumnName("normalized");
+        b.Property(x => x.VectorL2Norm).HasColumnName("vector_l2_norm");
+        b.Property(x => x.ContentHash).HasColumnName("content_hash");
+        b.Property(x => x.ChunkIndex).HasColumnName("chunk_index");
+        b.Property(x => x.CharStart).HasColumnName("char_start");
+        b.Property(x => x.CharEnd).HasColumnName("char_end");
+        b.Property(x => x.Language).HasColumnName("language");
+        b.Property(x => x.SchemaVersion).HasColumnName("schema_version");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.HasIndex(x => x.KnowledgeItemId).HasDatabaseName("ix_knowledge_embeddings_item_id");
+        b.HasIndex(x => x.Model).HasDatabaseName("ix_knowledge_embeddings_model");
+        b.HasIndex(x => x.Provider).HasDatabaseName("ix_knowledge_embeddings_provider");
+        b.HasIndex(x => x.Dimensions).HasDatabaseName("ix_knowledge_embeddings_dimensions");
+        b.HasIndex(x => new { x.KnowledgeItemId, x.Model, x.ModelVersion, x.ChunkIndex })
+            .IsUnique()
+            .HasDatabaseName("ux_knowledge_embeddings_item_model_version_chunk");
     }
 }

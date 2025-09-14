@@ -15,5 +15,26 @@ public class KnowledgeEmbedding : BaseEntity
 
     // The embedding vector values
     public float[] Vector { get; set; } = Array.Empty<float>();
+
+    // Typed, queryable descriptors for portability and governance
+    public string? Provider { get; set; }
+    public string? Model { get; set; }
+    public string? ModelVersion { get; set; }
+    public int? Dimensions { get; set; }
+    public EmbeddingSpace? Space { get; set; }
+    public bool? Normalized { get; set; }
+    public double? VectorL2Norm { get; set; }
+    public string? ContentHash { get; set; }
+    public int? ChunkIndex { get; set; }
+    public int? CharStart { get; set; }
+    public int? CharEnd { get; set; }
+    public string? Language { get; set; }
+    public int? SchemaVersion { get; set; }
 }
 
+public enum EmbeddingSpace
+{
+    Cosine,
+    Dot,
+    Euclidean
+}
