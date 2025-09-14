@@ -9,6 +9,7 @@ using Hangfire.Dashboard;
 using Hangfire.PostgreSql;
 using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Mvc;
+using Cognition.Api.Infrastructure.Swagger;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +37,34 @@ builder.Services.AddSwaggerGen(c =>
         Title = "Cognition API",
         Version = "v1"
     });
+
+    // JWT Bearer authentication so the UI shows the Authorize button
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Enter JWT access token only (without 'Bearer')"
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+
+    // Remove security from endpoints marked [AllowAnonymous]
+    c.OperationFilter<AllowAnonymousOperationFilter>();
 });
 
 // CORS for Vite dev server
