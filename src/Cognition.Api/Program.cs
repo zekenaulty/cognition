@@ -22,7 +22,21 @@ builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddOpenApi();
 builder.Services.AddCognitionClients();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    // Avoid schema ID collisions for nested/duplicate DTO names
+    c.CustomSchemaIds(type =>
+    {
+        var fullName = type.FullName ?? type.Name;
+        // Replace '+' from nested types with '.' to keep it readable
+        return fullName.Replace("+", ".");
+    });
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Cognition API",
+        Version = "v1"
+    });
+});
 
 // CORS for Vite dev server
 builder.Services.AddCors(options =>
