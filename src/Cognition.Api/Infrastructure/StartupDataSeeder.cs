@@ -20,6 +20,36 @@ public static class StartupDataSeeder
 
         var user = await EnsureUserAsync(db, logger, username: "Zythis", password: "root");
 
+        // Backfill: ensure primary persona types are correct (User) and owner set
+        var users = await db.Users.AsNoTracking().ToListAsync();
+        foreach (var u in users)
+        {
+            if (u.PrimaryPersonaId.HasValue)
+            {
+                var p = await db.Personas.FirstOrDefaultAsync(x => x.Id == u.PrimaryPersonaId.Value);
+                if (p != null)
+                {
+                    bool changed = false;
+                    if (p.Type != PersonaType.User)
+                    {
+                        p.Type = PersonaType.User;
+                        changed = true;
+                    }
+                    if (p.OwnerUserId != u.Id)
+                    {
+                        p.OwnerUserId = u.Id;
+                        changed = true;
+                    }
+                    if (changed)
+                    {
+                        p.UpdatedAtUtc = DateTime.UtcNow;
+                        await db.SaveChangesAsync();
+                        logger.LogInformation("Backfilled persona {PersonaId} for user {UserId} as Type=User with owner.", p.Id, u.Id);
+                    }
+                }
+            }
+        }
+
         // Seed default client profiles
         await EnsureClientProfilesAsync(db, logger);
 

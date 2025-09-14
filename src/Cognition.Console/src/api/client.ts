@@ -59,6 +59,11 @@ async function request<T>(path: string, options: RequestInit = {}, accessToken?:
 }
 
 export const api = {
+  register: (username: string, password: string, email?: string) =>
+    request<{ id: string; username: string; primaryPersonaId?: string | null }>(
+      '/api/users/register',
+      { method: 'POST', body: JSON.stringify({ Username: username, Password: password, Email: email }) }
+    ),
   login: (username: string, password: string) =>
     request<LoginResponse>('/api/users/login', {
       method: 'POST',
@@ -102,7 +107,8 @@ export const api = {
       accessToken
     ),
 
-  listPersonas: (accessToken?: string) => request<Array<{ id: string; name: string; type?: 'User'|'Assistant' }>>('/api/personas', {}, accessToken),
+  // type comes from backend enum: 0 = User, 1 = Assistant (or string if enum serialized as string)
+  listPersonas: (accessToken?: string) => request<Array<{ id: string; name: string; type?: number | 'User' | 'Assistant' }>>('/api/personas', {}, accessToken),
   getPersona: (id: string, accessToken?: string) => request<any>(`/api/personas/${id}`, {}, accessToken),
   createPersona: (
     payload: {

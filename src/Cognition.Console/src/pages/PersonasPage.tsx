@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { Alert, Box, Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Chip } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -9,18 +9,19 @@ import { PersonaForm, PersonaModel } from '../components/PersonaForm'
 
 export default function PersonasPage() {
   const { auth } = useAuth()
-  const [items, setItems] = useState<Array<{ id: string; name: string; type?: 'User'|'Assistant' }>>([])
+  const [items, setItems] = useState<Array<{ id: string; name: string; type?: number | 'User' | 'Assistant' }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<PersonaModel | null>(null)
+  const [filterType, setFilterType] = useState<'All'|'User'|'Assistant'>('All')
 
   async function load() {
     setLoading(true)
     setError(null)
     try {
       const list = await api.listPersonas(auth?.accessToken)
-      setItems(list.filter(p => p.type !== 'User'))
+      setItems(list)
     } catch (e: any) {
       setError(e.message || 'Failed to load personas')
     } finally {
@@ -29,6 +30,14 @@ export default function PersonasPage() {
   }
 
   useEffect(() => { load() }, [auth?.accessToken])
+
+  const isUserType = (t: any) => t === 0 || t === 'User'
+  const typeText = (t: any) => (isUserType(t) ? 'User' : 'Assistant')
+
+  const filtered = useMemo(() => {
+    if (filterType === 'All') return items
+    return items.filter(p => (filterType === 'User' ? isUserType(p.type) : !isUserType(p.type)))
+  }, [items, filterType])
 
   async function onEdit(id: string) {
     try {
@@ -98,7 +107,17 @@ export default function PersonasPage() {
     <Box>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Typography variant="h5">Personas</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd}>New</Button>
+        <Stack direction="row" spacing={2} alignItems="center">
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel id="filter-type-label">Type</InputLabel>
+            <Select labelId="filter-type-label" label="Type" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
+              <MenuItem value="All">All</MenuItem>
+              <MenuItem value="Assistant">Assistant</MenuItem>
+              <MenuItem value="User">User</MenuItem>
+            </Select>
+          </FormControl>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd}>New</Button>
+        </Stack>
       </Stack>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       <Card>
@@ -110,13 +129,17 @@ export default function PersonasPage() {
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
+                  <TableCell>Type</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {items.map(p => (
+                {filtered.map(p => (
                   <TableRow key={p.id} hover>
                     <TableCell>{p.name}</TableCell>
+                    <TableCell>
+                      <Chip size="small" label={typeText(p.type)} color={isUserType(p.type) ? 'primary' : 'default'} />
+                    </TableCell>
                     <TableCell align="right">
                       <IconButton size="small" onClick={() => onEdit(p.id)}><EditIcon fontSize="small" /></IconButton>
                       <IconButton size="small" onClick={() => onDelete(p.id)}><DeleteIcon fontSize="small" /></IconButton>

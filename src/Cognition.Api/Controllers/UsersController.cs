@@ -27,6 +27,7 @@ public class UsersController : ControllerBase
     public record LinkPersonaRequest(Guid PersonaId, bool IsDefault = false, string? Label = null);
 
     [HttpPost("register")]
+    [AllowAnonymous]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
     {
         var norm = req.Username.Trim().ToUpperInvariant();
@@ -82,6 +83,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("login")]
+    [AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
         var norm = req.Username.Trim().ToUpperInvariant();
@@ -95,6 +97,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("refresh")]
+    [AllowAnonymous]
     public async Task<IActionResult> Refresh([FromBody] string refreshToken)
     {
         var result = await JwtTokenHelper.RotateRefreshAsync(_db, refreshToken);

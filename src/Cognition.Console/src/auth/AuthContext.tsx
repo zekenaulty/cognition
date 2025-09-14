@@ -56,10 +56,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!auth) return
     const expMs = new Date(auth.expiresAt).getTime()
     const now = Date.now()
-    const inMs = Math.max(5000, expMs - now - 60_000) // refresh 1 min before expiry
-    const t = setTimeout(() => {
+    const millisToRefresh = expMs - now - 60_000 // refresh 1 min before expiry
+    const inMs = Math.max(5000, millisToRefresh)
+    // If already expired or about to expire soon, refresh immediately
+    if (millisToRefresh <= 0) {
       refresh().catch(() => logout())
-    }, inMs)
+      return
+    }
+    const t = setTimeout(() => { refresh().catch(() => logout()) }, inMs)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.accessToken, auth?.expiresAt])

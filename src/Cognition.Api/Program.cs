@@ -105,7 +105,8 @@ if (app.Environment.IsDevelopment())
     app.UseCors("DevCors");
 }
 
-app.MapControllers();
+// Require auth for all API controllers, but allow SPA/static/Swagger/Hangfire anonymously
+app.MapControllers().RequireAuthorization();
 
 // Expose Hangfire Dashboard
 if (app.Environment.IsDevelopment())

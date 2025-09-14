@@ -3,6 +3,7 @@ import MenuIcon from '@mui/icons-material/Menu'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import ProfilePage from './pages/ProfilePage'
 import ProtectedRoute from './routes/ProtectedRoute'
@@ -28,7 +29,10 @@ function Shell({ children }: { children: React.ReactNode }) {
             {isAuthenticated ? (
               <AccountMenu />
             ) : (
-              <Button color="inherit" component={Link} href="/login">Login</Button>
+              <>
+                <Button color="inherit" component={Link} href="/login">Login</Button>
+                <Button color="inherit" component={Link} href="/register">Register</Button>
+              </>
             )}
           </Stack>
         </Toolbar>
@@ -59,6 +63,7 @@ export default function App() {
         <Shell>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route path="/profile" element={<ProfilePage />} />
