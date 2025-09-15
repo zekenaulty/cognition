@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import React from 'react'
 // FeedbackBar component for emoji rating
-import { Popover } from '@mui/material'
+// ...existing code...
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt'
 import SentimentVerySatisfiedIcon from '@mui/icons-material/SentimentVerySatisfied'
@@ -73,7 +73,8 @@ function FeedbackBar({ onRate, selected }: FeedbackBarProps) {
     </>
   )
 }
-import { Box, Button, Card, CardContent, Divider, Stack, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Tooltip, IconButton, Chip } from '@mui/material'
+import { Box, Button, Card, CardContent, Divider, Stack, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Tooltip, IconButton, Chip, Popover, Menu, MenuList, MenuItem as MUIMenuItem, ListItemIcon, ListItemText } from '@mui/material'
+import SettingsIcon from '@mui/icons-material/Settings'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import MicIcon from '@mui/icons-material/Mic'
 import { alpha } from '@mui/material/styles'
@@ -90,6 +91,32 @@ type Persona = { id: string; name: string; gender?: string }
 type ImageStyle = { id: string; name: string; description?: string; promptPrefix?: string; negativePrompt?: string }
 
 export default function ChatPage() {
+  // Responsive gear/settings menu state
+  const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null)
+  const [settingsMenu, setSettingsMenu] = useState<string | null>(null)
+  const [subMenuAnchor, setSubMenuAnchor] = useState<null | HTMLElement>(null)
+  const [subMenuType, setSubMenuType] = useState<string | null>(null)
+
+  // Responsive breakpoint
+  const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 600px)').matches
+
+  // Handlers for gear/settings menu
+  const handleSettingsOpen = (e: React.MouseEvent<HTMLElement>) => setSettingsAnchor(e.currentTarget)
+  const handleSettingsClose = () => { setSettingsAnchor(null); setSettingsMenu(null); setSubMenuAnchor(null); setSubMenuType(null) }
+  const handleMenuOpen = (menu: string, e: React.MouseEvent<HTMLElement>) => { setSettingsMenu(menu); setSubMenuAnchor(e.currentTarget); setSubMenuType(menu) }
+
+  // When a provider is selected in mobile menu, update providerId, reload models, and keep menu open for model selection
+  const handleProviderSelect = async (prId: string) => {
+    setProviderId(prId)
+    setSubMenuType('provider') // keep provider/model menu open
+    // Wait for models to load (models are loaded via useEffect on providerId)
+    // No need to close menu yet; user should select model next
+  }
+
+  // ...existing code...
+
+  // Place this effect after providerId, modelId, models are declared
+  const handleMenuClose = () => { setSubMenuAnchor(null); setSubMenuType(null) }
   // TTS: Speak text aloud
   function speakText(text: string, gender: 'male' | 'female' = 'female') {
     if ('speechSynthesis' in window) {
@@ -187,6 +214,13 @@ export default function ChatPage() {
   const [imgModel, setImgModel] = useState<string>('dall-e-3')
   const [imgMsgCount, setImgMsgCount] = useState<number>(6)
   const [imgPending, setImgPending] = useState<boolean>(false)
+  // When the menu closes, if provider is selected but model is empty, set default/first model
+  useEffect(() => {
+    if (!settingsAnchor && subMenuType === 'provider' && providerId && !modelId && models.length > 0) {
+      // Set default model (first in list)
+      setModelId(models[0].id)
+    }
+  }, [settingsAnchor, subMenuType, providerId, modelId, models])
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
   const forceScrollRef = useRef(false)
@@ -555,92 +589,90 @@ Rules:
             .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
             @keyframes blink { 0% { opacity: 0.2 } 20% { opacity: 1 } 100% { opacity: 0.2 } }
           `}</style>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="persona-label">Persona</InputLabel>
-              <Select labelId="persona-label" label="Persona" value={personaId} onChange={e => setPersonaId(e.target.value)}>
-                {personas.length === 0 ? (
-                  <MenuItem value="" disabled>Loading...</MenuItem>
-                ) : (
-                  personas.map(p => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)
-                )}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 260 }}>
-              <InputLabel id="conversation-label">Conversation</InputLabel>
-              <Select labelId="conversation-label" label="Conversation" value={conversationId || ''} onChange={e => { setConversationId(e.target.value); setMessages([]) }} renderValue={(v) => { const c = conversations.find(x => x.id === v); return c ? (c.title || (c.id.slice(0,8) + '...')) : ''; }}>
-                {conversations.length === 0 && <MenuItem value="" disabled>No saved conversations</MenuItem>}
-                {conversations.map(c => (
-                  <MenuItem key={c.id} value={c.id}>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <Chip size="small" label={c.id.slice(0,8)} />
-                      <Typography variant="body2" color="text.secondary">{c.title || c.id}</Typography>
-                    </Stack>
-                  </MenuItem>
+          {/* Always show gear/settings icon and conversation title, always hide toolbars */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+            <IconButton aria-label="Settings" onClick={handleSettingsOpen} size="large">
+              <SettingsIcon />
+            </IconButton>
+            {/* Conversation title next to gear */}
+            <Typography variant="subtitle1" sx={{ ml: 1, fontWeight: 500 }}>
+              {conversations.find(c => c.id === conversationId)?.title || (conversationId ? conversationId.slice(0,8) + '...' : 'New Conversation')}
+            </Typography>
+            <Popover
+              open={Boolean(settingsAnchor)}
+              anchorEl={settingsAnchor}
+              onClose={handleSettingsClose}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+            >
+              <MenuList>
+                <MUIMenuItem onClick={e => handleMenuOpen('persona', e)}>
+                  <ListItemIcon><SettingsIcon /></ListItemIcon>
+                  <ListItemText>Persona</ListItemText>
+                </MUIMenuItem>
+                <MUIMenuItem onClick={e => handleMenuOpen('provider', e)}>
+                  <ListItemIcon><SettingsIcon /></ListItemIcon>
+                  <ListItemText>Provider & Model</ListItemText>
+                </MUIMenuItem>
+                <MUIMenuItem onClick={e => handleMenuOpen('images', e)}>
+                  <ListItemIcon><SettingsIcon /></ListItemIcon>
+                  <ListItemText>Images</ListItemText>
+                </MUIMenuItem>
+                <MUIMenuItem onClick={e => handleMenuOpen('conversation', e)}>
+                  <ListItemIcon><SettingsIcon /></ListItemIcon>
+                  <ListItemText>Conversation</ListItemText>
+                </MUIMenuItem>
+              </MenuList>
+            </Popover>
+            {/* Cascading submenus */}
+            <Popover
+              open={Boolean(subMenuAnchor)}
+              anchorEl={subMenuAnchor}
+              onClose={handleMenuClose}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+            >
+              <MenuList>
+                {subMenuType === 'persona' && personas.map(p => (
+                  <MUIMenuItem key={p.id} selected={personaId === p.id} onClick={() => { setPersonaId(p.id); handleSettingsClose() }}>{p.name}</MUIMenuItem>
                 ))}
-              </Select>
-            </FormControl>
-            <Button variant="outlined" onClick={createConversation}>New Conversation</Button>
-            <FormControl size="small" sx={{ minWidth: 180 }}>
-              <InputLabel id="provider-label">Provider</InputLabel>
-              <Select labelId="provider-label" label="Provider" value={providerId} onChange={e => setProviderId(e.target.value)}>
-                {providers.length === 0 ? (
-                  <MenuItem value="" disabled>No providers</MenuItem>
-                ) : (
-                  providers.map(p => (
-                    <MenuItem key={p.id} value={p.id}>{p.displayName || p.name}</MenuItem>
+                {subMenuType === 'provider' && [
+                  ...providers.map(pr => (
+                    <MUIMenuItem key={pr.id} selected={providerId === pr.id} onClick={async () => { await handleProviderSelect(pr.id) }}>{pr.displayName || pr.name}</MUIMenuItem>
+                  )),
+                  ...models.length > 0 ? [<Divider key="provider-divider" />] : [],
+                  ...models.map(m => (
+                    <MUIMenuItem key={m.id} selected={modelId === m.id} onClick={() => { setModelId(m.id); handleSettingsClose() }}>{m.displayName || m.name}</MUIMenuItem>
                   ))
-                )}
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="model-label">Model</InputLabel>
-              <Select labelId="model-label" label="Model" value={modelId} onChange={e => setModelId(e.target.value)}>
-                {models.length === 0 ? (
-                  <MenuItem value="">Default</MenuItem>
-                ) : (
-                  models.map(m => (
-                    <MenuItem key={m.id} value={m.id}>{m.displayName || m.name}</MenuItem>
+                ]}
+                {subMenuType === 'images' && [
+                  <MUIMenuItem key="img-model-label" disabled>Image Model</MUIMenuItem>,
+                  ...['dall-e-3', 'gpt-image-1'].map(im => (
+                    <MUIMenuItem key={im} selected={imgModel === im} onClick={() => { setImgModel(im); handleMenuClose() }}>{im}</MUIMenuItem>
+                  )),
+                  <Divider key="img-divider" />,
+                  <MUIMenuItem key="img-style-label" disabled>Image Style</MUIMenuItem>,
+                  ...imgStyles.map(s => (
+                    <MUIMenuItem key={s.id} selected={imgStyleId === s.id} onClick={() => { setImgStyleId(s.id); handleMenuClose() }}>{s.name}</MUIMenuItem>
+                  )),
+                  <Divider key="img-divider2" />,
+                  <MUIMenuItem key="img-msg-label" disabled>#Msgs</MUIMenuItem>,
+                  ...[6, 12, 24].map(n => (
+                    <MUIMenuItem key={n} selected={imgMsgCount === n} onClick={() => { setImgMsgCount(n); handleMenuClose() }}>{n}</MUIMenuItem>
+                  )),
+                  <Divider key="img-divider3" />,
+                  <MUIMenuItem key="img-generate" disabled={imgPending} onClick={() => { generateImageFromChat(); handleSettingsClose() }}>{imgPending ? 'Generating...' : 'Generate Image'}</MUIMenuItem>
+                ]}
+                {subMenuType === 'conversation' && [
+                  <MUIMenuItem key="new-conv" onClick={() => { createConversation(); handleSettingsClose() }}>New Conversation</MUIMenuItem>,
+                  <Divider key="conv-divider" />,
+                  ...conversations.map(c => (
+                    <MUIMenuItem key={c.id} selected={conversationId === c.id} onClick={() => { setConversationId(c.id); setMessages([]); handleSettingsClose() }}>{c.title || (c.id.slice(0,8) + '...')}</MUIMenuItem>
                   ))
-                )}
-              </Select>
-            </FormControl>
-            {providers.length === 0 && (
-              <Tooltip title="Try to sync providers (admin only)">
-                <span>
-                  <IconButton onClick={async () => {
-                    try {
-                      const res = await fetch('/api/admin/sync-models', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) } })
-                      if (res.ok) setProviderId('')
-                    } catch {}
-                  }}>
-                    <RefreshIcon />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            )}
-          </Stack>
-
-          {/* Image tools toolbar */}
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel id="img-model-label">Image Model</InputLabel>
-              <Select labelId="img-model-label" label="Image Model" value={imgModel} onChange={e => setImgModel(e.target.value)}>
-                <MenuItem value="dall-e-3">DALLE-3</MenuItem>
-                <MenuItem value="gpt-image-1">gpt-image-1</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 220 }}>
-              <InputLabel id="img-style-label">Image Style</InputLabel>
-              <Select labelId="img-style-label" label="Image Style" value={imgStyleId} onChange={e => setImgStyleId(e.target.value)}>
-                {imgStyles.map(s => (
-                  <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField size="small" label="#Msgs" type="number" sx={{ width: 110 }} value={imgMsgCount} onChange={e => setImgMsgCount(Math.max(1, parseInt(e.target.value || '1') || 1))} />
-            <Button variant="outlined" disabled={imgPending} onClick={generateImageFromChat}>{imgPending ? 'Generating.' : 'Generate Image'}</Button>
-          </Stack>
+                ]}
+              </MenuList>
+            </Popover>
+          </Box>
 
           {/* Messages */}
           <Box
@@ -682,12 +714,13 @@ Rules:
                       </Typography>
                       {m.imageId ? (
                         <Box sx={{ mt: 0.5 }}>
-                          <img
+                          <Box
+                            component="img"
                             alt={m.imgStyleName ? `[${m.imgStyleName}] ${m.imgPrompt || ''}` : (m.imgPrompt || 'generated')}
                             title={m.imgStyleName ? `[${m.imgStyleName}] ${m.imgPrompt || ''}` : (m.imgPrompt || 'generated')}
                             src={`/api/images/content?id=${m.imageId}`}
                             onClick={() => setViewer({ open: true, id: m.imageId, title: (m.imgStyleName ? `[${m.imgStyleName}] ` : '') + (m.imgPrompt || '') })}
-                            style={{ height: 240, width: 'auto', borderRadius: 6, cursor: 'zoom-in', maxWidth: '100%' }}
+                            sx={{ height: 240, width: 'auto', borderRadius: 1, cursor: 'zoom-in', maxWidth: '100%' }}
                           />
                         </Box>
                       ) : m.pending ? (
