@@ -1,4 +1,4 @@
-using System.Net.Http;
+﻿using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 
@@ -10,11 +10,14 @@ public class OpenAIImageClient : IImageClient
     private readonly string _model;
     private readonly string _apiBase;
 
-    public OpenAIImageClient(HttpClient http, string model = "gpt-image-1")
+    public OpenAIImageClient(HttpClient http, string model = "dall-e-3")
     {
         _http = http;
         _model = model;
         _apiBase = Environment.GetEnvironmentVariable("OPENAI_BASE_URL")?.TrimEnd('/') ?? "https://api.openai.com";
+        // Ensure generous timeout for long-running generations
+        if (_http.Timeout < TimeSpan.FromMinutes(10))
+            _http.Timeout = TimeSpan.FromMinutes(10);
         var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? Environment.GetEnvironmentVariable("OPENAI_KEY");
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
@@ -25,25 +28,86 @@ public class OpenAIImageClient : IImageClient
 
     public async Task<ImageResult> GenerateAsync(string prompt, ImageParameters parameters)
     {
-        // Use new OpenAI "images/edits" style or compatible endpoint when available
-        var payload = new
+        // Choose model per-call if provided (allows DALLE-3 vs gpt-image-1)
+        var initialModel = string.IsNullOrWhiteSpace(parameters.Model) ? _model : parameters.Model!;
+
+        async Task<HttpResponseMessage> SendAsync(string modelToUse)
         {
-            model = _model,
-            prompt,
-            size = $"{parameters.Width}x{parameters.Height}",
-            n = 1,
-            response_format = "b64_json"
-        };
-        var req = new HttpRequestMessage(HttpMethod.Post, $"{_apiBase}/v1/images/generations")
+            var payload = new
+            {
+                model = modelToUse,
+                prompt,
+                size = $"{parameters.Width}x{parameters.Height}",
+                n = 1,
+                response_format = "b64_json"
+            };
+            var req = new HttpRequestMessage(HttpMethod.Post, $"{_apiBase}/v1/images/generations")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+            return await SendWithRetryAsync(() => _http.SendAsync(req));
+        }
+
+        var resp = await SendAsync(initialModel);
+        if (!resp.IsSuccessStatusCode)
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-        };
-        var resp = await SendWithRetryAsync(() => _http.SendAsync(req));
-        resp.EnsureSuccessStatusCode();
+            var errBody = await resp.Content.ReadAsStringAsync();
+            // Graceful fallback: if using gpt-image-1 and org is not verified, retry with DALLE-3
+            if (string.Equals(initialModel, "gpt-image-1", StringComparison.OrdinalIgnoreCase)
+                && (int)resp.StatusCode == 400
+                && errBody.IndexOf("must be verified", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                var fallbackModel = "dall-e-3";
+                var resp2 = await SendAsync(fallbackModel);
+                if (!resp2.IsSuccessStatusCode)
+                {
+                    var err2 = await resp2.Content.ReadAsStringAsync();
+                    throw new HttpRequestException($"OpenAI image error {(int)resp2.StatusCode} {resp2.StatusCode}: {err2}");
+                }
+                using var doc2 = JsonDocument.Parse(await resp2.Content.ReadAsStringAsync());
+                var data0b = doc2.RootElement.GetProperty("data")[0];
+                byte[] bytes2;
+                if (data0b.TryGetProperty("b64_json", out var b64El2))
+                {
+                    var b64 = b64El2.GetString() ?? string.Empty;
+                    bytes2 = Convert.FromBase64String(b64);
+                }
+                else if (data0b.TryGetProperty("url", out var urlEl2))
+                {
+                    var url = urlEl2.GetString() ?? string.Empty;
+                    using var imgResp2 = await _http.GetAsync(url);
+                    imgResp2.EnsureSuccessStatusCode();
+                    bytes2 = await imgResp2.Content.ReadAsByteArrayAsync();
+                }
+                else
+                {
+                    throw new HttpRequestException("OpenAI image response missing 'b64_json' and 'url'.");
+                }
+                return new ImageResult(bytes2, "image/png", parameters.Width, parameters.Height, "OpenAI", fallbackModel);
+            }
+
+            throw new HttpRequestException($"OpenAI image error {(int)resp.StatusCode} {resp.StatusCode}: {errBody}");
+        }
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-        var b64 = doc.RootElement.GetProperty("data")[0].GetProperty("b64_json").GetString() ?? string.Empty;
-        var bytes = Convert.FromBase64String(b64);
-        return new ImageResult(bytes, "image/png", parameters.Width, parameters.Height, "OpenAI", _model);
+        var data0 = doc.RootElement.GetProperty("data")[0];
+        byte[] bytes;
+        if (data0.TryGetProperty("b64_json", out var b64El))
+        {
+            var b64 = b64El.GetString() ?? string.Empty;
+            bytes = Convert.FromBase64String(b64);
+        }
+        else if (data0.TryGetProperty("url", out var urlEl))
+        {
+            var url = urlEl.GetString() ?? string.Empty;
+            using var imgResp = await _http.GetAsync(url);
+            imgResp.EnsureSuccessStatusCode();
+            bytes = await imgResp.Content.ReadAsByteArrayAsync();
+        }
+        else
+        {
+            throw new HttpRequestException("OpenAI image response missing 'b64_json' and 'url'.");
+        }
+        return new ImageResult(bytes, "image/png", parameters.Width, parameters.Height, "OpenAI", initialModel);
     }
 
     private static bool IsTransient(HttpResponseMessage r)

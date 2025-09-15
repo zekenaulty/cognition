@@ -22,15 +22,16 @@ public class ImageService : IImageService
 
     public async Task<ImageAsset> GenerateAndSaveAsync(Guid? conversationId, Guid? createdByPersonaId, string prompt, ImageParameters parameters, string provider, string model)
     {
-        var res = await _client.GenerateAsync(prompt, parameters);
+        var safePrompt = prompt.Length > 2500 ? prompt.Substring(0, 2500) : prompt;
+        var res = await _client.GenerateAsync(safePrompt, parameters);
         using var sha = SHA256.Create();
         var hash = Convert.ToHexString(sha.ComputeHash(res.Bytes)).ToLowerInvariant();
         var asset = new ImageAsset
         {
             ConversationId = conversationId,
             CreatedByPersonaId = createdByPersonaId,
-            Provider = provider,
-            Model = model,
+            Provider = res.Provider,
+            Model = res.Model,
             MimeType = res.MimeType,
             Width = res.Width,
             Height = res.Height,
@@ -47,4 +48,3 @@ public class ImageService : IImageService
         return asset;
     }
 }
-

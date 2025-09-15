@@ -52,6 +52,7 @@ public static class StartupDataSeeder
 
         // Seed default client profiles
         await EnsureClientProfilesAsync(db, logger);
+        await EnsureImageStylesAsync(db, logger);
 
         // Seed personas from reference files if present
         var contentRoot = scope.ServiceProvider.GetRequiredService<IHostEnvironment>().ContentRootPath;
@@ -351,5 +352,53 @@ public static class StartupDataSeeder
             }
         }
         return (name, nickname, role, gender, essence, beliefs, background, comms, emotions, sig.Count>0? sig.ToArray(): null, themes.Count>0? themes.ToArray(): null, domain.Count>0? domain.ToArray(): null);
+    }
+
+    private static async Task EnsureImageStylesAsync(CognitionDbContext db, ILogger logger)
+    {
+        var styles = new List<(string name, string desc, string prefix, string? neg)>();
+
+        var animeImpression = @"Imagine a visual symphony where the precision of high-definition anime collides with the evocative brushwork of impressionism. This style masterfully blends razor-sharp, vector-precise lines and hyper-realistic lighting with granular, luminous impressionistic texture. Emphasize sub-pixel sharp lines, volumetric ray-traced lighting, HDR palettes, micro-textures like oil impasto, strategic Gaussian blur and motion trails for depth (not random blur), and tasteful cinematic effects (chromatic aberration, bloom, lens flare). Maintain ultra-high clarity at focal points, with painterly periphery for depth. Output in concise, declarative phrasing.";
+
+        styles.Add(("Anime-Impression UltraHD", "Ultra-sharp anime blended with impressionist texture and cinematic lighting.", animeImpression, null));
+        styles.Add(("Renaissance Oil", "Classical oil painting with sfumato, balanced composition, naturalistic anatomy.", "Renaissance oil painting, sfumato, chiaroscuro, balanced composition, naturalistic anatomy, subtle texture, vellum-toned palette.", null));
+        styles.Add(("Baroque Chiaroscuro", "Dramatic lighting, deep shadows, dynamic composition.", "Baroque chiaroscuro, dramatic directional lighting, dynamic diagonals, rich warm palette, textured brushwork.", null));
+        styles.Add(("Impressionism Luminous", "Loose brushwork, luminous color, atmospheric depth.", "Impressionist painting, broken color, visible brush strokes, en plein air light, luminous atmosphere, soft edges.", null));
+        styles.Add(("Cubism Geometric", "Faceted geometry, multiple viewpoints, muted palette.", "Analytical cubism, faceted geometry, overlapping planes, multiple viewpoints, muted earth palette, line emphasis.", null));
+        styles.Add(("Surreal Dream", "Dreamlike juxtapositions, symbolic imagery, uncanny spaces.", "Surrealism, dreamlike juxtaposition, symbolic motifs, uncanny perspective, painterly rendering, soft shadows.", null));
+        styles.Add(("Pop Art Halftone", "Bold colors, graphic lines, halftone dots.", "Pop art, bold flat colors, heavy inking, halftone dots, screen print texture, graphic composition.", null));
+        styles.Add(("Art Deco Luxury", "Geometric elegance, chrome, lacquer, luxury motifs.", "Art Deco, geometric ornament, stepped forms, chrome accents, lacquer sheen, opulent palette, symmetry.", null));
+        styles.Add(("Ukiyo-e Woodblock", "Japanese woodblock print style, flat colors, linework.", "Ukiyo-e woodblock print, flat color fields, bold linework, off-register texture, handmade paper grain.", null));
+        styles.Add(("Bauhaus Minimal", "Functional minimalism, primary colors, geometry.", "Bauhaus minimalism, functional geometry, primary colors, grid alignment, sans serif typographic balance.", null));
+        styles.Add(("Photoreal Lens", "Hyperrealism, shallow depth of field, lens artifacts.", "Photorealistic, shallow depth of field, bokeh highlights, lens flares (subtle), accurate materials and micro-surface detail.", null));
+        styles.Add(("Noir Monochrome", "High contrast monochrome, hard shadows, moody.", "Film noir, high-contrast monochrome, hard shadow slats, smoky atmosphere, period styling.", null));
+        styles.Add(("Watercolor Wash", "Translucent washes, granulation, soft bleed.", "Watercolor, translucent washes, paper granulation, soft edge bleed, limited palette, light pencil underdrawing.", null));
+        styles.Add(("Ink Wash Sumi-e", "Calligraphic brush, negative space, simplicity.", "Sumi-e ink wash, expressive calligraphic brush, restrained composition, strong negative space.", null));
+        styles.Add(("Charcoal Sketch", "Loose gesture sketch, smudged charcoal.", "Charcoal sketch, loose gesture, cross-contour, smudged tonal blocks, newsprint tooth.", null));
+        styles.Add(("Cyberpunk Neon", "Neon nights, rain-slick city, holograms.", "Cyberpunk, neon signage, rain-slick streets, holographic UI, volumetric fog, high contrast lighting.", null));
+        styles.Add(("Synthwave 80s", "Retro-futuristic 80s, magenta/cyan grid.", "Synthwave, neon magenta-cyan palette, horizon grid, retro-futuristic silhouettes, bloom.", null));
+        styles.Add(("Low Poly Isometric", "Low polygon count, isometric perspective.", "Low poly, flat shading, isometric projection, clean edge topology, simplified materials.", null));
+        styles.Add(("Cel Shaded Anime", "Flat cel shading, crisp outlines, vibrant color.", "Cel-shaded anime, crisp ink lines, flat color fills, minimal gradients, dynamic posing.", null));
+        styles.Add(("Studio Ghibli", "Warm pastel tones, whimsical nature.", "Studio Ghibli-inspired, warm pastel palette, whimsical nature, soft edges, gentle light.", null));
+        styles.Add(("Pixar 3D", "Soft subsurface scattering, friendly forms.", "Pixar-style 3D, soft subsurface scattering, friendly proportions, cinematic rim lighting.", null));
+        styles.Add(("Comic Inking", "Clean inking, halftone shadows, panels.", "Comic book, clean inking, halftone shading, dynamic panel composition, speed lines.", null));
+        styles.Add(("Steampunk Brass", "Victorian mechanics, brass, steam.", "Steampunk, Victorian machinery, brass, rivets, steam vents, worn leather, patina.", null));
+
+        foreach (var s in styles)
+        {
+            if (!await db.ImageStyles.AnyAsync(x => x.Name == s.name))
+            {
+                db.ImageStyles.Add(new Cognition.Data.Relational.Modules.Images.ImageStyle
+                {
+                    Name = s.name,
+                    Description = s.desc,
+                    PromptPrefix = s.prefix,
+                    NegativePrompt = s.neg,
+                    IsActive = true
+                });
+                await db.SaveChangesAsync();
+                logger.LogInformation("Seeded image style {Style}", s.name);
+            }
+        }
     }
 }

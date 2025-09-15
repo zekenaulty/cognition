@@ -9,6 +9,7 @@ import ProfilePage from './pages/ProfilePage'
 import ProtectedRoute from './routes/ProtectedRoute'
 import AccountMenu from './components/AccountMenu'
 import PersonasPage from './pages/PersonasPage'
+import ImageLabPage from './pages/ImageLabPage'
 import ChatPage from './pages/ChatPage'
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -24,6 +25,9 @@ function Shell({ children }: { children: React.ReactNode }) {
             Cognition Console
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
+            {isAuthenticated && (
+              <Button color="inherit" component={Link} href="/image-lab">Image Lab</Button>
+            )}
             <Button color="inherit" component={Link} href="/hangfire" target="_blank" rel="noopener">Jobs</Button>
             <Button color="inherit" component={Link} href="/openapi/v1.json" target="_blank" rel="noopener">API JSON</Button>
             <Button color="inherit" component={Link} href="/swagger" target="_blank" rel="noopener">Swagger</Button>
@@ -68,6 +72,7 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<ChatPage />} />
               <Route path="/chat" element={<ChatPage />} />
+              <Route path="/image-lab" element={<ImageLabPage />} />
               <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/personas" element={<PersonasPage />} />
