@@ -3,8 +3,9 @@ import { Box, Button, Card, CardContent, Divider, Stack, TextField, Typography, 
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useAuth } from '../auth/AuthContext'
 import MarkdownView from '../components/MarkdownView'
+import EmojiButton from '../components/EmojiButton'
 
-type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string }
+type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string }
 type Provider = { id: string; name: string; displayName?: string }
 type Model = { id: string; name: string; displayName?: string }
 type Persona = { id: string; name: string }
@@ -18,6 +19,7 @@ export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const creatingRef = useRef(false)
   const fetchSeqRef = useRef(0)
 
@@ -38,6 +40,9 @@ export default function ChatPage() {
   const [imgModel, setImgModel] = useState<string>('dall-e-3')
   const [imgMsgCount, setImgMsgCount] = useState<number>(6)
   const [imgPending, setImgPending] = useState<boolean>(false)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
+  const forceScrollRef = useRef(false)
 
   const canSend = useMemo(
     () => !!accessToken && !!personaId && !!providerId && input.trim().length > 0,
@@ -159,6 +164,8 @@ export default function ChatPage() {
       const seq = ++fetchSeqRef.current
       // Clear immediately to avoid showing stale messages from previous selection
       setMessages([])
+      // Ensure we scroll to bottom after this conversation loads
+      forceScrollRef.current = true
       const headers = { Authorization: `Bearer ${accessToken}` }
       // Fetch chat messages and images in parallel
       const [resMsgs, resImgs] = await Promise.all([
@@ -263,8 +270,15 @@ export default function ChatPage() {
     }
     const text = input.trim()
     setMessages(prev => [...prev, { role: 'user', content: text, fromName: 'You' }])
+    if (stickToBottomRef.current) {
+      forceScrollRef.current = true
+    }
     setInput('')
     try {
+      const placeholderId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const assistantName = personas.find(p => p.id === personaId)?.name || 'Assistant'
+      setMessages(prev => [...prev, { role: 'assistant', content: '', fromName: assistantName, pending: true, localId: placeholderId }])
+      if (stickToBottomRef.current) forceScrollRef.current = true
       const res = await fetch('/api/chat/ask-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
@@ -272,14 +286,17 @@ export default function ChatPage() {
       })
       if (!res.ok) {
         const err = await res.text()
-        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err}` }])
+        setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: `Error: ${err}` } : m))
         return
       }
       const body = await res.json()
-      setMessages(prev => [...prev, { role: 'assistant', content: body.reply, fromName: personas.find(p => p.id === personaId)?.name || 'Assistant' }])
+      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: body.reply } : m))
+      if (stickToBottomRef.current) {
+        forceScrollRef.current = true
+      }
       await loadConversations(personaId)
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Network error` }])
+      setMessages(prev => prev.map(m => m.pending ? { ...m, pending: false, content: `Network error` } : m))
     }
   }
 
@@ -292,25 +309,51 @@ export default function ChatPage() {
     const payload = { ConversationId: conversationId, PersonaId: personaId, Prompt: fullPrompt, Width: 1024, Height: 1024, StyleId: imgStyleId || undefined, NegativePrompt: style?.negativePrompt || undefined, Provider: 'OpenAI', Model: imgModel }
     try {
       setImgPending(true)
+      // Add placeholder assistant message for image generation
+      const placeholderId = `img-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const assistantName = personas.find(p => p.id === personaId)?.name || 'Assistant'
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Generating image', fromName: assistantName, pending: true, localId: placeholderId }])
+      if (stickToBottomRef.current) forceScrollRef.current = true
       const res = await fetch('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(payload) })
       if (!res.ok) {
         const txt = await res.text()
-        setMessages(prev => [...prev, { role: 'assistant', content: `Image error: ${txt}` }])
+        setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: `Image error: ${txt}` } : m))
         return
       }
       const data = await res.json()
       const id = data.id || data.Id
-      setMessages(prev => [...prev, { role: 'assistant', content: '', imageId: id, fromName: personas.find(p => p.id === personaId)?.name || 'Assistant' }])
+      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: '', imageId: String(id) } : m))
+      if (stickToBottomRef.current) {
+        forceScrollRef.current = true
+      }
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Image error: ${String(e)}` }])
+      setMessages(prev => prev.map(m => m.pending ? { ...m, pending: false, content: `Image error: ${String(e)}` } : m))
     } finally { setImgPending(false) }
   }
 
+  // Auto-scroll to bottom when new messages arrive if user was already at bottom
+  // Also scroll after a conversation is freshly loaded (forceScrollRef)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (forceScrollRef.current || stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+      forceScrollRef.current = false
+    }
+  }, [messages])
+
   return (
-    <Stack spacing={2} sx={{ height: 'calc(100vh - 160px)' }}>
+    <Stack spacing={2} sx={{ height: 'calc(100vh - 210px)' }}>
       <Typography variant="h5">Chat</Typography>
       <Card variant="outlined" sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
+          {/* lightweight animation for pending messages */}
+          <style>{`
+            .loading-dots span { display: inline-block; animation: blink 1.2s infinite; }
+            .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+            .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+            @keyframes blink { 0% { opacity: 0.2 } 20% { opacity: 1 } 100% { opacity: 0.2 } }
+          `}</style>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
             <FormControl size="small" sx={{ minWidth: 200 }}>
               <InputLabel id="persona-label">Persona</InputLabel>
@@ -399,7 +442,16 @@ export default function ChatPage() {
           </Stack>
 
           {/* Messages */}
-          <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}>
+          <Box
+            ref={scrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget
+              const threshold = 24
+              const atBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) <= threshold
+              stickToBottomRef.current = atBottom
+            }}
+            sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}
+          >
             {messages.length === 0 ? (
               <Typography color="text.secondary">Start the conversation.</Typography>
             ) : (
@@ -411,9 +463,13 @@ export default function ChatPage() {
                       <Box sx={{ mt: 0.5 }}>
                         <img alt="generated" src={`/api/images/content?id=${m.imageId}`} style={{ maxWidth: '100%', borderRadius: 6 }} />
                       </Box>
+                    ) : m.pending ? (
+                      <Typography variant="body1">
+                        {m.content ? m.content + ' ' : ''}
+                        <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
+                      </Typography>
                     ) : (
-                      <MarkdownView content={m.content}
-                      />
+                      <MarkdownView content={m.content} />
                     )}
                   </Box>
                 ))}
@@ -423,8 +479,23 @@ export default function ChatPage() {
 
           {/* Input */}
           <Divider />
-          <Stack direction="row" spacing={1}>
-            <TextField fullWidth size="small" placeholder="Type a message." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TextField inputRef={inputRef} fullWidth size="small" placeholder="Type a message." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
+            <EmojiButton
+              onInsert={(text) => {
+                const el = inputRef.current
+                if (!el) { setInput(prev => prev + text); return }
+                const start = el.selectionStart ?? el.value.length
+                const end = el.selectionEnd ?? el.value.length
+                const before = input.slice(0, start)
+                const after = input.slice(end)
+                const next = before + text + after
+                setInput(next)
+                // Restore caret after inserted text
+                setTimeout(() => { try { el.focus(); const pos = start + text.length; el.setSelectionRange(pos, pos) } catch {} }, 0)
+              }}
+              onCloseFocus={() => { try { inputRef.current?.focus() } catch {} }}
+            />
             <Button variant="contained" disabled={!canSend} onClick={send}>Send</Button>
           </Stack>
         </CardContent>
