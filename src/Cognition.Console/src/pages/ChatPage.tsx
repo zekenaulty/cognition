@@ -1,4 +1,78 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import React from 'react'
+// FeedbackBar component for emoji rating
+import { Popover } from '@mui/material'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt'
+import SentimentVerySatisfiedIcon from '@mui/icons-material/SentimentVerySatisfied'
+import SentimentSatisfiedIcon from '@mui/icons-material/SentimentSatisfied'
+import FavoriteIcon from '@mui/icons-material/Favorite'
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder'
+import EmojiObjectsIcon from '@mui/icons-material/EmojiObjects'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import WhatshotIcon from '@mui/icons-material/Whatshot'
+import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions'
+import SentimentVeryDissatisfiedIcon from '@mui/icons-material/SentimentVeryDissatisfied'
+import SentimentDissatisfiedIcon from '@mui/icons-material/SentimentDissatisfied'
+
+const FEEDBACK_ICONS = [
+  { key: 'satisfied', icon: <SentimentSatisfiedAltIcon fontSize="medium" />, label: 'Satisfied' },
+  { key: 'very_satisfied', icon: <SentimentVerySatisfiedIcon fontSize="medium" />, label: 'Very Satisfied' },
+  { key: 'neutral', icon: <SentimentSatisfiedIcon fontSize="medium" />, label: 'Neutral' },
+  { key: 'love', icon: <FavoriteIcon fontSize="medium" />, label: 'Love' },
+  { key: 'like', icon: <FavoriteBorderIcon fontSize="medium" />, label: 'Like' },
+  { key: 'idea', icon: <EmojiObjectsIcon fontSize="medium" />, label: 'Interesting' },
+  { key: 'see', icon: <VisibilityIcon fontSize="medium" />, label: 'See' },
+  { key: 'hot', icon: <WhatshotIcon fontSize="medium" />, label: 'Hot' },
+  { key: 'funny', icon: <EmojiEmotionsIcon fontSize="medium" />, label: 'Funny' },
+  { key: 'very_funny', icon: <SentimentVerySatisfiedIcon fontSize="medium" />, label: 'Very Funny' },
+  { key: 'dissatisfied', icon: <SentimentDissatisfiedIcon fontSize="medium" />, label: 'Dissatisfied' },
+  { key: 'very_dissatisfied', icon: <SentimentVeryDissatisfiedIcon fontSize="medium" />, label: 'Very Dissatisfied' },
+]
+
+type FeedbackBarProps = {
+  onRate?: (key: string) => void
+  selected?: string
+}
+function FeedbackBar({ onRate, selected }: FeedbackBarProps) {
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
+  const open = Boolean(anchorEl)
+  const handleOpen = (e: React.MouseEvent<HTMLElement>) => setAnchorEl(e.currentTarget)
+  const handleClose = () => setAnchorEl(null)
+  const handleSelect = (key: string) => {
+    if (onRate) onRate(key)
+    handleClose()
+  }
+  const selectedIcon = FEEDBACK_ICONS.find(f => f.key === selected)?.icon
+  return (
+    <>
+      <IconButton size="small" onClick={handleOpen} sx={{ p: 0.5 }}>
+        {selectedIcon || <HelpOutlineIcon fontSize="medium" />}
+      </IconButton>
+      <Popover
+        open={open}
+        anchorEl={anchorEl}
+        onClose={handleClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+      >
+        <Box sx={{ display: 'flex', gap: 0.5, p: 1 }}>
+          {FEEDBACK_ICONS.map(f => (
+            <Tooltip key={f.key} title={f.label}>
+              <IconButton
+                size="small"
+                sx={{ p: 0.5, background: selected === f.key ? 'rgba(255,200,0,0.15)' : undefined }}
+                onClick={() => handleSelect(f.key)}
+              >
+                {f.icon}
+              </IconButton>
+            </Tooltip>
+          ))}
+        </Box>
+      </Popover>
+    </>
+  )
+}
 import { Box, Button, Card, CardContent, Divider, Stack, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Tooltip, IconButton, Chip } from '@mui/material'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 import MicIcon from '@mui/icons-material/Mic'
@@ -622,29 +696,31 @@ Rules:
                           <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
                         </Typography>
                       ) : (
-                        <Box sx={{ textAlign: isUser ? 'right' : 'left', display: 'flex', alignItems: 'center' }}>
+                        <Box sx={{ textAlign: isUser ? 'right' : 'left', display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start' }}>
                           <MarkdownView content={m.content} />
-                          {/* TTS button for assistant messages */}
-                          {m.role === 'assistant' && m.content && (
-                            <IconButton
-                              aria-label="Read aloud"
-                              size="small"
-                              sx={{ ml: 1 }}
-                              onClick={() => {
-                                // Find persona gender, default to female
-                                let gender: 'male' | 'female' = 'female'
-                                const persona = personas.find(p => p.id === personaId)
-                                if (persona && persona.gender) {
-                                  const g = String(persona.gender).toLowerCase()
-                                  if (g === 'male' || g === 'm') gender = 'male'
-                                  if (g === 'female' || g === 'f') gender = 'female'
-                                }
-                                speakText(m.content, gender)
-                              }}
-                            >
-                              <VolumeUpIcon fontSize="small" />
-                            </IconButton>
-                          )}
+                          {/* Feedback bar and TTS button under every message */}
+                          <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: isUser ? 'flex-end' : 'flex-start', mt: 1 }}>
+                            <FeedbackBar />
+                            {m.role === 'assistant' && m.content && (
+                              <IconButton
+                                aria-label="Read aloud"
+                                size="small"
+                                sx={{ ml: 1 }}
+                                onClick={() => {
+                                  let gender: 'male' | 'female' = 'female'
+                                  const persona = personas.find(p => p.id === personaId)
+                                  if (persona && persona.gender) {
+                                    const g = String(persona.gender).toLowerCase()
+                                    if (g === 'male' || g === 'm') gender = 'male'
+                                    if (g === 'female' || g === 'f') gender = 'female'
+                                  }
+                                  speakText(m.content, gender)
+                                }}
+                              >
+                                <VolumeUpIcon fontSize="small" />
+                              </IconButton>
+                            )}
+                          </Box>
                         </Box>
                       )}
                     </Box>
@@ -664,7 +740,6 @@ Rules:
                 <IconButton
                   aria-label="Record"
                   size="medium"
-                  sx={{ mr: 1 }}
                   onMouseDown={startRecognition}
                   onMouseUp={stopRecognition}
                   onTouchStart={startRecognition}
