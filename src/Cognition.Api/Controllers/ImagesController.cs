@@ -94,7 +94,7 @@ public class ImagesController : ControllerBase
         var items = await _db.ImageAssets.AsNoTracking()
             .Where(x => x.CreatedByPersonaId == personaId)
             .OrderByDescending(x => x.CreatedAtUtc)
-            .Select(x => new { x.Id, x.Provider, x.Model, x.Width, x.Height, x.MimeType, x.CreatedAtUtc, x.StyleId, x.ConversationId })
+            .Select(x => new { x.Id, x.Provider, x.Model, x.Width, x.Height, x.MimeType, x.CreatedAtUtc, x.StyleId, x.ConversationId, x.Prompt, StyleName = x.Style != null ? x.Style.Name : null })
             .ToListAsync();
         return Ok(items);
     }
