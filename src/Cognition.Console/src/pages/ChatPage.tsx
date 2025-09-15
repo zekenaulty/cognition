@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Button, Card, CardContent, Divider, Stack, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Tooltip, IconButton, Chip } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useAuth } from '../auth/AuthContext'
+import MarkdownView from '../components/MarkdownView'
 
 type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string }
 type Provider = { id: string; name: string; displayName?: string }
@@ -168,29 +169,42 @@ export default function ChatPage() {
       let baseMsgs: Message[] = []
       if (resMsgs.ok) {
         const list = await resMsgs.json()
-        const pids = new Set<string>()
-        ;(list as any[]).forEach((m: any) => { if (m.fromPersonaId ?? m.FromPersonaId) pids.add(String(m.fromPersonaId ?? m.FromPersonaId)) })
-        const labels = new Map<string, string>()
-        if (personaId) labels.set(personaId, personas.find(p => p.id === personaId)?.name || 'Assistant')
-        if (auth?.primaryPersonaId) labels.set(auth.primaryPersonaId, 'You')
-        for (const id of pids) {
-          if (labels.has(id)) continue
-          try {
-            const r = await fetch(`/api/personas/${id}`, { headers })
-            if (r.ok) {
-              const p = await r.json()
-              const name = (p.nickname ?? p.Nickname) || (p.name ?? p.Name)
-              labels.set(id, name)
-            }
-          } catch {}
+        // Optionally gather labels if needed in future; we now derive names by role for clarity
+
+        const normalizeRole = (r: any): 'system' | 'user' | 'assistant' => {
+          if (r == null) return 'user'
+          if (typeof r === 'string') {
+            const t = r.toLowerCase()
+            if (t === 'system' || t === 'user' || t === 'assistant') return t as any
+            // sometimes numeric comes as string
+            const n = Number(t)
+            if (!Number.isNaN(n)) r = n
+          }
+          if (typeof r === 'number') {
+            if (r === 0) return 'system'
+            if (r === 2) return 'assistant'
+            return 'user'
+          }
+          return 'user'
         }
-        baseMsgs = (list as any[]).map((m: any) => ({
-          role: (m.role ?? m.Role)?.toString().toLowerCase() || 'user',
-          content: m.content ?? m.Content,
-          fromId: String(m.fromPersonaId ?? m.FromPersonaId ?? ''),
-          fromName: labels.get(String(m.fromPersonaId ?? m.FromPersonaId ?? '')) || ((m.role ?? m.Role) === 0 ? 'System' : ((m.role ?? m.Role) === 2 ? (personas.find(p => p.id === personaId)?.name || 'Assistant') : 'You')),
-          timestamp: m.timestamp ?? m.Timestamp
-        }))
+
+        baseMsgs = (list as any[]).map((m: any) => {
+          const role = normalizeRole(m.role ?? m.Role)
+          const fromId = String(m.fromPersonaId ?? m.FromPersonaId ?? '')
+          // Display name strictly by role to avoid mislabeling
+          const fromName = role === 'user'
+            ? 'You'
+            : role === 'assistant'
+            ? (personas.find(p => p.id === personaId)?.name || 'Assistant')
+            : 'System'
+          return {
+            role,
+            content: m.content ?? m.Content,
+            fromId,
+            fromName,
+            timestamp: m.timestamp ?? m.Timestamp
+          } as Message
+        })
       }
 
       let imageMsgs: Message[] = []
@@ -398,7 +412,8 @@ export default function ChatPage() {
                         <img alt="generated" src={`/api/images/content?id=${m.imageId}`} style={{ maxWidth: '100%', borderRadius: 6 }} />
                       </Box>
                     ) : (
-                      <Typography variant="body1" whiteSpace="pre-wrap">{m.content}</Typography>
+                      <MarkdownView content={m.content}
+                      />
                     )}
                   </Box>
                 ))}
