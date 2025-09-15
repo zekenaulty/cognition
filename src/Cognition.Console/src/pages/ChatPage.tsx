@@ -18,6 +18,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const creatingRef = useRef(false)
+  const fetchSeqRef = useRef(0)
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [models, setModels] = useState<Model[]>([])
@@ -42,7 +43,7 @@ export default function ChatPage() {
     [accessToken, personaId, providerId, input]
   )
 
-  async function loadConversations(pid?: string) {
+  async function loadConversations(pid?: string, autoSelectFirst: boolean = false) {
     if (!accessToken) return
     const url = pid ? `/api/conversations?participantId=${pid}` : `/api/conversations`
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
@@ -50,7 +51,8 @@ export default function ChatPage() {
     const list = await res.json()
     const items: Conv[] = (list as any[]).map((c: any) => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }))
     setConversations(items)
-    if (!conversationId && items.length > 0) setConversationId(items[0].id)
+    if (autoSelectFirst) setConversationId(items.length > 0 ? items[0].id : null)
+    return items
   }
 
   // Personas: show assistants only
@@ -125,10 +127,12 @@ export default function ChatPage() {
   }, [accessToken, providerId])
 
   useEffect(() => {
-    // On persona change: clear current state and load that persona's last conversation (if any)
+    // On persona change: clear and select latest conversation for that persona
     setMessages([])
     setConversationId(null)
-    loadConversations(personaId)
+    setConversations([])
+    if (!personaId) return
+    loadConversations(personaId, true)
   }, [accessToken, personaId])
 
   // Image styles
@@ -151,6 +155,9 @@ export default function ChatPage() {
   useEffect(() => {
     const load = async () => {
       if (!accessToken || !conversationId) return
+      const seq = ++fetchSeqRef.current
+      // Clear immediately to avoid showing stale messages from previous selection
+      setMessages([])
       const headers = { Authorization: `Bearer ${accessToken}` }
       // Fetch chat messages and images in parallel
       const [resMsgs, resImgs] = await Promise.all([
@@ -204,7 +211,7 @@ export default function ChatPage() {
         const tb = b.timestamp ? Date.parse(b.timestamp) : 0
         return ta - tb
       })
-      setMessages(combined)
+      if (seq === fetchSeqRef.current) setMessages(combined)
     }
     load()
   }, [accessToken, conversationId, personaId, personas])
@@ -303,7 +310,7 @@ export default function ChatPage() {
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 260 }}>
               <InputLabel id="conversation-label">Conversation</InputLabel>
-              <Select labelId="conversation-label" label="Conversation" value={conversationId || ''} onChange={e => setConversationId(e.target.value)} renderValue={(v) => { const c = conversations.find(x => x.id === v); return c ? (c.title || (c.id.slice(0,8) + '...')) : ''; }}>
+              <Select labelId="conversation-label" label="Conversation" value={conversationId || ''} onChange={e => { setConversationId(e.target.value); setMessages([]) }} renderValue={(v) => { const c = conversations.find(x => x.id === v); return c ? (c.title || (c.id.slice(0,8) + '...')) : ''; }}>
                 {conversations.length === 0 && <MenuItem value="" disabled>No saved conversations</MenuItem>}
                 {conversations.map(c => (
                   <MenuItem key={c.id} value={c.id}>
