@@ -4,6 +4,7 @@ using Cognition.Clients.LLM;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Tools;
+using Cognition.Data.Relational.Modules.Conversations;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cognition.Clients.Agents;
@@ -12,6 +13,7 @@ public interface IAgentService
 {
     Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
     Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
+    Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
 }
 
 public class AgentService : IAgentService
@@ -93,6 +95,140 @@ public class AgentService : IAgentService
         }
 
         return draft;
+    }
+
+    // Chat with conversation history and summaries; persists user/assistant messages
+    public async Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false)
+    {
+        // Ensure the conversation exists without loading heavy navigations
+        var exists = await _db.Conversations.AsNoTracking().AnyAsync(c => c.Id == conversationId);
+        if (!exists) throw new InvalidOperationException("Conversation not found");
+
+        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId);
+        var system = BuildSystemMessage(persona, rolePlay);
+
+        // Persist user message first
+        var userMsg = new ConversationMessage
+        {
+            ConversationId = conversationId,
+            FromPersonaId = personaId,
+            Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
+            Content = input,
+            Timestamp = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        _db.ConversationMessages.Add(userMsg);
+        await _db.SaveChangesAsync();
+
+        // Determine a rough turn window from model context (fallback to 20)
+        var maxTurns = 20;
+        if (modelId.HasValue)
+        {
+            var m = await _db.Models.AsNoTracking().FirstOrDefaultAsync(mm => mm.Id == modelId.Value);
+            if (m?.ContextWindow is int cw && cw > 0)
+            {
+                maxTurns = Math.Clamp(cw / 256, 6, 40);
+            }
+        }
+        // Fetch just the most recent N messages from DB, then order ascending in-memory
+        var window = await _db.ConversationMessages.AsNoTracking()
+            .Where(m => m.ConversationId == conversationId)
+            .OrderByDescending(m => m.Timestamp)
+            .Take(maxTurns)
+            .ToListAsync();
+        window.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
+
+        var chat = new List<ChatMessage>();
+        // 1) Instruction sets as distinct system messages (scoped: global/provider/model/persona)
+        var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, rolePlay);
+        chat.AddRange(instructionMsgs);
+        // 2) Persona baseline system message
+        if (!string.IsNullOrWhiteSpace(system)) chat.Add(new ChatMessage("system", system));
+        // Optional: include latest summary as system supplement (DB limited)
+        var summary = await _db.ConversationSummaries.AsNoTracking()
+            .Where(s => s.ConversationId == conversationId)
+            .OrderByDescending(s => s.Timestamp)
+            .FirstOrDefaultAsync();
+        if (summary != null)
+            chat.Add(new ChatMessage("system", "Conversation Summary: " + summary.Content));
+        foreach (var m in window)
+        {
+            var role = m.Role switch
+            {
+                Cognition.Data.Relational.Modules.Common.ChatRole.Assistant => "assistant",
+                Cognition.Data.Relational.Modules.Common.ChatRole.System => "system",
+                _ => "user"
+            };
+            chat.Add(new ChatMessage(role, m.Content));
+        }
+        // Append the new input (also in window now via persisted user message)
+        chat.Add(new ChatMessage("user", input));
+
+        var client = await _factory.CreateAsync(providerId, modelId);
+        var reply = await client.ChatAsync(chat);
+
+        // Persist assistant reply
+        var assistantMsg = new ConversationMessage
+        {
+            ConversationId = conversationId,
+            FromPersonaId = personaId,
+            Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
+            Content = reply,
+            Timestamp = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        _db.ConversationMessages.Add(assistantMsg);
+        await _db.SaveChangesAsync();
+
+        return reply;
+    }
+
+    private async Task<IEnumerable<ChatMessage>> BuildInstructionMessages(Guid personaId, Guid providerId, Guid? modelId, bool rolePlay)
+    {
+        // Pull active instruction sets for relevant scopes
+        var q = _db.InstructionSets
+            .AsNoTracking()
+            .Where(s => s.IsActive);
+
+        // Note: Scope values are conventions: "global", "provider", "model", "persona" (case-insensitive)
+        q = q.Where(s =>
+            (s.Scope == null || s.Scope!.ToLower() == "global")
+            || (s.Scope!.ToLower() == "provider" && s.ScopeRefId == providerId)
+            || (modelId != null && s.Scope!.ToLower() == "model" && s.ScopeRefId == modelId)
+            || (s.Scope!.ToLower() == "persona" && s.ScopeRefId == personaId)
+        );
+
+        var sets = await q
+            .Include(s => s.Items)
+                .ThenInclude(i => i.Instruction)
+            .ToListAsync();
+
+        var items = sets
+            .SelectMany(s => s.Items)
+            .Where(i => i.Enabled && i.Instruction.IsActive)
+            .OrderBy(i => i.Order)
+            .ToList();
+
+        // Prioritize by kind to keep important rules first
+        int KindRank(Cognition.Data.Relational.Modules.Common.InstructionKind k) => k switch
+        {
+            Cognition.Data.Relational.Modules.Common.InstructionKind.MissionCritical => 0,
+            Cognition.Data.Relational.Modules.Common.InstructionKind.CoreRules => 1,
+            Cognition.Data.Relational.Modules.Common.InstructionKind.Tool => 2,
+            Cognition.Data.Relational.Modules.Common.InstructionKind.SystemInstruction => 3,
+            Cognition.Data.Relational.Modules.Common.InstructionKind.Persona => 4,
+            _ => 5
+        };
+
+        var filtered = items
+            .Where(i => !i.Instruction.RolePlay || rolePlay)
+            .OrderBy(i => KindRank(i.Instruction.Kind))
+            .ThenBy(i => i.Order)
+            .ThenBy(i => i.Instruction.Name)
+            .Select(i => new ChatMessage("system", i.Instruction.Content))
+            .ToList();
+
+        return filtered;
     }
 
     private static bool TryGetJsonObjectText(string text, out string? json)

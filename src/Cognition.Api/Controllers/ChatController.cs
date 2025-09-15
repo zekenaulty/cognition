@@ -34,4 +34,19 @@ public class ChatController : ControllerBase
         var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay);
         return Ok(new { reply });
     }
+
+    public record ChatRequest(
+        Guid ConversationId,
+        Guid PersonaId,
+        Guid ProviderId,
+        Guid? ModelId,
+        string Input,
+        bool RolePlay = false);
+
+    [HttpPost("ask-chat")]
+    public async Task<IActionResult> AskChat([FromBody] ChatRequest req)
+    {
+        var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay);
+        return Ok(new { reply });
+    }
 }
