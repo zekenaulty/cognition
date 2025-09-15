@@ -25,6 +25,7 @@ public class GeminiTextClient : ILLMClient
             _http.DefaultRequestHeaders.Remove("x-goog-api-key");
             _http.DefaultRequestHeaders.Add("x-goog-api-key", key);
         }
+        _http.Timeout = TimeSpan.FromSeconds(90);
     }
 
     public async Task<string> GenerateAsync(string prompt, bool track = false)
@@ -81,6 +82,9 @@ public class GeminiTextClient : ILLMClient
         while ((line = await reader.ReadLineAsync()) != null)
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
+            // Accept both raw JSON lines and SSE-style "data: {json}"
+            if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                line = line.Substring("data:".Length).Trim();
             string? toYield = null;
             try
             {

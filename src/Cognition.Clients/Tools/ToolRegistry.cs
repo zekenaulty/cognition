@@ -26,7 +26,7 @@ public class ToolRegistry : IToolRegistry
             var aqn = $"{t.FullName}, {asmName}"; // assembly-qualified short form
             if (t.FullName != null) _map[t.FullName] = t;     // Namespace.Type
             _map[aqn] = t;                                    // Namespace.Type, Assembly
-            _map[t.Name] = t;                                 // TypeName (last resort)
+            // Intentionally omit plain type name mapping to avoid collisions/abuse
         }
     }
 
@@ -39,4 +39,3 @@ public class ToolRegistry : IToolRegistry
 
     public IReadOnlyDictionary<string, Type> Map => _map;
 }
-

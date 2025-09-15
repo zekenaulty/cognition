@@ -4,16 +4,18 @@ using Cognition.Clients.LLM;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Tools;
+using Cognition.Data.Relational.Modules.FeatureFlags;
 using Cognition.Data.Relational.Modules.Conversations;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Cognition.Clients.Agents;
 
 public interface IAgentService
 {
-    Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
-    Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
-    Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
+    Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
+    Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
+    Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
 }
 
 public class AgentService : IAgentService
@@ -22,26 +24,42 @@ public class AgentService : IAgentService
     private readonly ILLMClientFactory _factory;
     private readonly Cognition.Clients.Tools.IToolDispatcher _dispatcher;
     private readonly IServiceProvider _sp;
+    private readonly ILogger<AgentService> _logger;
 
-    public AgentService(CognitionDbContext db, ILLMClientFactory factory, Cognition.Clients.Tools.IToolDispatcher dispatcher, IServiceProvider sp)
+    public AgentService(CognitionDbContext db, ILLMClientFactory factory, Cognition.Clients.Tools.IToolDispatcher dispatcher, IServiceProvider sp, ILogger<AgentService> logger)
     {
         _db = db;
         _factory = factory;
         _dispatcher = dispatcher;
         _sp = sp;
+        _logger = logger;
     }
 
-    public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false)
+    public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
     {
-        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId);
+        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId, ct);
         var sys = BuildSystemMessage(persona, rolePlay);
         var client = await _factory.CreateAsync(providerId, modelId);
         var prompt = string.IsNullOrWhiteSpace(sys) ? input : $"{sys}\n\nUser: {input}";
-        return await client.GenerateAsync(prompt, track: false);
+        try
+        {
+            return await client.GenerateAsync(prompt, track: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "LLM GenerateAsync failed for provider {ProviderId} model {ModelId}", providerId, modelId);
+            return "Sorry, I couldn’t complete that request.";
+        }
     }
 
-    public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false)
+    public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
     {
+        // Feature-flag: if ToolsEnabled exists and is disabled, fall back to AskAsync
+        var flag = await _db.FeatureFlags.AsNoTracking().FirstOrDefaultAsync(f => f.Key == "ToolsEnabled", ct);
+        if (flag != null && !flag.IsEnabled)
+        {
+            return await AskAsync(personaId, providerId, modelId, input, rolePlay, ct);
+        }
         // Discover available tools for this provider/model and expose a compact schema
         var tools = await _db.Tools
             .Include(t => t.Parameters)
@@ -51,7 +69,7 @@ public class AgentService : IAgentService
                                                         && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
                                                         && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
             .AsNoTracking()
-            .ToListAsync();
+            .ToListAsync(ct);
 
         var draft = await AskWithToolIndexAsync(personaId, providerId, modelId, input, tools, rolePlay);
 
@@ -70,12 +88,6 @@ public class AgentService : IAgentService
                 var ts = t.GetString();
                 if (Guid.TryParse(ts, out var tmp)) toolId = tmp;
             }
-            else if (root.TryGetProperty("toolName", out var tn))
-            {
-                var name = tn.GetString();
-                var match = tools.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
-                if (match != null) toolId = match.Id;
-            }
 
             if (toolId.HasValue)
             {
@@ -83,7 +95,7 @@ public class AgentService : IAgentService
                     ? JsonSerializer.Deserialize<Dictionary<string, object?>>(a.GetRawText()) ?? new()
                     : new Dictionary<string, object?>();
 
-                var ctx = new Cognition.Clients.Tools.ToolContext(null, null, personaId, _sp, CancellationToken.None);
+                var ctx = new Cognition.Clients.Tools.ToolContext(null, null, personaId, _sp, ct);
                 var exec = await _dispatcher.ExecuteAsync(toolId.Value, ctx, args, log: true);
                 if (!exec.ok) return $"Tool error: {exec.error}";
                 return exec.result is string s ? s : JsonSerializer.Serialize(exec.result);
@@ -98,13 +110,13 @@ public class AgentService : IAgentService
     }
 
     // Chat with conversation history and summaries; persists user/assistant messages
-    public async Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false)
+    public async Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
     {
         // Ensure the conversation exists without loading heavy navigations
-        var exists = await _db.Conversations.AsNoTracking().AnyAsync(c => c.Id == conversationId);
+        var exists = await _db.Conversations.AsNoTracking().AnyAsync(c => c.Id == conversationId, ct);
         if (!exists) throw new InvalidOperationException("Conversation not found");
 
-        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId);
+        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId, ct);
         var system = BuildSystemMessage(persona, rolePlay);
 
         // Persist user message first
@@ -118,7 +130,7 @@ public class AgentService : IAgentService
             CreatedAtUtc = DateTime.UtcNow
         };
         _db.ConversationMessages.Add(userMsg);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
 
         // Determine a rough turn window from model context (fallback to 20)
         var maxTurns = 20;
@@ -135,12 +147,12 @@ public class AgentService : IAgentService
             .Where(m => m.ConversationId == conversationId)
             .OrderByDescending(m => m.Timestamp)
             .Take(maxTurns)
-            .ToListAsync();
+            .ToListAsync(ct);
         window.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
 
         var chat = new List<ChatMessage>();
         // 1) Instruction sets as distinct system messages (scoped: global/provider/model/persona)
-        var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, rolePlay);
+        var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, rolePlay, ct);
         chat.AddRange(instructionMsgs);
         // 2) Persona baseline system message
         if (!string.IsNullOrWhiteSpace(system)) chat.Add(new ChatMessage("system", system));
@@ -148,7 +160,7 @@ public class AgentService : IAgentService
         var summary = await _db.ConversationSummaries.AsNoTracking()
             .Where(s => s.ConversationId == conversationId)
             .OrderByDescending(s => s.Timestamp)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(ct);
         if (summary != null)
             chat.Add(new ChatMessage("system", "Conversation Summary: " + summary.Content));
         foreach (var m in window)
@@ -178,12 +190,12 @@ public class AgentService : IAgentService
             CreatedAtUtc = DateTime.UtcNow
         };
         _db.ConversationMessages.Add(assistantMsg);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
 
         return reply;
     }
 
-    private async Task<IEnumerable<ChatMessage>> BuildInstructionMessages(Guid personaId, Guid providerId, Guid? modelId, bool rolePlay)
+    private async Task<IEnumerable<ChatMessage>> BuildInstructionMessages(Guid personaId, Guid providerId, Guid? modelId, bool rolePlay, CancellationToken ct = default)
     {
         // Pull active instruction sets for relevant scopes
         var q = _db.InstructionSets
@@ -201,7 +213,7 @@ public class AgentService : IAgentService
         var sets = await q
             .Include(s => s.Items)
                 .ThenInclude(i => i.Instruction)
-            .ToListAsync();
+            .ToListAsync(ct);
 
         var items = sets
             .SelectMany(s => s.Items)
@@ -236,19 +248,38 @@ public class AgentService : IAgentService
         json = null;
         if (string.IsNullOrWhiteSpace(text)) return false;
         var trimmed = text.Trim();
+        // Strip code fences if present
+        if (trimmed.StartsWith("```"))
+        {
+            var startFence = trimmed.IndexOf("```", StringComparison.Ordinal);
+            var endFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+            if (startFence >= 0 && endFence > startFence)
+            {
+                var inner = trimmed.Substring(startFence + 3, endFence - (startFence + 3)).Trim();
+                // Drop optional language hint like "json"
+                var firstNewline = inner.IndexOf('\n');
+                if (firstNewline > 0)
+                {
+                    var lang = inner.Substring(0, firstNewline).Trim();
+                    if (lang.Equals("json", StringComparison.OrdinalIgnoreCase))
+                        inner = inner.Substring(firstNewline + 1).Trim();
+                }
+                trimmed = inner;
+            }
+        }
         if (trimmed.StartsWith("{") && trimmed.EndsWith("}")) { json = trimmed; return true; }
 
-        int start = text.IndexOf('{');
-        while (start >= 0 && start < text.Length)
+        int start = trimmed.IndexOf('{');
+        while (start >= 0 && start < trimmed.Length)
         {
             int depth = 0;
             bool inString = false;
-            for (int i = start; i < text.Length; i++)
+            for (int i = start; i < trimmed.Length; i++)
             {
-                char c = text[i];
+                char c = trimmed[i];
                 if (c == '"')
                 {
-                    bool escaped = i > 0 && text[i - 1] == '\\';
+                    bool escaped = i > 0 && trimmed[i - 1] == '\\';
                     if (!escaped) inString = !inString;
                 }
                 if (inString) continue;
@@ -258,12 +289,12 @@ public class AgentService : IAgentService
                     depth--;
                     if (depth == 0)
                     {
-                        json = text.Substring(start, i - start + 1);
+                        json = trimmed.Substring(start, i - start + 1);
                         return true;
                     }
                 }
             }
-            start = text.IndexOf('{', start + 1);
+            start = trimmed.IndexOf('{', start + 1);
         }
         return false;
     }
@@ -307,7 +338,7 @@ public class AgentService : IAgentService
         var sb = new StringBuilder();
         sb.AppendLine("Tool Index:");
         sb.AppendLine("- You may optionally call exactly one tool by returning pure JSON only on a single line:");
-        sb.AppendLine("  {\"toolId\":\"<GUID>\",\"args\":{...}} OR {\"toolName\":\"<NAME>\",\"args\":{...}}");
+        sb.AppendLine("  {\"toolId\":\"<GUID>\",\"args\":{...}}");
         sb.AppendLine("- If no tool is needed, answer normally without JSON.");
         sb.AppendLine("- Arguments must match the schema below (required marked with *).");
         sb.AppendLine("Available tools:");

@@ -24,14 +24,14 @@ public class ChatController : ControllerBase
     [HttpPost("ask")]
     public async Task<IActionResult> Ask([FromBody] AskRequest req)
     {
-        var reply = await _agents.AskAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay);
+        var reply = await _agents.AskAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
         return Ok(new { reply });
     }
 
     [HttpPost("ask-with-tools")]
     public async Task<IActionResult> AskWithTools([FromBody] AskRequest req)
     {
-        var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay);
+        var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
         return Ok(new { reply });
     }
 
@@ -46,7 +46,7 @@ public class ChatController : ControllerBase
     [HttpPost("ask-chat")]
     public async Task<IActionResult> AskChat([FromBody] ChatRequest req)
     {
-        var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay);
+        var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
         return Ok(new { reply });
     }
 }

@@ -8,12 +8,14 @@ public class OpenAIImageClient : IImageClient
 {
     private readonly HttpClient _http;
     private readonly string _model;
+    private readonly string _apiBase;
 
     public OpenAIImageClient(HttpClient http, string model = "gpt-image-1")
     {
         _http = http;
         _model = model;
-        var apiKey = Environment.GetEnvironmentVariable("OPENAI_KEY");
+        _apiBase = Environment.GetEnvironmentVariable("OPENAI_BASE_URL")?.TrimEnd('/') ?? "https://api.openai.com";
+        var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? Environment.GetEnvironmentVariable("OPENAI_KEY");
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
             _http.DefaultRequestHeaders.Remove("Authorization");
@@ -32,7 +34,7 @@ public class OpenAIImageClient : IImageClient
             n = 1,
             response_format = "b64_json"
         };
-        var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/images/generations")
+        var req = new HttpRequestMessage(HttpMethod.Post, $"{_apiBase}/v1/images/generations")
         {
             Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
         };
@@ -44,4 +46,3 @@ public class OpenAIImageClient : IImageClient
         return new ImageResult(bytes, "image/png", parameters.Width, parameters.Height, "OpenAI", _model);
     }
 }
-

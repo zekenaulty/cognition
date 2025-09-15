@@ -1,12 +1,15 @@
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Users;
 
 namespace Cognition.Api.Controllers;
 
 [ApiController]
 [Route("api/admin")] 
+[Authorize(Roles = nameof(UserRole.Administrator))]
 public class AdminController : ControllerBase
 {
     private readonly CognitionDbContext _db;
