@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Button, Card, CardContent, Divider, Stack, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Tooltip, IconButton, Chip } from '@mui/material'
+import { alpha } from '@mui/material/styles'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useAuth } from '../auth/AuthContext'
 import MarkdownView from '../components/MarkdownView'
 import EmojiButton from '../components/EmojiButton'
+import ImageViewer from '../components/ImageViewer'
 
-type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string }
+type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string; imgPrompt?: string; imgStyleName?: string }
 type Provider = { id: string; name: string; displayName?: string }
 type Model = { id: string; name: string; displayName?: string }
 type Persona = { id: string; name: string }
@@ -43,6 +45,7 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
   const forceScrollRef = useRef(false)
+  const [viewer, setViewer] = useState<{ open: boolean, id?: string, title?: string }>({ open: false })
 
   const canSend = useMemo(
     () => !!accessToken && !!personaId && !!providerId && input.trim().length > 0,
@@ -222,7 +225,9 @@ export default function ChatPage() {
           content: '',
           imageId: String(i.id ?? i.Id),
           fromName: personas.find(p => p.id === personaId)?.name || 'Assistant',
-          timestamp: i.createdAtUtc ?? i.CreatedAtUtc
+          timestamp: i.createdAtUtc ?? i.CreatedAtUtc,
+          imgPrompt: i.prompt ?? i.Prompt,
+          imgStyleName: i.styleName ?? i.StyleName
         }))
       }
 
@@ -301,19 +306,51 @@ export default function ChatPage() {
   }
 
   const generateImageFromChat = async () => {
-    if (!accessToken || !conversationId || !personaId) return
+    if (!accessToken || !conversationId || !personaId || !providerId) return
     const style = imgStyles.find(s => s.id === imgStyleId)
     const recent = messages.slice(-imgMsgCount)
     const lines = recent.map(m => `${m.fromName || m.role}: ${m.content}`).join('\n')
-    const fullPrompt = `${style?.promptPrefix ? style.promptPrefix + '\n' : ''}${lines}`
-    const payload = { ConversationId: conversationId, PersonaId: personaId, Prompt: fullPrompt, Width: 1024, Height: 1024, StyleId: imgStyleId || undefined, NegativePrompt: style?.negativePrompt || undefined, Provider: 'OpenAI', Model: imgModel }
+    // Build a style recipe string for the LLM
+    const styleRecipe = [`Style: ${style?.name || ''}`, style?.description || '', style?.promptPrefix || ''].filter(Boolean).join('\n')
+    // System + user instruction to synthesize a single image prompt from chat + style
+    const sysInstr = `You are an expert prompt-writer for image models.
+Given a conversation transcript and a style recipe, produce ONE concise, vivid, concrete image prompt.
+Rules:
+- 1-4 sentences. <= 2500 characters total.
+- Describe subject, setting, background, foreground, lighting, mood, and camera.
+- Avoid copyrighted characters/logos and explicit sexual content.
+- Do NOT include disclaimers or the transcript itself. Output only the prompt.`
+    const userInstr = `Style recipe:\n${styleRecipe}\n\nConversation (recent):\n${lines}\n\nWrite the single best image prompt now.`
+    const promptBuildInput = `${sysInstr}\n\n${userInstr}`
+    // Placeholder assistant message while we build + generate
     try {
       setImgPending(true)
       // Add placeholder assistant message for image generation
       const placeholderId = `img-${Date.now()}-${Math.random().toString(36).slice(2)}`
       const assistantName = personas.find(p => p.id === personaId)?.name || 'Assistant'
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Generating image', fromName: assistantName, pending: true, localId: placeholderId }])
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Generating image', fromName: assistantName, pending: true, localId: placeholderId, imgPrompt: '', imgStyleName: style?.name }])
       if (stickToBottomRef.current) forceScrollRef.current = true
+      // Step 1: ask LLM to synthesize an image prompt from recent chat + style
+      let finalPrompt = ''
+      try {
+        const resp = await fetch('/api/chat/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ PersonaId: personaId, ProviderId: providerId, ModelId: modelId || null, Input: promptBuildInput, RolePlay: false })
+        })
+        if (resp.ok) {
+          const rj = await resp.json()
+          finalPrompt = String(rj.reply || '').trim()
+        }
+      } catch {}
+      if (!finalPrompt) {
+        // Fallback: simple concatenation if LLM failed
+        finalPrompt = `${style?.promptPrefix ? style.promptPrefix + '\n' : ''}${lines}`.slice(0, 2500)
+      }
+      // Update placeholder with the prompt we will use (for thumbnail titles)
+      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, imgPrompt: finalPrompt } : m))
+      // Step 2: request image generation
+      const payload = { ConversationId: conversationId, PersonaId: personaId, Prompt: finalPrompt, Width: 1024, Height: 1024, StyleId: imgStyleId || undefined, NegativePrompt: style?.negativePrompt || undefined, Provider: 'OpenAI', Model: imgModel }
       const res = await fetch('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(payload) })
       if (!res.ok) {
         const txt = await res.text()
@@ -322,7 +359,7 @@ export default function ChatPage() {
       }
       const data = await res.json()
       const id = data.id || data.Id
-      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: '', imageId: String(id) } : m))
+      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: '', imageId: String(id), imgPrompt: finalPrompt, imgStyleName: style?.name } : m))
       if (stickToBottomRef.current) {
         forceScrollRef.current = true
       }
@@ -456,23 +493,52 @@ export default function ChatPage() {
               <Typography color="text.secondary">Start the conversation.</Typography>
             ) : (
               <Stack spacing={1}>
-                {messages.map((m, i) => (
-                  <Box key={i} sx={{ p: 1, borderRadius: 1, bgcolor: m.role === 'user' ? 'action.selected' : 'background.paper' }}>
-                    <Typography variant="caption" color="text.secondary">{m.fromName || m.role}</Typography>
-                    {m.imageId ? (
-                      <Box sx={{ mt: 0.5 }}>
-                        <img alt="generated" src={`/api/images/content?id=${m.imageId}`} style={{ maxWidth: '100%', borderRadius: 6 }} />
-                      </Box>
-                    ) : m.pending ? (
-                      <Typography variant="body1">
-                        {m.content ? m.content + ' ' : ''}
-                        <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
+                {messages.map((m, i) => {
+                  const isUser = m.role === 'user'
+                  return (
+                    <Box
+                      key={i}
+                      sx={{
+                        p: 1.25,
+                        maxWidth: { xs: '92%', sm: '78%' },
+                        backgroundColor: (theme) => isUser
+                          ? alpha(theme.palette.action.selected, 0.45)
+                          : theme.palette.background.paper,
+                        alignSelf: isUser ? 'flex-end' : 'flex-start',
+                        ml: isUser ? 2 : 0,
+                        mr: isUser ? 0 : 2,
+                        borderTopLeftRadius: isUser ? 12 : 10,
+                        borderTopRightRadius: isUser ? 12 : 10,
+                        borderBottomLeftRadius: isUser ? 12 : 8,
+                        borderBottomRightRadius: isUser ? 8 : 12,
+                      }}
+                    >
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: isUser ? 'right' : 'left', mb: 0.25 }}>
+                        {m.fromName || m.role}
                       </Typography>
-                    ) : (
-                      <MarkdownView content={m.content} />
-                    )}
-                  </Box>
-                ))}
+                      {m.imageId ? (
+                        <Box sx={{ mt: 0.5 }}>
+                          <img
+                            alt={m.imgStyleName ? `[${m.imgStyleName}] ${m.imgPrompt || ''}` : (m.imgPrompt || 'generated')}
+                            title={m.imgStyleName ? `[${m.imgStyleName}] ${m.imgPrompt || ''}` : (m.imgPrompt || 'generated')}
+                            src={`/api/images/content?id=${m.imageId}`}
+                            onClick={() => setViewer({ open: true, id: m.imageId, title: (m.imgStyleName ? `[${m.imgStyleName}] ` : '') + (m.imgPrompt || '') })}
+                            style={{ height: 240, width: 'auto', borderRadius: 6, cursor: 'zoom-in', maxWidth: '100%' }}
+                          />
+                        </Box>
+                      ) : m.pending ? (
+                        <Typography variant="body1" sx={{ textAlign: isUser ? 'right' : 'left' }}>
+                          {m.content ? m.content + ' ' : ''}
+                          <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
+                        </Typography>
+                      ) : (
+                        <Box sx={{ textAlign: isUser ? 'right' : 'left' }}>
+                          <MarkdownView content={m.content} />
+                        </Box>
+                      )}
+                    </Box>
+                  )
+                })}
               </Stack>
             )}
           </Box>
@@ -500,6 +566,7 @@ export default function ChatPage() {
           </Stack>
         </CardContent>
       </Card>
+      <ImageViewer open={viewer.open} onClose={() => setViewer({ open: false })} imageId={viewer.id} title={viewer.title} />
     </Stack>
   )
 }
