@@ -4,7 +4,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
-type Message = { role: 'system' | 'user' | 'assistant'; content: string }
+type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string }
 type Provider = { id: string; name: string; displayName?: string }
 type Model = { id: string; name: string; displayName?: string }
 type Persona = { id: string; name: string }
@@ -25,23 +25,24 @@ export default function ChatPage() {
   const [modelId, setModelId] = useState<string>('')
   const [personas, setPersonas] = useState<Persona[]>([])
   const [personaId, setPersonaId] = useState<string>('')
-  const [conversations, setConversations] = useState<string[]>([])
+  type Conv = { id: string; title?: string | null }
+  const [conversations, setConversations] = useState<Conv[]>([])
 
   const canSend = useMemo(
     () => !!accessToken && !!personaId && !!conversationId && !!providerId && input.trim().length > 0,
     [accessToken, personaId, conversationId, providerId, input]
   )
 
-  useEffect(() => {
-    // Load saved conversations from localStorage
-    try {
-      const raw = localStorage.getItem(LS_CONVOS_KEY)
-      if (raw) {
-        const list = JSON.parse(raw) as string[]
-        setConversations(Array.from(new Set(list)))
-      }
-    } catch {}
-  }, [])
+  async function loadConversations(pid?: string) {
+    if (!accessToken) return
+    const url = pid ? `/api/conversations?participantId=${pid}` : `/api/conversations`
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+    if (!res.ok) return
+    const list = await res.json()
+    const items: Conv[] = (list as any[]).map(c => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }))
+    setConversations(items)
+    if (!conversationId && items.length > 0) setConversationId(items[0].id)
+  }
 
   useEffect(() => {
     // Load user's accessible personas; show Assistants (type = 1 or 'Assistant') only.
@@ -104,9 +105,7 @@ export default function ChatPage() {
         const body = await res.json()
         const id = body.id || body.Id
         setConversationId(id)
-        const next = Array.from(new Set([id, ...conversations]))
-        setConversations(next)
-        try { localStorage.setItem(LS_CONVOS_KEY, JSON.stringify(next)) } catch {}
+        await loadConversations(personaId)
       }
     } finally {
       creatingRef.current = false
@@ -142,10 +141,53 @@ export default function ChatPage() {
     load()
   }, [accessToken, providerId])
 
+  // Load conversations when persona changes
+  useEffect(() => {
+    loadConversations(personaId)
+  }, [accessToken, personaId])
+
+  // Load messages when conversation changes
+  useEffect(() => {
+    const load = async () => {
+      if (!accessToken || !conversationId) return
+      const res = await fetch(`/api/conversations/${conversationId}/messages`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      if (!res.ok) return
+      const list = await res.json()
+      // Collect persona ids to label messages
+      const pids = new Set<string>()
+      ;(list as any[]).forEach(m => { if (m.fromPersonaId ?? m.FromPersonaId) pids.add(String(m.fromPersonaId ?? m.FromPersonaId)) })
+      const labels = new Map<string, string>()
+      // Prelabel current selected persona and maybe user's primary
+      if (personaId) labels.set(personaId, personas.find(p => p.id === personaId)?.name || 'Assistant')
+      if (auth?.primaryPersonaId) labels.set(auth.primaryPersonaId, 'You')
+      // Fetch any missing labels
+      for (const id of pids) {
+        if (labels.has(id)) continue
+        try {
+          const r = await fetch(`/api/personas/${id}`, { headers: { Authorization: `Bearer ${accessToken}` } })
+          if (r.ok) {
+            const p = await r.json()
+            const name = (p.nickname ?? p.Nickname) || (p.name ?? p.Name)
+            labels.set(id, name)
+          }
+        } catch {}
+      }
+      const msgs: Message[] = (list as any[]).map(m => ({
+        role: (m.role ?? m.Role)?.toString().toLowerCase() || 'user',
+        content: m.content ?? m.Content,
+        fromId: String(m.fromPersonaId ?? m.FromPersonaId ?? ''),
+        fromName: labels.get(String(m.fromPersonaId ?? m.FromPersonaId ?? '')) || ((m.role ?? m.Role) === 0 ? 'System' : ((m.role ?? m.Role) === 2 ? (personas.find(p => p.id === personaId)?.name || 'Assistant') : 'You')),
+        timestamp: m.timestamp ?? m.Timestamp
+      }))
+      setMessages(msgs)
+    }
+    load()
+  }, [accessToken, conversationId, personaId, personas])
+
   const send = async () => {
     if (!canSend || !conversationId || !personaId) return
     const text = input.trim()
-    setMessages((prev) => [...prev, { role: 'user', content: text }])
+    setMessages((prev) => [...prev, { role: 'user', content: text, fromName: 'You' }])
     setInput('')
     try {
       const res = await fetch('/api/chat/ask-chat', {
@@ -159,19 +201,20 @@ export default function ChatPage() {
         return
       }
       const body = await res.json()
-      setMessages((prev) => [...prev, { role: 'assistant', content: body.reply }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: body.reply, fromName: personas.find(p => p.id === personaId)?.name || 'Assistant' }])
+      // refresh conversations to reflect any auto-title
+      await loadConversations(personaId)
     } catch (e: any) {
       setMessages((prev) => [...prev, { role: 'assistant', content: `Network error` }])
     }
   }
 
   return (
-    <Stack spacing={2}>
+    <Stack spacing={2} sx={{ height: 'calc(100vh - 160px)' }}>
       <Typography variant="h5">Chat</Typography>
-      <Card variant="outlined">
-        <CardContent>
-          <Stack spacing={2}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+      <Card variant="outlined" sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
               <FormControl size="small" sx={{ minWidth: 200 }}>
                 <InputLabel id="persona-label">Persona</InputLabel>
                 <Select labelId="persona-label" label="Persona" value={personaId} onChange={e => setPersonaId(e.target.value)}>
@@ -184,9 +227,9 @@ export default function ChatPage() {
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 260 }}>
                 <InputLabel id="conversation-label">Conversation</InputLabel>
-                <Select labelId="conversation-label" label="Conversation" value={conversationId || ''} onChange={e => setConversationId(e.target.value)} renderValue={(v) => v ? String(v).slice(0,8)+'…' : ''}>
+                <Select labelId="conversation-label" label="Conversation" value={conversationId || ''} onChange={e => setConversationId(e.target.value)} renderValue={(v) => { const c = conversations.find(x => x.id === v); return c ? (c.title || (c.id.slice(0,8) + "...")) : ""; }}>
                   {conversations.length === 0 && <MenuItem value="" disabled>No saved conversations</MenuItem>}
-                  {conversations.map(id => <MenuItem key={id} value={id}><Stack direction="row" spacing={1} alignItems="center"><Chip size="small" label={id.slice(0,8)} /> <Typography variant="body2" color="text.secondary">{id}</Typography></Stack></MenuItem>)}
+                  {conversations.map(c => <MenuItem key={c.id} value={c.id}><Stack direction="row" spacing={1} alignItems="center"><Chip size="small" label={c.id.slice(0,8)} /> <Typography variant="body2" color="text.secondary">{c.title || c.id}</Typography></Stack></MenuItem>)}
                 </Select>
               </FormControl>
               <Button variant="outlined" onClick={createConversation}>New Conversation</Button>
@@ -232,14 +275,14 @@ export default function ChatPage() {
                 </Tooltip>
               )}
             </Stack>
-            <Box sx={{ minHeight: 240 }}>
+            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}>
               {messages.length === 0 ? (
                 <Typography color="text.secondary">Start the conversation…</Typography>
               ) : (
                 <Stack spacing={1}>
                   {messages.map((m, i) => (
                     <Box key={i} sx={{ p: 1, borderRadius: 1, bgcolor: m.role === 'user' ? 'action.selected' : 'background.paper' }}>
-                      <Typography variant="caption" color="text.secondary">{m.role}</Typography>
+                      <Typography variant="caption" color="text.secondary">{m.fromName || m.role}</Typography>
                       <Typography variant="body1" whiteSpace="pre-wrap">{m.content}</Typography>
                     </Box>
                   ))}
@@ -251,9 +294,9 @@ export default function ChatPage() {
               <TextField fullWidth size="small" placeholder="Type a message…" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
               <Button variant="contained" disabled={!canSend} onClick={send}>Send</Button>
             </Stack>
-          </Stack>
-        </CardContent>
-      </Card>
-    </Stack>
-  )
-}
+            
+            </CardContent>
+          </Card>
+        </Stack>
+      )
+    }

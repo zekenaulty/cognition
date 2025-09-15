@@ -20,6 +20,22 @@ public class ConversationsController : ControllerBase
 
     public record CreateConversationRequest(string? Title, Guid[] ParticipantIds);
     public record AddMessageRequest(Guid FromPersonaId, Guid? ToPersonaId, ChatRole Role, string Content);
+    public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc);
+
+    [HttpGet]
+    public async Task<IActionResult> List([FromQuery] Guid? participantId)
+    {
+        var q = _db.Conversations.AsNoTracking().AsQueryable();
+        if (participantId.HasValue)
+        {
+            q = q.Where(c => _db.ConversationParticipants.Any(p => p.ConversationId == c.Id && p.PersonaId == participantId.Value));
+        }
+        var items = await q
+            .OrderByDescending(c => c.CreatedAtUtc)
+            .Select(c => new ConversationListItem(c.Id, c.Title, c.CreatedAtUtc))
+            .ToListAsync();
+        return Ok(items);
+    }
 
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateConversationRequest req)

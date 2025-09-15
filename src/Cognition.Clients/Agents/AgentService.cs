@@ -202,6 +202,34 @@ public class AgentService : IAgentService
         _db.ConversationMessages.Add(assistantMsg);
         await _db.SaveChangesAsync(ct);
 
+        // If conversation has no title yet, ask the LLM to propose a concise title and save it
+        try
+        {
+            var convo = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, ct);
+            if (convo != null && string.IsNullOrWhiteSpace(convo.Title))
+            {
+                var recent = window.TakeLast(8).Select(m => $"{m.Role}: {m.Content}");
+                var titlePrompt = new List<ChatMessage>
+                {
+                    new ChatMessage("system", "You generate concise, descriptive conversation titles (3–6 words). No quotes, no punctuation at the end."),
+                    new ChatMessage("user", string.Join("\n", recent))
+                };
+                var title = await client.ChatAsync(titlePrompt);
+                title = (title ?? string.Empty).Trim();
+                if (!string.IsNullOrEmpty(title))
+                {
+                    // Truncate overly long titles
+                    if (title.Length > 80) title = title.Substring(0, 80);
+                    convo.Title = title;
+                    await _db.SaveChangesAsync(ct);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to auto-title conversation {ConversationId}", conversationId);
+        }
+
         // Optional summarization trigger when window is dense
         try
         {

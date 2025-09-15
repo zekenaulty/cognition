@@ -68,6 +68,26 @@ builder.Services.AddSwaggerGen(c =>
     c.OperationFilter<AllowAnonymousOperationFilter>();
 });
 
+// Bridge configuration secrets into environment variables for libraries that read from Environment
+void SetEnvFromConfig(string envName, params string[] configKeys)
+{
+    foreach (var key in configKeys)
+    {
+        var val = builder.Configuration[key];
+        if (!string.IsNullOrWhiteSpace(val))
+        {
+            Environment.SetEnvironmentVariable(envName, val);
+            break;
+        }
+    }
+}
+SetEnvFromConfig("OPENAI_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY");
+SetEnvFromConfig("OPENAI_BASE_URL", "OPENAI_BASE_URL");
+SetEnvFromConfig("GOOGLE_API_KEY", "GOOGLE_API_KEY");
+SetEnvFromConfig("GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY");
+SetEnvFromConfig("OLLAMA_BASE_URL", "OLLAMA_BASE_URL");
+SetEnvFromConfig("GITHUB_TOKEN", "GITHUB_TOKEN");
+
 // CORS for Vite dev server
 builder.Services.AddCors(options =>
 {
@@ -137,6 +157,22 @@ if (app.Environment.IsDevelopment())
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "Cognition API v1");
         c.RoutePrefix = "swagger";
     });
+}
+
+// Log env status (masked) for quick verification in logs
+{
+    string Mask(string? s) => string.IsNullOrEmpty(s) ? "" : new string('*', Math.Max(0, s.Length - Math.Min(4, s.Length))) + (s.Length >= 4 ? s[^4..] : s);
+    var log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("EnvStatus");
+    var openaiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? Environment.GetEnvironmentVariable("OPENAI_KEY");
+    var openaiBase = Environment.GetEnvironmentVariable("OPENAI_BASE_URL");
+    var geminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? Environment.GetEnvironmentVariable("GOOGLE_API_KEY");
+    var geminiBase = Environment.GetEnvironmentVariable("GEMINI_BASE_URL");
+    var ollamaBase = Environment.GetEnvironmentVariable("OLLAMA_BASE_URL");
+    var githubToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+    log.LogInformation("Env: OpenAI hasKey={Has} base={Base}", !string.IsNullOrWhiteSpace(openaiKey), openaiBase ?? "(default)");
+    log.LogInformation("Env: Gemini hasKey={Has} base={Base}", !string.IsNullOrWhiteSpace(geminiKey), geminiBase ?? "(default)");
+    log.LogInformation("Env: Ollama base={Base}", ollamaBase ?? "(unset)");
+    log.LogInformation("Env: GitHub hasToken={Has}", !string.IsNullOrWhiteSpace(githubToken));
 }
 
 // Only redirect to HTTPS if an HTTPS endpoint is configured
