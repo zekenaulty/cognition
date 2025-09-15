@@ -10,6 +10,7 @@ using Hangfire.PostgreSql;
 using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Cognition.Api.Infrastructure.Swagger;
+using Cognition.Api.Infrastructure.Hangfire;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -108,6 +109,8 @@ builder.Services.AddHangfire(config =>
           .UseRecommendedSerializerSettings()
           .UsePostgreSqlStorage(hfConn);
 });
+builder.Services.AddSingleton<JobStorage>(sp => Hangfire.JobStorage.Current);
+builder.Services.AddSingleton<IHangfireRunner, HangfireRunner>();
 
 // JWT Auth
 var jwtSection = builder.Configuration.GetSection("Jwt");

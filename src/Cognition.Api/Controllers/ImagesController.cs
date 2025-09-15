@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Cognition.Clients.Images;
+using Hangfire;
+using Cognition.Api.Infrastructure.Hangfire;
 using Cognition.Data.Relational;
 
 namespace Cognition.Api.Controllers;
@@ -15,8 +17,10 @@ public class ImagesController : ControllerBase
 {
     private readonly CognitionDbContext _db;
     private readonly IImageService _images;
-    public ImagesController(CognitionDbContext db, IImageService images)
-    { _db = db; _images = images; }
+    private readonly IBackgroundJobClient _jobs;
+    private readonly IHangfireRunner _runner;
+    public ImagesController(CognitionDbContext db, IImageService images, IBackgroundJobClient jobs, IHangfireRunner runner)
+    { _db = db; _images = images; _jobs = jobs; _runner = runner; }
 
     public record GenerateImageRequest(Guid? ConversationId, Guid? PersonaId, string Prompt,
         int Width = 1024, int Height = 1024, string? StyleName = null, Guid? StyleId = null,
@@ -32,8 +36,19 @@ public class ImagesController : ControllerBase
                 ? await _db.ImageStyles.AsNoTracking().FirstOrDefaultAsync(s => s.Name == req.StyleName)
                 : null);
 
-        var p = new ImageParameters(req.Width, req.Height, style?.Name, req.NegativePrompt, req.Steps, req.Guidance, req.Seed, req.Model);
-        var asset = await _images.GenerateAndSaveAsync(req.ConversationId, req.PersonaId, req.Prompt, p, req.Provider, req.Model);
+        var started = DateTime.UtcNow.AddSeconds(-1);
+        // Enqueue job and wait for completion
+        var jobId = _jobs.Enqueue<Cognition.Jobs.ImageJobs>(j => j.Generate(req.ConversationId, req.PersonaId, req.Prompt, req.Width, req.Height, req.StyleId, req.NegativePrompt, req.Provider, req.Model, CancellationToken.None));
+        var ok = await _runner.WaitForCompletionAsync(jobId, TimeSpan.FromSeconds(90), TimeSpan.FromMilliseconds(500));
+        // Fetch the asset created after we started
+        var asset = await _db.ImageAssets.AsNoTracking()
+            .Where(x => x.ConversationId == req.ConversationId && x.CreatedAtUtc >= started)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync();
+        if (asset == null)
+        {
+            return StatusCode(500, ok ? "Image generated but record not found." : "Image generation failed or timed out");
+        }
 
         if (style != null)
         {

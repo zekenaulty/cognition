@@ -1,4 +1,6 @@
 using Cognition.Jobs;
+using Cognition.Data.Relational;
+using Cognition.Clients;
 using Hangfire;
 using Hangfire.PostgreSql;
 
@@ -36,8 +38,34 @@ GlobalJobFilters.Filters.Add(new AutomaticRetryAttribute
     DelaysInSeconds = new[] { 5, 15, 60 }
 });
 
-// Register example job and recurring registration
+// Bridge config settings into environment variables for clients that read from Environment
+void SetEnvFromConfig(string envName, params string[] configKeys)
+{
+    foreach (var key in configKeys)
+    {
+        var val = builder.Configuration[key];
+        if (!string.IsNullOrWhiteSpace(val))
+        {
+            Environment.SetEnvironmentVariable(envName, val);
+            break;
+        }
+    }
+}
+SetEnvFromConfig("OPENAI_API_KEY", "OPENAI_API_KEY", "OPENAI_KEY");
+SetEnvFromConfig("OPENAI_BASE_URL", "OPENAI_BASE_URL");
+SetEnvFromConfig("GOOGLE_API_KEY", "GOOGLE_API_KEY");
+SetEnvFromConfig("GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY");
+SetEnvFromConfig("OLLAMA_BASE_URL", "OLLAMA_BASE_URL");
+SetEnvFromConfig("GITHUB_TOKEN", "GITHUB_TOKEN");
+
+// Register Db + clients so jobs can use the same services as API
+builder.Services.AddCognitionDb(builder.Configuration);
+builder.Services.AddCognitionClients();
+
+// Register example + concrete jobs and recurring registration
 builder.Services.AddTransient<ExampleJob>();
+builder.Services.AddTransient<TextJobs>();
+builder.Services.AddTransient<ImageJobs>();
 builder.Services.AddHostedService<RecurringJobsRegistrar>();
 
 var host = builder.Build();

@@ -13,4 +13,9 @@
     <PackageReference Include="Hangfire.PostgreSql" Version="1.19.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.8" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cognition.Data.Relational\Cognition.Data.Relational.csproj" />
+    <ProjectReference Include="..\Cognition.Clients\Cognition.Clients.csproj" />
+  </ItemGroup>
 </Project>

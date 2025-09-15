@@ -27,11 +27,22 @@ export default function ChatPage() {
 
   const [providers, setProviders] = useState<Provider[]>([])
   const [models, setModels] = useState<Model[]>([])
-  const [providerId, setProviderId] = useState<string>('')
-  const [modelId, setModelId] = useState<string>('')
+  const LS = {
+    persona: 'cognition.chat.personaId',
+    conversation: 'cognition.chat.conversationId',
+    provider: 'cognition.chat.providerId',
+    model: 'cognition.chat.modelId'
+  } as const
+  const getLS = (k: string) => {
+    try { return localStorage.getItem(k) || '' } catch { return '' }
+  }
+  const setLS = (k: string, v: string | null) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k) } catch {} }
+
+  const [providerId, setProviderId] = useState<string>(getLS(LS.provider))
+  const [modelId, setModelId] = useState<string>(getLS(LS.model))
 
   const [personas, setPersonas] = useState<Persona[]>([])
-  const [personaId, setPersonaId] = useState<string>('')
+  const [personaId, setPersonaId] = useState<string>(getLS(LS.persona))
 
   type Conv = { id: string; title?: string | null }
   const [conversations, setConversations] = useState<Conv[]>([])
@@ -60,7 +71,11 @@ export default function ChatPage() {
     const list = await res.json()
     const items: Conv[] = (list as any[]).map((c: any) => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }))
     setConversations(items)
-    if (autoSelectFirst) setConversationId(items.length > 0 ? items[0].id : null)
+    if (autoSelectFirst) {
+      const saved = getLS(LS.conversation)
+      const pick = (saved && items.find(x => x.id === saved)) ? saved : (items[0]?.id || null)
+      setConversationId(pick)
+    }
     return items
   }
 
@@ -82,8 +97,9 @@ export default function ChatPage() {
           const items: Persona[] = assistants.map((p: any) => ({ id: p.id ?? p.Id, name: p.name ?? p.Name }))
           setPersonas(items)
           if (!personaId) {
-            if (items.length > 0) setPersonaId(items[0].id)
-            else if (auth?.primaryPersonaId) setPersonaId(auth.primaryPersonaId)
+            const saved = getLS(LS.persona)
+            const pick = (saved && items.find(x => x.id === saved)) ? saved : (items[0]?.id || auth?.primaryPersonaId || '')
+            if (pick) setPersonaId(pick)
           }
           if (items.length > 0) return
         }
@@ -101,7 +117,11 @@ export default function ChatPage() {
           })
           const items: Persona[] = assistants.map((p: any) => ({ id: p.id ?? p.Id, name: p.name ?? p.Name }))
           setPersonas(items)
-          if (!personaId && items.length > 0) setPersonaId(items[0].id)
+          if (!personaId && items.length > 0) {
+            const saved = getLS(LS.persona)
+            const pick = (saved && items.find(x => x.id === saved)) ? saved : items[0].id
+            setPersonaId(pick)
+          }
         }
       } catch {}
     }
@@ -118,7 +138,7 @@ export default function ChatPage() {
       const pList = await pRes.json()
       const normProviders: Provider[] = (pList as any[]).map((p: any) => ({ id: p.id ?? p.Id, name: p.name ?? p.Name, displayName: p.displayName ?? p.DisplayName }))
       setProviders(normProviders)
-      let chosenProviderId = providerId
+      let chosenProviderId = providerId || getLS(LS.provider)
       if (!chosenProviderId && normProviders.length > 0) {
         const openai = normProviders.find(p => (p.name || '').toLowerCase() === 'openai')
         chosenProviderId = (openai ?? normProviders[0]).id
@@ -130,7 +150,11 @@ export default function ChatPage() {
       const mList = await mRes.json()
       const normModels: Model[] = (mList as any[]).map((m: any) => ({ id: m.id ?? m.Id, name: m.name ?? m.Name, displayName: m.displayName ?? m.DisplayName }))
       setModels(normModels)
-      if (!modelId && normModels.length > 0) setModelId(normModels[0].id)
+      if (!modelId && normModels.length > 0) {
+        const savedModel = getLS(LS.model)
+        const pick = (savedModel && normModels.find(x => x.id === savedModel || x.name === savedModel)) ? savedModel : normModels[0].id
+        setModelId(pick)
+      }
     }
     load()
   }, [accessToken, providerId])
@@ -143,6 +167,12 @@ export default function ChatPage() {
     if (!personaId) return
     loadConversations(personaId, true)
   }, [accessToken, personaId])
+
+  // Persist selections to localStorage on change
+  useEffect(() => { if (personaId) setLS(LS.persona, personaId) }, [personaId])
+  useEffect(() => { setLS(LS.conversation, conversationId || '') }, [conversationId])
+  useEffect(() => { if (providerId) setLS(LS.provider, providerId) }, [providerId])
+  useEffect(() => { if (modelId) setLS(LS.model, modelId) }, [modelId])
 
   // Image styles
   useEffect(() => {
@@ -562,8 +592,21 @@ Rules:
               }}
               onCloseFocus={() => { try { inputRef.current?.focus() } catch {} }}
             />
-            <Button variant="contained" disabled={!canSend} onClick={send}>Send</Button>
+            <Tooltip title={!personaId ? 'Select a persona' : (!providerId ? 'Select a provider' : (input.trim().length === 0 ? 'Type a message' : ''))}>
+              <span>
+                <Button variant="contained" disabled={!canSend} onClick={send}>Send</Button>
+              </span>
+            </Tooltip>
           </Stack>
+          {!personaId || !providerId ? (
+            <Typography variant="caption" color="text.secondary">
+              {!personaId ? 'Choose a persona to chat as. ' : ''}{!providerId ? 'Choose a provider and model.' : ''}
+            </Typography>
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              {`Chatting as ${personas.find(p => p.id === personaId)?.name || 'Assistant'} via ${providers.find(p => p.id === providerId)?.displayName || providers.find(p => p.id === providerId)?.name}${modelId ? ` · ${models.find(m => m.id === modelId)?.displayName || models.find(m => m.id === modelId)?.name}` : ''}${conversationId ? '' : ' · New conversation on first send'}`}
+            </Typography>
+          )}
         </CardContent>
       </Card>
       <ImageViewer open={viewer.open} onClose={() => setViewer({ open: false })} imageId={viewer.id} title={viewer.title} />
