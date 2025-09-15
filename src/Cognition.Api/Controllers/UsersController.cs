@@ -215,6 +215,10 @@ public class UsersController : ControllerBase
     [HttpPost("{id:guid}/personas")]
     public async Task<IActionResult> LinkPersona(Guid id, [FromBody] LinkPersonaRequest req)
     {
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
+            return Forbid();
         if (!await _db.Users.AnyAsync(u => u.Id == id)) return NotFound("User not found");
         if (!await _db.Personas.AnyAsync(p => p.Id == req.PersonaId)) return NotFound("Persona not found");
         var link = await _db.UserPersonas.FirstOrDefaultAsync(up => up.UserId == id && up.PersonaId == req.PersonaId);
@@ -236,6 +240,10 @@ public class UsersController : ControllerBase
     [HttpDelete("{id:guid}/personas/{personaId:guid}")]
     public async Task<IActionResult> UnlinkPersona(Guid id, Guid personaId)
     {
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
+            return Forbid();
         var link = await _db.UserPersonas.FirstOrDefaultAsync(up => up.UserId == id && up.PersonaId == personaId);
         if (link == null) return NotFound();
         _db.UserPersonas.Remove(link);

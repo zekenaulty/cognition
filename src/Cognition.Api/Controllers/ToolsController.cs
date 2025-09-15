@@ -15,7 +15,8 @@ namespace Cognition.Api.Controllers;
 public class ToolsController : ControllerBase
 {
     private readonly CognitionDbContext _db;
-    public ToolsController(CognitionDbContext db) => _db = db;
+    private readonly IToolRegistry _registry;
+    public ToolsController(CognitionDbContext db, IToolRegistry registry) { _db = db; _registry = registry; }
 
     public record CreateToolRequest(string Name, string ClassPath, string? Description, string[]? Tags, object? Metadata, string? Example, bool IsActive = true);
     public record PatchToolRequest(string? Name, string? ClassPath, string? Description, string[]? Tags, object? Metadata, string? Example, bool? IsActive);
@@ -60,13 +61,12 @@ public class ToolsController : ControllerBase
         return NoContent();
     }
 
-    private static bool IsValidToolClassPath(string classPath, out string? error)
+    private bool IsValidToolClassPath(string classPath, out string? error)
     {
         error = null;
-        var type = Type.GetType(classPath, throwOnError: false);
-        if (type is null)
+        if (!_registry.TryResolveByClassPath(classPath, out var type))
         {
-            error = "ClassPath must be an assembly-qualified type name (e.g., Namespace.Type, Assembly).";
+            error = "ClassPath must reference a known ITool implementation (Namespace.Type or Namespace.Type, Assembly).";
             return false;
         }
         if (!typeof(ITool).IsAssignableFrom(type))

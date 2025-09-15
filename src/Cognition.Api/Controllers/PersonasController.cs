@@ -57,6 +57,11 @@ public class PersonasController : ControllerBase
     {
         var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id);
         if (p == null) return NotFound();
+        // Only owner or admin may edit
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller) || (p.OwnerUserId != caller && role != nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)))
+            return Forbid();
         if (req.Name != null) p.Name = req.Name;
         if (req.Nickname != null) p.Nickname = req.Nickname;
         if (req.Role != null) p.Role = req.Role;
@@ -115,6 +120,13 @@ public class PersonasController : ControllerBase
             IsPublic = req.IsPublic ?? false,
             Type = PersonaType.Assistant
         };
+        // Set owner to caller if not admin
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (Guid.TryParse(sub, out var caller) && role != nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator))
+        {
+            p.OwnerUserId = caller;
+        }
         _db.Personas.Add(p);
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(Get), new { id = p.Id }, new { p.Id });
@@ -125,6 +137,10 @@ public class PersonasController : ControllerBase
     {
         var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id);
         if (p == null) return NotFound();
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller) || (p.OwnerUserId != caller && role != nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)))
+            return Forbid();
         p.IsPublic = req.IsPublic;
         p.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
@@ -136,6 +152,11 @@ public class PersonasController : ControllerBase
     {
         if (!await _db.Personas.AnyAsync(p => p.Id == id)) return NotFound("Persona not found");
         if (!await _db.Users.AnyAsync(u => u.Id == req.UserId)) return NotFound("User not found");
+        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id);
+        var sub2 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role2 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub2, out var caller2) || (persona.OwnerUserId != caller2 && role2 != nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)))
+            return Forbid();
 
         var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == req.UserId && x.PersonaId == id);
         if (link == null)
@@ -158,6 +179,11 @@ public class PersonasController : ControllerBase
     {
         var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == userId && x.PersonaId == id);
         if (link == null) return NotFound();
+        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id);
+        var sub3 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role3 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub3, out var caller3) || (persona.OwnerUserId != caller3 && role3 != nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)))
+            return Forbid();
         _db.UserPersonas.Remove(link);
         await _db.SaveChangesAsync();
         return NoContent();

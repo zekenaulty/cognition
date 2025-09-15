@@ -9,10 +9,11 @@ public class ToolDispatcher : IToolDispatcher
 {
     private readonly CognitionDbContext _db;
     private readonly IServiceProvider _sp;
+    private readonly IToolRegistry _registry;
 
-    public ToolDispatcher(CognitionDbContext db, IServiceProvider sp)
+    public ToolDispatcher(CognitionDbContext db, IServiceProvider sp, IToolRegistry registry)
     {
-        _db = db; _sp = sp;
+        _db = db; _sp = sp; _registry = registry;
     }
 
     public async Task<(bool ok, object? result, string? error)> ExecuteAsync(
@@ -24,8 +25,9 @@ public class ToolDispatcher : IToolDispatcher
 
         try
         {
-            // Resolve implementation by ClassPath from DI
-            var implType = Type.GetType(tool.ClassPath, throwOnError: true)!;
+            // Resolve implementation by ClassPath through the safe registry
+            if (!_registry.TryResolveByClassPath(tool.ClassPath, out var implType))
+                throw new InvalidOperationException($"Tool impl not registered/known: {tool.ClassPath}");
             var impl = (ITool?)_sp.GetService(implType);
             if (impl is null)
                 throw new InvalidOperationException($"Tool impl not registered in DI: {tool.ClassPath}");

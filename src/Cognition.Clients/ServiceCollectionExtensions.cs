@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddCognitionTools(this IServiceCollection services)
     {
+        services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddScoped<IToolDispatcher, ToolDispatcher>();
 
         // Auto-register all ITool implementations in this assembly so

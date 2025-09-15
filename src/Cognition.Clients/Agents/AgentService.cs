@@ -56,7 +56,11 @@ public class AgentService : IAgentService
         // Try to parse a tool plan (by id or name)
         try
         {
-            using var doc = JsonDocument.Parse(draft);
+            if (!TryGetJsonObjectText(draft, out var jsonText))
+            {
+                return draft; // not JSON -> direct answer
+            }
+            using var doc = JsonDocument.Parse(jsonText);
             var root = doc.RootElement;
             Guid? toolId = null;
             if (root.TryGetProperty("toolId", out var t))
@@ -89,6 +93,43 @@ public class AgentService : IAgentService
         }
 
         return draft;
+    }
+
+    private static bool TryGetJsonObjectText(string text, out string? json)
+    {
+        json = null;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var trimmed = text.Trim();
+        if (trimmed.StartsWith("{") && trimmed.EndsWith("}")) { json = trimmed; return true; }
+
+        int start = text.IndexOf('{');
+        while (start >= 0 && start < text.Length)
+        {
+            int depth = 0;
+            bool inString = false;
+            for (int i = start; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c == '"')
+                {
+                    bool escaped = i > 0 && text[i - 1] == '\\';
+                    if (!escaped) inString = !inString;
+                }
+                if (inString) continue;
+                if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        json = text.Substring(start, i - start + 1);
+                        return true;
+                    }
+                }
+            }
+            start = text.IndexOf('{', start + 1);
+        }
+        return false;
     }
 
     // Non-interface helper: include a Tool Index in the system message
