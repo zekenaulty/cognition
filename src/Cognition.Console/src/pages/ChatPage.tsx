@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Button, Card, CardContent, Divider, Stack, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Tooltip, IconButton, Chip } from '@mui/material'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
+import MicIcon from '@mui/icons-material/Mic'
 import { alpha } from '@mui/material/styles'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useAuth } from '../auth/AuthContext'
@@ -10,10 +12,68 @@ import ImageViewer from '../components/ImageViewer'
 type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string; imgPrompt?: string; imgStyleName?: string }
 type Provider = { id: string; name: string; displayName?: string }
 type Model = { id: string; name: string; displayName?: string }
-type Persona = { id: string; name: string }
+type Persona = { id: string; name: string; gender?: string }
 type ImageStyle = { id: string; name: string; description?: string; promptPrefix?: string; negativePrompt?: string }
 
 export default function ChatPage() {
+  // TTS: Speak text aloud
+  function speakText(text: string, gender: 'male' | 'female' = 'female') {
+    if ('speechSynthesis' in window) {
+      const synth = window.speechSynthesis
+      const voices = synth.getVoices()
+      let selectedVoice: SpeechSynthesisVoice | undefined
+      // Prefer Google UK English Female/Male for en-GB
+      if (gender === 'female') {
+        selectedVoice = voices.find(v => v.name === 'Google UK English Female' && v.lang === 'en-GB')
+      } else {
+        selectedVoice = voices.find(v => v.name === 'Google UK English Male' && v.lang === 'en-GB')
+      }
+      // Fallback to gender-based name/voiceURI matching
+      if (!selectedVoice) {
+        selectedVoice = voices.find(v => gender === 'female' ? /female|woman|girl/i.test(v.name + v.voiceURI) : /male|man|boy/i.test(v.name + v.voiceURI))
+      }
+      // Fuzzy fallback for 'Zira' (female) and 'Mark' (male)
+      if (!selectedVoice) {
+        if (gender === 'female') {
+          selectedVoice = voices.find(v => /zira/i.test(v.name))
+        } else {
+          selectedVoice = voices.find(v => /mark/i.test(v.name))
+        }
+      }
+      // Fallback to first available
+      if (!selectedVoice) selectedVoice = voices[0]
+      const utter = new window.SpeechSynthesisUtterance(text)
+      if (selectedVoice) utter.voice = selectedVoice
+      synth.speak(utter)
+    }
+  }
+
+  // STT: Speech to text for input
+  const recognitionRef = useRef<any>(null)
+  function startRecognition() {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert('Speech recognition not supported in this browser.')
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'en-US'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript
+      setInput(prev => prev + (prev ? ' ' : '') + transcript)
+    }
+    recognition.onerror = () => {}
+    recognitionRef.current = recognition
+    recognition.start()
+  }
+  function stopRecognition() {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+    }
+  }
   const { auth } = useAuth()
   const accessToken = auth?.accessToken
   const userId = auth?.userId
@@ -562,8 +622,29 @@ Rules:
                           <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
                         </Typography>
                       ) : (
-                        <Box sx={{ textAlign: isUser ? 'right' : 'left' }}>
+                        <Box sx={{ textAlign: isUser ? 'right' : 'left', display: 'flex', alignItems: 'center' }}>
                           <MarkdownView content={m.content} />
+                          {/* TTS button for assistant messages */}
+                          {m.role === 'assistant' && m.content && (
+                            <IconButton
+                              aria-label="Read aloud"
+                              size="small"
+                              sx={{ ml: 1 }}
+                              onClick={() => {
+                                // Find persona gender, default to female
+                                let gender: 'male' | 'female' = 'female'
+                                const persona = personas.find(p => p.id === personaId)
+                                if (persona && persona.gender) {
+                                  const g = String(persona.gender).toLowerCase()
+                                  if (g === 'male' || g === 'm') gender = 'male'
+                                  if (g === 'female' || g === 'f') gender = 'female'
+                                }
+                                speakText(m.content, gender)
+                              }}
+                            >
+                              <VolumeUpIcon fontSize="small" />
+                            </IconButton>
+                          )}
                         </Box>
                       )}
                     </Box>
@@ -577,6 +658,22 @@ Rules:
           <Divider />
           <Stack direction="row" spacing={1} alignItems="center">
             <TextField inputRef={inputRef} fullWidth size="small" placeholder="Type a message." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
+            {/* STT record button */}
+            <Tooltip title="Hold to record">
+              <span>
+                <IconButton
+                  aria-label="Record"
+                  size="medium"
+                  sx={{ mr: 1 }}
+                  onMouseDown={startRecognition}
+                  onMouseUp={stopRecognition}
+                  onTouchStart={startRecognition}
+                  onTouchEnd={stopRecognition}
+                >
+                  <MicIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
             <EmojiButton
               onInsert={(text) => {
                 const el = inputRef.current
