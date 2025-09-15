@@ -39,7 +39,7 @@ public class ImagesController : ControllerBase
         var started = DateTime.UtcNow.AddSeconds(-1);
         // Enqueue job and wait for completion
         var jobId = _jobs.Enqueue<Cognition.Jobs.ImageJobs>(j => j.Generate(req.ConversationId, req.PersonaId, req.Prompt, req.Width, req.Height, req.StyleId, req.NegativePrompt, req.Provider, req.Model, CancellationToken.None));
-        var ok = await _runner.WaitForCompletionAsync(jobId, TimeSpan.FromSeconds(90), TimeSpan.FromMilliseconds(500));
+        var ok = await _runner.WaitForCompletionAsync(jobId, TimeSpan.FromSeconds(90*10), TimeSpan.FromMilliseconds(25));
         // Fetch the asset created after we started
         var asset = await _db.ImageAssets.AsNoTracking()
             .Where(x => x.ConversationId == req.ConversationId && x.CreatedAtUtc >= started)

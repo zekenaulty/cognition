@@ -35,7 +35,7 @@ public class ChatController : ControllerBase
         {
             var started = DateTime.UtcNow.AddSeconds(-1);
             var jobId = _jobs.Enqueue<Cognition.Jobs.TextJobs>(j => j.ChatOnce(Guid.Empty, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, CancellationToken.None));
-            var ok = await _runner.WaitForCompletionAsync(jobId, TimeSpan.FromSeconds(30), TimeSpan.FromMilliseconds(250), HttpContext.RequestAborted);
+            var ok = await _runner.WaitForCompletionAsync(jobId, TimeSpan.FromSeconds(30*5), TimeSpan.FromMilliseconds(50), HttpContext.RequestAborted);
             // We used conversationId=Guid.Empty (single-shot AskAsync equivalent). Directly invoke fallback if not using conversation.
             if (!ok)
             {
@@ -83,7 +83,7 @@ public class ChatController : ControllerBase
             var started = DateTime.UtcNow.AddSeconds(-1);
             // Enqueue Chat job and wait
             var jobId = _jobs.Enqueue<Cognition.Jobs.TextJobs>(j => j.ChatOnce(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, CancellationToken.None));
-            var ok = await _runner.WaitForCompletionAsync(jobId, TimeSpan.FromSeconds(45), TimeSpan.FromMilliseconds(300), HttpContext.RequestAborted);
+            var ok = await _runner.WaitForCompletionAsync(jobId, TimeSpan.FromSeconds(60*5), TimeSpan.FromMilliseconds(50), HttpContext.RequestAborted);
             // After success (or even if timed out), fetch the latest assistant message persisted after we started
             var msg = await _db.ConversationMessages.AsNoTracking()
                 .Where(m => m.ConversationId == req.ConversationId

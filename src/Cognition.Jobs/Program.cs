@@ -18,8 +18,8 @@ builder.Services.AddHangfire(config =>
           .UsePostgreSqlStorage(connectionString, new PostgreSqlStorageOptions
           {
               SchemaName = "hangfire",
-              InvisibilityTimeout = TimeSpan.FromMinutes(5),
-              QueuePollInterval = TimeSpan.FromSeconds(5),
+              InvisibilityTimeout = TimeSpan.FromMinutes(30),
+              QueuePollInterval = TimeSpan.FromSeconds(0.25),
               PrepareSchemaIfNecessary = true
           });
 });
@@ -29,6 +29,9 @@ builder.Services.AddHangfireServer(options =>
 {
     options.Queues = new[] { "default" };
     options.WorkerCount = Math.Max(Environment.ProcessorCount, 2);
+    options.HeartbeatInterval        = TimeSpan.FromSeconds(1);
+    options.ServerCheckInterval      = TimeSpan.FromSeconds(1);
+    options.SchedulePollingInterval  = TimeSpan.FromSeconds(1);
 });
 
 // Configure global retry policy
