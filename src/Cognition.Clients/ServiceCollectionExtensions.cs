@@ -2,6 +2,7 @@ using Cognition.Clients.Images;
 using Cognition.Clients.LLM;
 using Cognition.Clients.Tools;
 using Microsoft.Extensions.DependencyInjection;
+using Cognition.Clients.Agents;
 
 namespace Cognition.Clients;
 
@@ -12,6 +13,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient();
         services.AddScoped<ILLMClientFactory, LLMClientFactory>();
         services.AddScoped<IImageClient, OpenAIImageClient>();
+        services.AddScoped<IAgentService, AgentService>();
         return services;
     }
 

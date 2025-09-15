@@ -11,10 +11,8 @@ namespace Cognition.Api.Controllers;
 public class ChatController : ControllerBase
 {
     private readonly IAgentService _agents;
-    private readonly IToolDispatcher _tools;
-    private readonly IServiceProvider _sp;
-    public ChatController(IAgentService agents, IToolDispatcher tools, IServiceProvider sp)
-    { _agents = agents; _tools = tools; _sp = sp; }
+    public ChatController(IAgentService agents)
+    { _agents = agents; }
 
     public record AskRequest(
         Guid PersonaId,
@@ -33,9 +31,7 @@ public class ChatController : ControllerBase
     [HttpPost("ask-with-tools")]
     public async Task<IActionResult> AskWithTools([FromBody] AskRequest req)
     {
-        if (_agents is not AgentService impl)
-            return BadRequest("AgentService implementation not available.");
-        var reply = await impl.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, _tools, _sp, req.RolePlay);
+        var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay);
         return Ok(new { reply });
     }
 }

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Cognition.Clients.LLM;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
@@ -10,17 +11,22 @@ namespace Cognition.Clients.Agents;
 public interface IAgentService
 {
     Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
+    Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false);
 }
 
 public class AgentService : IAgentService
 {
     private readonly CognitionDbContext _db;
     private readonly ILLMClientFactory _factory;
+    private readonly Cognition.Clients.Tools.IToolDispatcher _dispatcher;
+    private readonly IServiceProvider _sp;
 
-    public AgentService(CognitionDbContext db, ILLMClientFactory factory)
+    public AgentService(CognitionDbContext db, ILLMClientFactory factory, Cognition.Clients.Tools.IToolDispatcher dispatcher, IServiceProvider sp)
     {
         _db = db;
         _factory = factory;
+        _dispatcher = dispatcher;
+        _sp = sp;
     }
 
     public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false)
@@ -30,6 +36,59 @@ public class AgentService : IAgentService
         var client = await _factory.CreateAsync(providerId, modelId);
         var prompt = string.IsNullOrWhiteSpace(sys) ? input : $"{sys}\n\nUser: {input}";
         return await client.GenerateAsync(prompt, track: false);
+    }
+
+    public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false)
+    {
+        // Discover available tools for this provider/model and expose a compact schema
+        var tools = await _db.Tools
+            .Include(t => t.Parameters)
+            .Where(t => t.IsActive)
+            .Where(t => _db.ToolProviderSupports.Any(s => s.ToolId == t.Id
+                                                        && s.ProviderId == providerId
+                                                        && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
+                                                        && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
+            .AsNoTracking()
+            .ToListAsync();
+
+        var draft = await AskWithToolIndexAsync(personaId, providerId, modelId, input, tools, rolePlay);
+
+        // Try to parse a tool plan (by id or name)
+        try
+        {
+            using var doc = JsonDocument.Parse(draft);
+            var root = doc.RootElement;
+            Guid? toolId = null;
+            if (root.TryGetProperty("toolId", out var t))
+            {
+                var ts = t.GetString();
+                if (Guid.TryParse(ts, out var tmp)) toolId = tmp;
+            }
+            else if (root.TryGetProperty("toolName", out var tn))
+            {
+                var name = tn.GetString();
+                var match = tools.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (match != null) toolId = match.Id;
+            }
+
+            if (toolId.HasValue)
+            {
+                var args = root.TryGetProperty("args", out var a)
+                    ? JsonSerializer.Deserialize<Dictionary<string, object?>>(a.GetRawText()) ?? new()
+                    : new Dictionary<string, object?>();
+
+                var ctx = new Cognition.Clients.Tools.ToolContext(null, null, personaId, _sp, CancellationToken.None);
+                var exec = await _dispatcher.ExecuteAsync(toolId.Value, ctx, args, log: true);
+                if (!exec.ok) return $"Tool error: {exec.error}";
+                return exec.result is string s ? s : JsonSerializer.Serialize(exec.result);
+            }
+        }
+        catch
+        {
+            // not JSON => direct answer
+        }
+
+        return draft;
     }
 
     // Non-interface helper: include a Tool Index in the system message

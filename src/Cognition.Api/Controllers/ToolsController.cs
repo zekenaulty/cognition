@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Tools;
+using Cognition.Clients.Tools;
+using System.Text.Json;
 
 namespace Cognition.Api.Controllers;
 
@@ -28,6 +30,9 @@ public class ToolsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateTool([FromBody] CreateToolRequest req)
     {
+        // Validate ClassPath is a resolvable ITool type
+        if (!IsValidToolClassPath(req.ClassPath, out var validationError))
+            return BadRequest(validationError);
         var t = new Tool { Name = req.Name, ClassPath = req.ClassPath, Description = req.Description, Tags = req.Tags, Metadata = req.Metadata as System.Collections.Generic.Dictionary<string, object?>, Example = req.Example, IsActive = req.IsActive };
         _db.Tools.Add(t);
         await _db.SaveChangesAsync();
@@ -40,7 +45,12 @@ public class ToolsController : ControllerBase
         var t = await _db.Tools.FirstOrDefaultAsync(x => x.Id == id);
         if (t == null) return NotFound();
         t.Name = req.Name ?? t.Name;
-        t.ClassPath = req.ClassPath ?? t.ClassPath;
+        if (!string.IsNullOrWhiteSpace(req.ClassPath))
+        {
+            if (!IsValidToolClassPath(req.ClassPath!, out var validationError))
+                return BadRequest(validationError);
+            t.ClassPath = req.ClassPath!;
+        }
         t.Description = req.Description ?? t.Description;
         t.Tags = req.Tags ?? t.Tags;
         if (req.Metadata != null) t.Metadata = req.Metadata as System.Collections.Generic.Dictionary<string, object?>;
@@ -48,6 +58,23 @@ public class ToolsController : ControllerBase
         if (req.IsActive.HasValue) t.IsActive = req.IsActive.Value;
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    private static bool IsValidToolClassPath(string classPath, out string? error)
+    {
+        error = null;
+        var type = Type.GetType(classPath, throwOnError: false);
+        if (type is null)
+        {
+            error = "ClassPath must be an assembly-qualified type name (e.g., Namespace.Type, Assembly).";
+            return false;
+        }
+        if (!typeof(ITool).IsAssignableFrom(type))
+        {
+            error = "ClassPath type must implement ITool.";
+            return false;
+        }
+        return true;
     }
 }
 
@@ -81,13 +108,77 @@ public class ToolParametersController : ControllerBase
             Type = req.Type,
             Direction = dir,
             Required = req.Required,
-            DefaultValue = req.DefaultValue as System.Collections.Generic.Dictionary<string, object?>,
-            Options = req.Options as System.Collections.Generic.Dictionary<string, object?>,
+            DefaultValue = NormalizeToDictionary(req.DefaultValue),
+            Options = NormalizeOptions(req.Options),
             Description = req.Description
         };
         _db.ToolParameters.Add(p);
         await _db.SaveChangesAsync();
         return Ok(new { p.Id });
+    }
+
+    private static System.Collections.Generic.Dictionary<string, object?>? NormalizeToDictionary(object? value)
+    {
+        if (value is null) return null;
+        if (value is System.Collections.Generic.Dictionary<string, object?> dict) return dict;
+        if (value is JsonElement je)
+        {
+            switch (je.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    return JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object?>>(je.GetRawText());
+                case JsonValueKind.Array:
+                case JsonValueKind.String:
+                case JsonValueKind.Number:
+                case JsonValueKind.True:
+                case JsonValueKind.False:
+                case JsonValueKind.Null:
+                    return new System.Collections.Generic.Dictionary<string, object?> { { "value", JsonToDotNet(je) } };
+            }
+        }
+        // Fallback: wrap scalar
+        return new System.Collections.Generic.Dictionary<string, object?> { { "value", value } };
+    }
+
+    private static System.Collections.Generic.Dictionary<string, object?>? NormalizeOptions(object? value)
+    {
+        if (value is null) return null;
+        if (value is System.Collections.Generic.Dictionary<string, object?> dict) return dict;
+        if (value is JsonElement je)
+        {
+            if (je.ValueKind == JsonValueKind.Object)
+                return JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object?>>(je.GetRawText());
+            // Wrap arrays/scalars under a conventional key
+            return new System.Collections.Generic.Dictionary<string, object?> { { "values", JsonToDotNet(je) } };
+        }
+        return new System.Collections.Generic.Dictionary<string, object?> { { "values", value } };
+    }
+
+    private static object? JsonToDotNet(JsonElement je)
+    {
+        switch (je.ValueKind)
+        {
+            case JsonValueKind.String:
+                return je.GetString();
+            case JsonValueKind.Number:
+                if (je.TryGetInt64(out var l)) return l;
+                if (je.TryGetDouble(out var d)) return d;
+                return je.GetRawText();
+            case JsonValueKind.True:
+                return true;
+            case JsonValueKind.False:
+                return false;
+            case JsonValueKind.Null:
+                return null;
+            case JsonValueKind.Array:
+                var list = new System.Collections.Generic.List<object?>();
+                foreach (var el in je.EnumerateArray()) list.Add(JsonToDotNet(el));
+                return list.ToArray();
+            case JsonValueKind.Object:
+                return JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object?>>(je.GetRawText());
+            default:
+                return je.GetRawText();
+        }
     }
 }
 

@@ -19,7 +19,7 @@ public class OpenAITextClient : ILLMClient
             _http.DefaultRequestHeaders.Remove("Authorization");
             _http.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
         }
-        _http.Timeout = TimeSpan.FromSeconds(45);
+        _http.Timeout = TimeSpan.FromSeconds(90);
     }
 
     public async Task<string> GenerateAsync(string prompt, bool track = false)
@@ -56,4 +56,3 @@ public class OpenAITextClient : ILLMClient
         yield return full;
     }
 }
-
