@@ -96,6 +96,7 @@ public class AgentService : IAgentService
                     : new Dictionary<string, object?>();
 
                 var ctx = new Cognition.Clients.Tools.ToolContext(null, null, personaId, _sp, ct);
+                _logger.LogInformation("Agent invoking tool {ToolId} for persona {PersonaId}", toolId, personaId);
                 var exec = await _dispatcher.ExecuteAsync(toolId.Value, ctx, args, log: true);
                 if (!exec.ok) return $"Tool error: {exec.error}";
                 return exec.result is string s ? s : JsonSerializer.Serialize(exec.result);
@@ -177,7 +178,16 @@ public class AgentService : IAgentService
         chat.Add(new ChatMessage("user", input));
 
         var client = await _factory.CreateAsync(providerId, modelId);
-        var reply = await client.ChatAsync(chat);
+        string reply;
+        try
+        {
+            reply = await client.ChatAsync(chat);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "LLM ChatAsync failed for provider {ProviderId} model {ModelId} conversation {ConversationId}", providerId, modelId, conversationId);
+            reply = "Sorry, I couldn’t complete that request.";
+        }
 
         // Persist assistant reply
         var assistantMsg = new ConversationMessage
@@ -191,6 +201,37 @@ public class AgentService : IAgentService
         };
         _db.ConversationMessages.Add(assistantMsg);
         await _db.SaveChangesAsync(ct);
+
+        // Optional summarization trigger when window is dense
+        try
+        {
+            if (window.Count >= maxTurns)
+            {
+                var toSummarize = string.Join("\n", window.Select(m => $"{m.Role}: {m.Content}"));
+                var sumPrompt = new List<ChatMessage>
+                {
+                    new ChatMessage("system", "Summarize the conversation succinctly in 5-7 bullet points, focusing on decisions, facts, and tasks. Be concise."),
+                    new ChatMessage("user", toSummarize)
+                };
+                var summaryText = await client.ChatAsync(sumPrompt, track: false);
+                if (!string.IsNullOrWhiteSpace(summaryText))
+                {
+                    _db.ConversationSummaries.Add(new ConversationSummary
+                    {
+                        ConversationId = conversationId,
+                        ByPersonaId = personaId,
+                        Content = summaryText,
+                        Timestamp = DateTime.UtcNow,
+                        CreatedAtUtc = DateTime.UtcNow
+                    });
+                    await _db.SaveChangesAsync(ct);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Conversation summarization failed for conversation {ConversationId}", conversationId);
+        }
 
         return reply;
     }
@@ -308,7 +349,15 @@ public class AgentService : IAgentService
         var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
         var client = await _factory.CreateAsync(providerId, modelId);
         var prompt = string.IsNullOrWhiteSpace(fullSys) ? input : $"{fullSys}\n\nUser: {input}";
-        return await client.GenerateAsync(prompt, track: false);
+        try
+        {
+            return await client.GenerateAsync(prompt, track: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "LLM GenerateAsync (ToolIndex) failed for provider {ProviderId} model {ModelId}", providerId, modelId);
+            return "Sorry, I couldn’t complete that request.";
+        }
     }
 
     private static string BuildSystemMessage(Persona p, bool rolePlay)

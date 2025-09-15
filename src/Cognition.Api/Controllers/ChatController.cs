@@ -24,15 +24,29 @@ public class ChatController : ControllerBase
     [HttpPost("ask")]
     public async Task<IActionResult> Ask([FromBody] AskRequest req)
     {
-        var reply = await _agents.AskAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
-        return Ok(new { reply });
+        try
+        {
+            var reply = await _agents.AskAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
+            return Ok(new { reply });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { code = "ask_failed", message = ex.Message });
+        }
     }
 
     [HttpPost("ask-with-tools")]
     public async Task<IActionResult> AskWithTools([FromBody] AskRequest req)
     {
-        var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
-        return Ok(new { reply });
+        try
+        {
+            var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
+            return Ok(new { reply });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { code = "ask_with_tools_failed", message = ex.Message });
+        }
     }
 
     public record ChatRequest(
@@ -46,7 +60,18 @@ public class ChatController : ControllerBase
     [HttpPost("ask-chat")]
     public async Task<IActionResult> AskChat([FromBody] ChatRequest req)
     {
-        var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
-        return Ok(new { reply });
+        try
+        {
+            var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
+            return Ok(new { reply });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { code = "conversation_not_found", message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { code = "chat_failed", message = ex.Message });
+        }
     }
 }

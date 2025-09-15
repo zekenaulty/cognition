@@ -22,7 +22,7 @@ public class ToolExecutionController : ControllerBase
     {
         var ctx = new ToolContext(req.AgentId, req.ConversationId, req.PersonaId, _sp, HttpContext.RequestAborted);
         var (ok, result, error) = await _dispatcher.ExecuteAsync(id, ctx, req.Args ?? new Dictionary<string, object?>(), log: true);
-        return ok ? Ok(new { result }) : BadRequest(new { error });
+        if (ok) return Ok(new { result });
+        return BadRequest(new { code = "tool_execution_failed", message = error ?? "Tool execution failed." });
     }
 }
-

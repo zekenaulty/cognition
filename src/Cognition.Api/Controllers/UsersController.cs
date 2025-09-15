@@ -250,4 +250,20 @@ public class UsersController : ControllerBase
         await _db.SaveChangesAsync();
         return NoContent();
     }
+
+    [HttpGet("{id:guid}/personas")]
+    [Authorize]
+    public async Task<IActionResult> ListUserPersonas(Guid id)
+    {
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
+            return Forbid();
+        var items = await _db.UserPersonas.AsNoTracking()
+            .Where(up => up.UserId == id)
+            .Join(_db.Personas.AsNoTracking(), up => up.PersonaId, p => p.Id, (up, p) => new { p.Id, p.Name, p.Type, p.IsPublic })
+            .OrderBy(x => x.Name)
+            .ToListAsync();
+        return Ok(items);
+    }
 }

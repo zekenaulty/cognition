@@ -3,6 +3,9 @@ using Cognition.Clients.LLM;
 using Cognition.Clients.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Cognition.Clients.Agents;
+using Polly;
+using System.Net;
+using System.Net.Http;
 
 namespace Cognition.Clients;
 
@@ -10,7 +13,10 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddCognitionClients(this IServiceCollection services)
     {
+        // Default HttpClient factory; per-request resiliency is implemented inside clients
         services.AddHttpClient();
+        // Named client for LLM calls to allow separate tuning if needed
+        services.AddHttpClient("llm");
         services.AddScoped<ILLMClientFactory, LLMClientFactory>();
         services.AddScoped<IImageClient, OpenAIImageClient>();
         services.AddScoped<IAgentService, AgentService>();
@@ -37,4 +43,6 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    // Per-request resiliency is handled in the client implementations for portability.
 }

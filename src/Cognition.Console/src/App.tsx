@@ -9,6 +9,7 @@ import ProfilePage from './pages/ProfilePage'
 import ProtectedRoute from './routes/ProtectedRoute'
 import AccountMenu from './components/AccountMenu'
 import PersonasPage from './pages/PersonasPage'
+import ChatPage from './pages/ChatPage'
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -65,11 +66,12 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route element={<ProtectedRoute />}>
+              <Route path="/" element={<ChatPage />} />
+              <Route path="/chat" element={<ChatPage />} />
               <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/personas" element={<PersonasPage />} />
             </Route>
-            <Route path="/" element={<Home />} />
           </Routes>
         </Shell>
       </BrowserRouter>

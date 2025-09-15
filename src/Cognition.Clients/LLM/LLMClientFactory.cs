@@ -55,7 +55,7 @@ public class LLMClientFactory : ILLMClientFactory
         // Base URL selection: profile override -> provider -> env -> default
         string? baseUrlOverride = profile?.BaseUrlOverride ?? provider.BaseUrl;
 
-        var http = _httpClientFactory.CreateClient();
+        var http = _httpClientFactory.CreateClient("llm");
         switch (provider.Name.ToLowerInvariant())
         {
             case "openai":

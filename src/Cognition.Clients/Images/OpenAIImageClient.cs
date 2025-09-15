@@ -38,11 +38,44 @@ public class OpenAIImageClient : IImageClient
         {
             Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
         };
-        var resp = await _http.SendAsync(req);
+        var resp = await SendWithRetryAsync(() => _http.SendAsync(req));
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         var b64 = doc.RootElement.GetProperty("data")[0].GetProperty("b64_json").GetString() ?? string.Empty;
         var bytes = Convert.FromBase64String(b64);
         return new ImageResult(bytes, "image/png", parameters.Width, parameters.Height, "OpenAI", _model);
+    }
+
+    private static bool IsTransient(HttpResponseMessage r)
+        => r.StatusCode == System.Net.HttpStatusCode.RequestTimeout
+           || (int)r.StatusCode == 429
+           || ((int)r.StatusCode >= 500 && (int)r.StatusCode <= 599);
+
+    private static async Task<HttpResponseMessage> SendWithRetryAsync(Func<Task<HttpResponseMessage>> send)
+    {
+        int attempt = 0;
+        Exception? lastEx = null;
+        while (attempt < 3)
+        {
+            try
+            {
+                var resp = await send();
+                if (IsTransient(resp))
+                {
+                    attempt++;
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                    continue;
+                }
+                return resp;
+            }
+            catch (HttpRequestException ex)
+            {
+                lastEx = ex;
+                attempt++;
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+            }
+        }
+        if (lastEx != null) throw lastEx;
+        return await send();
     }
 }

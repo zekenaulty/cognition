@@ -53,7 +53,7 @@ public class OpenAITextClient : ILLMClient
         {
             Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
         };
-        var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
@@ -72,16 +72,18 @@ public class OpenAITextClient : ILLMClient
         {
             Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
         };
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        using var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync();
         using var reader = new StreamReader(stream);
         string? line;
         while ((line = await reader.ReadLineAsync()) != null)
         {
+            if (line.Length == 0 || line.StartsWith(":")) continue; // keep-alive/comments
             if (!line.StartsWith("data:")) continue;
             var data = line.Substring("data:".Length).Trim();
             if (data == "[DONE]") yield break;
+            if (string.IsNullOrWhiteSpace(data)) continue; // empty keep-alive
             string? chunkToYield = null;
             try
             {
@@ -97,5 +99,39 @@ public class OpenAITextClient : ILLMClient
 
             if (!string.IsNullOrEmpty(chunkToYield)) yield return chunkToYield!;
         }
+    }
+
+    private static bool IsTransient(HttpResponseMessage r)
+        => r.StatusCode == System.Net.HttpStatusCode.RequestTimeout
+           || (int)r.StatusCode == 429
+           || ((int)r.StatusCode >= 500 && (int)r.StatusCode <= 599);
+
+    private static async Task<HttpResponseMessage> SendWithRetryAsync(Func<Task<HttpResponseMessage>> send)
+    {
+        int attempt = 0;
+        Exception? lastEx = null;
+        while (attempt < 3)
+        {
+            try
+            {
+                var resp = await send();
+                if (IsTransient(resp))
+                {
+                    attempt++;
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                    continue;
+                }
+                return resp;
+            }
+            catch (HttpRequestException ex)
+            {
+                lastEx = ex;
+                attempt++;
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+            }
+        }
+        if (lastEx != null) throw lastEx;
+        // Last attempt
+        return await send();
     }
 }

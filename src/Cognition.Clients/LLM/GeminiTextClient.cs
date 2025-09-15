@@ -52,7 +52,11 @@ public class GeminiTextClient : ILLMClient
     {
         var url = $"{_apiBase}/v1beta/models/{_model}:generateContent";
         var body = ToGeminiContent(messages);
-        var resp = await _http.PostAsJsonAsync(url, body);
+        var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(body)
+        };
+        var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         var root = doc.RootElement;
@@ -74,7 +78,7 @@ public class GeminiTextClient : ILLMClient
         {
             Content = JsonContent.Create(body)
         };
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        using var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync();
         using var reader = new StreamReader(stream);
@@ -112,5 +116,38 @@ public class GeminiTextClient : ILLMClient
             catch { /* ignore malformed */ }
             if (!string.IsNullOrEmpty(toYield)) yield return toYield!;
         }
+    }
+
+    private static bool IsTransient(HttpResponseMessage r)
+        => r.StatusCode == System.Net.HttpStatusCode.RequestTimeout
+           || (int)r.StatusCode == 429
+           || ((int)r.StatusCode >= 500 && (int)r.StatusCode <= 599);
+
+    private static async Task<HttpResponseMessage> SendWithRetryAsync(Func<Task<HttpResponseMessage>> send)
+    {
+        int attempt = 0;
+        Exception? lastEx = null;
+        while (attempt < 3)
+        {
+            try
+            {
+                var resp = await send();
+                if (IsTransient(resp))
+                {
+                    attempt++;
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                    continue;
+                }
+                return resp;
+            }
+            catch (HttpRequestException ex)
+            {
+                lastEx = ex;
+                attempt++;
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+            }
+        }
+        if (lastEx != null) throw lastEx;
+        return await send();
     }
 }

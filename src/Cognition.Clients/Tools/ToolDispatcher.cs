@@ -3,6 +3,7 @@ using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Tools;
 using Cognition.Data.Relational.Modules.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Cognition.Clients.Tools;
 
@@ -11,10 +12,11 @@ public class ToolDispatcher : IToolDispatcher
     private readonly CognitionDbContext _db;
     private readonly IServiceProvider _sp;
     private readonly IToolRegistry _registry;
+    private readonly ILogger<ToolDispatcher> _logger;
 
-    public ToolDispatcher(CognitionDbContext db, IServiceProvider sp, IToolRegistry registry)
+    public ToolDispatcher(CognitionDbContext db, IServiceProvider sp, IToolRegistry registry, ILogger<ToolDispatcher> logger)
     {
-        _db = db; _sp = sp; _registry = registry;
+        _db = db; _sp = sp; _registry = registry; _logger = logger;
     }
 
     public async Task<(bool ok, object? result, string? error)> ExecuteAsync(
@@ -54,12 +56,14 @@ public class ToolDispatcher : IToolDispatcher
                 }
             }
 
+            _logger.LogInformation("Executing tool {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId} persona {PersonaId}", tool.Name, tool.Id, tool.ClassPath, ctx.ConversationId, ctx.PersonaId);
             result = await impl.ExecuteAsync(ctx, args);
             ok = true; error = null;
         }
         catch (Exception ex)
         {
             ok = false; error = ex.Message; result = null;
+            _logger.LogError(ex, "Tool execution failed for {ToolName} ({ToolId})", tool.Name, tool.Id);
         }
         // log and return
         if (log)
@@ -80,6 +84,7 @@ public class ToolDispatcher : IToolDispatcher
             });
             await _db.SaveChangesAsync(ctx.Ct);
         }
+        _logger.LogInformation("Tool {ToolName} ({ToolId}) completed success={Success} durationMs={Duration}", tool.Name, tool.Id, ok, (int)sw.ElapsedMilliseconds);
 
         return (ok, result, error);
     }
