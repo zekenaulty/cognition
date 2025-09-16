@@ -19,7 +19,7 @@ public class ConversationsController : ControllerBase
     public ConversationsController(CognitionDbContext db) => _db = db;
 
     public record CreateConversationRequest(string? Title, Guid[] ParticipantIds);
-    public record AddMessageRequest(Guid FromPersonaId, Guid? ToPersonaId, ChatRole Role, string Content);
+    public record AddMessageRequest(Guid FromPersonaId, Guid? ToPersonaId, ChatRole Role, string Content, string? Metatype = null);
     public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc);
 
     [HttpGet]
@@ -100,7 +100,8 @@ public class ConversationsController : ControllerBase
             Role = req.Role,
             Content = req.Content,
             Timestamp = DateTime.UtcNow,
-            CreatedByUserId = userId
+            CreatedByUserId = userId,
+            Metatype = req.Metatype
         };
         _db.ConversationMessages.Add(msg);
         await _db.SaveChangesAsync();

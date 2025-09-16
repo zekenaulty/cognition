@@ -48,9 +48,12 @@ public class CognitionDbContext : DbContext
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
     public DbSet<ConversationSummary> ConversationSummaries => Set<ConversationSummary>();
 
-        public DbSet<ConversationPlan> ConversationPlans => Set<ConversationPlan>();
-        public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
-        public DbSet<ConversationThought> ConversationThoughts => Set<ConversationThought>();
+    public DbSet<ConversationPlan> ConversationPlans => Set<ConversationPlan>();
+    public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
+    public DbSet<ConversationThought> ConversationThoughts => Set<ConversationThought>();
+
+    public DbSet<ConversationWorkflowState> ConversationWorkflowStates => Set<ConversationWorkflowState>();
+    public DbSet<WorkflowEvent> WorkflowEvents => Set<WorkflowEvent>();
 
     public DbSet<Tool> Tools => Set<Tool>();
     public DbSet<ToolParameter> ToolParameters => Set<ToolParameter>();
@@ -76,8 +79,24 @@ public class CognitionDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Configure WorkflowEvent.Payload as JSONB
+        modelBuilder.Entity<WorkflowEvent>()
+            .Property(e => e.Payload)
+            .HasConversion(
+                v => v.ToString(Newtonsoft.Json.Formatting.None),
+                v => Newtonsoft.Json.Linq.JObject.Parse(v))
+            .HasColumnType("jsonb");
+
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(CognitionDbContext).Assembly);
+
+        // Configure ConversationWorkflowState.Blackboard as JSONB
+        modelBuilder.Entity<ConversationWorkflowState>()
+            .Property(e => e.Blackboard)
+            .HasConversion(
+                v => v.ToString(Newtonsoft.Json.Formatting.None),
+                v => Newtonsoft.Json.Linq.JObject.Parse(v))
+            .HasColumnType("jsonb");
     }
 
     public override int SaveChanges()

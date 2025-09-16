@@ -8,6 +8,9 @@ using Cognition.Data.Relational.Modules.FeatureFlags;
 using Cognition.Data.Relational.Modules.Conversations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Schema;
+using System.IO;
 
 namespace Cognition.Clients.Agents;
 
@@ -19,8 +22,47 @@ public interface IAgentService
     Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, bool rolePlay = false, CancellationToken ct = default);
 }
 
+
 public class AgentService : IAgentService
 {
+    // P5: Helpers for CoT v2 loop
+    private static string CompactObservation(string? s, int max = 200)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "<no output>";
+        var t = s.Trim().Replace("\r", " ").Replace("\n", " ");
+        return t.Length <= max ? t : t[..max] + "…";
+    }
+    // P1: Prompt layer helpers for strict JSON contracts and tool-first cognition
+    private static string BuildOutlinePlanPrompt(string input, string compactHistory, string toolIndex)
+    {
+        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
+               "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
+               "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
+               "MODE: OUTLINE_PLAN\n" +
+               $"UserRequest: \"{input}\"\n" +
+               $"History: {compactHistory}\n" +
+               $"Tools: {toolIndex}\n" +
+               "Return ONLY a JSON array of tasks: [ {\"goal\":\"...\",\"suggestedTool\":\"nameOrId\",\"notes\":\"...\"} ]";
+    }
+
+    private static string BuildStepPlanPrompt(string goalCompact, int maxSteps, string outlineJson, string completedJson, string toolIndex)
+    {
+        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
+                     "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
+                     "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
+                     "MODE: PLAN\n" +
+                     $"STATE: Goal: \"{goalCompact}\"; Constraints: [\"Tools only\", \"Max {maxSteps}\", \"One tool per step\"]; OutlinePlan: {outlineJson}; Completed: {completedJson}\n" +
+                     "RESPONSE_SCHEMA: { \"step\": 1, \"goal\": \"this step goal\", \"rationale\": \"<=2 sentences\", \"action\": {\"toolId\":\"GUID\",\"args\":{}}, \"finish\": false, \"final_answer\": null }\n" +
+                     "Return ONLY JSON matching schema.";
+    }
+
+    private static string BuildFinalizePrompt(string finalAnswer, string respondToolId)
+    {
+        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
+               "MODE: FINALIZE\n" +
+               $"Return ONLY: {{\"toolId\":\"{respondToolId}\",\"args\":{{\"text\":\"{finalAnswer}\"}}}}";
+    }
+
     private readonly CognitionDbContext _db;
     private readonly ILLMClientFactory _factory;
     private readonly Cognition.Clients.Tools.IToolDispatcher _dispatcher;
@@ -55,125 +97,249 @@ public class AgentService : IAgentService
 
     public async Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, bool rolePlay = false, CancellationToken ct = default)
     {
-            // 1. Save original message
-            var userMsg = new ConversationMessage
-            {
-                ConversationId = conversationId,
-                FromPersonaId = personaId,
-                Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
-                Content = input,
-                Timestamp = DateTime.UtcNow,
-                CreatedAtUtc = DateTime.UtcNow,
-                Metatype = "TextResponse"
-            };
-            _db.ConversationMessages.Add(userMsg);
-            await _db.SaveChangesAsync(ct);
+        // 1. Save original message
+        var userMsg = new ConversationMessage
+        {
+            ConversationId = conversationId,
+            FromPersonaId = personaId,
+            Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
+            Content = input,
+            Timestamp = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow,
+            Metatype = "TextResponse"
+        };
+        _db.ConversationMessages.Add(userMsg);
+        await _db.SaveChangesAsync(ct);
 
-            // 2. Create ConversationPlan
-            var plan = new ConversationPlan
+        // 2. Create ConversationPlan and discover tools
+        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
+        var tools = await _db.Tools
+            .Include(t => t.Parameters)
+            .Where(t => t.IsActive)
+            .Where(t => _db.ToolProviderSupports.Any(s => s.ToolId == t.Id
+                                                        && s.ProviderId == providerId
+                                                        && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
+                                                        && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
+            .AsNoTracking()
+            .ToListAsync(ct);
+        var toolIndex = BuildToolIndexSection(tools);
+        var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
+        var client = await _factory.CreateAsync(providerId, modelId);
+
+        // 3. Generate OUTLINE_PLAN
+        var compactHistory = ""; // TODO: build compact history from recent messages
+        var outlinePrompt = BuildOutlinePlanPrompt(input, compactHistory, toolIndex);
+        var outlineJson = await client.GenerateAsync(outlinePrompt, track: false);
+
+        // Validate plan JSON against schema
+        var schemaPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "schemas", "plan.schema.json");
+        var schemaText = await File.ReadAllTextAsync(schemaPath, ct);
+        var schema = Newtonsoft.Json.Schema.JSchema.Parse(schemaText);
+        var planObj = Newtonsoft.Json.Linq.JObject.Parse(outlineJson);
+        var errors = new List<string>();
+        planObj.Validate(schema, (o, a) => errors.Add(a.Message));
+        if (errors.Count > 0)
+        {
+            _logger.LogWarning("Plan JSON failed validation: {Errors}", string.Join("; ", errors));
+            throw new InvalidOperationException($"Plan JSON is invalid: {string.Join("; ", errors)}");
+        }
+
+        var plan = new ConversationPlan
+        {
+            ConversationId = conversationId,
+            PersonaId = personaId,
+            Title = $"Plan for: {input.Substring(0, Math.Min(40, input.Length))}",
+            Description = $"CoT v2 plan generated for message {userMsg.Id}",
+            CreatedAt = DateTime.UtcNow,
+            OutlineJson = outlineJson,
+            Tasks = new List<ConversationTask>()
+        };
+        _db.ConversationPlans.Add(plan);
+        await _db.SaveChangesAsync(ct);
+
+        // 4. Step loop: PLAN → tool → observe → persist
+        var results = new List<string>();
+        var completedSteps = new List<object>(); // for state
+        for (int step = 1; step <= maxSteps; step++)
+        {
+            // Build state for PLAN prompt
+            var goalCompact = input; // TODO: refine
+            var outlineState = outlineJson ?? "[]";
+            var completedJson = System.Text.Json.JsonSerializer.Serialize(completedSteps);
+            var planPrompt = BuildStepPlanPrompt(goalCompact, maxSteps, outlineState, completedJson, toolIndex);
+            var planStepJson = await client.GenerateAsync(planPrompt, track: false);
+            // TODO: Parse/repair planStepJson, fallback to error if invalid
+
+            // Save ConversationThought (step, rationale, plan snapshot, prompt)
+            var thoughtEntity = new ConversationThought
             {
                 ConversationId = conversationId,
                 PersonaId = personaId,
-                Title = $"Plan for: {input.Substring(0, Math.Min(40, input.Length))}",
-                Description = $"CoT plan generated for message {userMsg.Id}",
-                CreatedAt = DateTime.UtcNow,
-                Tasks = new List<ConversationTask>()
+                Thought = planStepJson,
+                StepNumber = step,
+                Rationale = null, // TODO: extract from parsed JSON
+                PlanSnapshotJson = outlineJson,
+                Prompt = planPrompt,
+                Timestamp = DateTime.UtcNow
             };
-            _db.ConversationPlans.Add(plan);
+            _db.ConversationThoughts.Add(thoughtEntity);
             await _db.SaveChangesAsync(ct);
 
-            var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
-            // Discover available tools for this provider/model and expose a compact schema
-            var tools = await _db.Tools
-                .Include(t => t.Parameters)
-                .Where(t => t.IsActive)
-                .Where(t => _db.ToolProviderSupports.Any(s => s.ToolId == t.Id
-                                                            && s.ProviderId == providerId
-                                                            && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
-                                                            && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
-                .AsNoTracking()
-                .ToListAsync(ct);
-            var toolIndex = BuildToolIndexSection(tools);
-            var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
-            var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
-            var client = await _factory.CreateAsync(providerId, modelId);
-            var thoughts = new List<string>();
-            var results = new List<string>();
-
-            // 3. Planning loop: generate thoughts, tasks, and execute with tool awareness
-            int step = 1;
-            for (; step <= maxSteps; step++)
+            // Parse planStepJson to get toolId, args, finish, final_answer
+            Guid? toolId = null;
+            string? toolName = null;
+            string? argsJson = null;
+            bool finish = false;
+            string? finalAnswer = null;
+            string? rationale = null;
+            string? goal = null;
+            string? observation = null;
+            string? error = null;
+            string status = "Pending";
+            try
             {
-                // Generate next thought with full tool/system context
-                var planPrompt = $"{fullSys}\n\nCurrent plan: {plan.Title}\nStep {step}: What should happen next?";
-                var thought = await client.GenerateAsync(planPrompt, track: false);
-                thoughts.Add(thought);
-
-                // Save thought
-                var thoughtEntity = new ConversationThought
+                using var doc = JsonDocument.Parse(planStepJson);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("action", out var action))
                 {
-                    ConversationId = conversationId,
-                    PersonaId = personaId,
-                    Thought = thought,
-                    Timestamp = DateTime.UtcNow
-                };
-                _db.ConversationThoughts.Add(thoughtEntity);
-                await _db.SaveChangesAsync(ct);
-
-                // Create task
-                var task = new ConversationTask
-                {
-                    ConversationPlanId = plan.Id,
-                    StepNumber = step,
-                    Thought = thought,
-                    Action = $"Action for step {step}",
-                    CreatedAt = DateTime.UtcNow
-                };
-                _db.ConversationTasks.Add(task);
-                plan.Tasks.Add(task);
-                await _db.SaveChangesAsync(ct);
-
-                // Execute task with full tool awareness
-                var execPrompt = $"{fullSys}\n\nExecute: {thought}";
-                var result = await AskWithToolsAsync(personaId, providerId, modelId, execPrompt, rolePlay, ct);
-                task.Result = result;
-                results.Add(result);
-                await _db.SaveChangesAsync(ct);
-
-                // Optionally, add a 'thought' message to ConversationMessage
-                var thoughtMsg = new ConversationMessage
-                {
-                    ConversationId = conversationId,
-                    FromPersonaId = personaId,
-                    Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
-                    Content = result,
-                    Timestamp = DateTime.UtcNow,
-                    CreatedAtUtc = DateTime.UtcNow,
-                    Metatype = "PlanThought"
-                };
-                _db.ConversationMessages.Add(thoughtMsg);
-                await _db.SaveChangesAsync(ct);
-
-                // Early exit if minSteps reached and some stop condition (not implemented)
-                if (step >= minSteps && thought.Contains("[END]")) break;
+                    if (action.TryGetProperty("toolId", out var tId))
+                    {
+                        var tIdStr = tId.GetString();
+                        if (Guid.TryParse(tIdStr, out var guid)) toolId = guid;
+                        else toolName = tIdStr;
+                    }
+                    if (action.TryGetProperty("args", out var args))
+                    {
+                        argsJson = args.GetRawText();
+                    }
+                }
+                finish = root.TryGetProperty("finish", out var f) && f.GetBoolean();
+                finalAnswer = root.TryGetProperty("final_answer", out var fa) ? fa.GetString() : null;
+                rationale = root.TryGetProperty("rationale", out var r) ? r.GetString() : null;
+                goal = root.TryGetProperty("goal", out var g) ? g.GetString() : null;
+            }
+            catch (Exception ex)
+            {
+                error = $"Invalid PLAN JSON: {ex.Message}";
+                status = "Failure";
             }
 
-            // 5. Aggregate and return final response
-            var finalResponse = string.Join("\n", results);
-            var assistantMsg = new ConversationMessage
+            // If finish, call Respond.Answer tool
+            string result = "";
+            if (finish && !string.IsNullOrWhiteSpace(finalAnswer))
+            {
+                // TODO: get Respond.Answer toolId
+                var respondToolId = toolId ?? Guid.Empty;
+                var finalizePrompt = BuildFinalizePrompt(finalAnswer, respondToolId.ToString());
+                result = await client.GenerateAsync(finalizePrompt, track: false);
+                status = "Success";
+            }
+            else if (toolId.HasValue || !string.IsNullOrWhiteSpace(toolName))
+            {
+                // Dispatch tool
+                try
+                {
+                    var ctx = new Cognition.Clients.Tools.ToolContext(null, null, personaId, _sp, ct);
+                    var execId = toolId ?? tools.FirstOrDefault(t => t.Name == toolName)?.Id ?? Guid.Empty;
+                    var argsDict = !string.IsNullOrWhiteSpace(argsJson)
+                        ? JsonSerializer.Deserialize<Dictionary<string, object?>>(argsJson) ?? new()
+                        : new Dictionary<string, object?>();
+                    var exec = await _dispatcher.ExecuteAsync(execId, ctx, argsDict, log: true);
+                    if (!exec.ok)
+                    {
+                        result = $"Tool error: {exec.error}";
+                        error = exec.error;
+                        status = "Failure";
+                    }
+                    else
+                    {
+                        result = exec.result is string s ? s : JsonSerializer.Serialize(exec.result);
+                        status = "Success";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result = $"Tool dispatch error: {ex.Message}";
+                    error = ex.Message;
+                    status = "Failure";
+                }
+            }
+            else
+            {
+                result = "No valid tool selected.";
+                error = "No valid tool selected.";
+                status = "Failure";
+            }
+
+            // Compact observation
+            observation = CompactObservation(result, 200);
+            results.Add(result);
+
+            // Persist ConversationTask
+            var task = new ConversationTask
+            {
+                ConversationPlanId = plan.Id,
+                StepNumber = step,
+                Thought = planStepJson,
+                Goal = goal,
+                Rationale = rationale,
+                ToolId = toolId,
+                ToolName = toolName,
+                ArgsJson = argsJson,
+                Observation = observation,
+                Error = error,
+                Finish = finish,
+                FinalAnswer = finalAnswer,
+                Status = status,
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.ConversationTasks.Add(task);
+            plan.Tasks.Add(task);
+            await _db.SaveChangesAsync(ct);
+
+            // Add completed step for next PLAN state
+            completedSteps.Add(new
+            {
+                step,
+                action = new { toolId = toolId?.ToString() ?? toolName, args = argsJson },
+                ok = status == "Success",
+                observation
+            });
+
+            // Optionally, add a 'thought' message to ConversationMessage
+            var thoughtMsg = new ConversationMessage
             {
                 ConversationId = conversationId,
                 FromPersonaId = personaId,
                 Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
-                Content = finalResponse,
+                Content = result,
                 Timestamp = DateTime.UtcNow,
                 CreatedAtUtc = DateTime.UtcNow,
-                Metatype = "TextResponse"
+                Metatype = "PlanThought"
             };
-            _db.ConversationMessages.Add(assistantMsg);
+            _db.ConversationMessages.Add(thoughtMsg);
             await _db.SaveChangesAsync(ct);
 
-            return finalResponse;
+            // Early exit if finish or maxSteps
+            if (finish || (step >= minSteps && status == "Success" && !string.IsNullOrWhiteSpace(finalAnswer))) break;
+        }
+
+        // 5. Aggregate and return final response
+        var finalResponse = string.Join("\n", results);
+        var assistantMsg = new ConversationMessage
+        {
+            ConversationId = conversationId,
+            FromPersonaId = personaId,
+            Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
+            Content = finalResponse,
+            Timestamp = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow,
+            Metatype = "TextResponse"
+        };
+        _db.ConversationMessages.Add(assistantMsg);
+        await _db.SaveChangesAsync(ct);
+
+        return finalResponse;
     }
 
     public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
@@ -257,7 +423,8 @@ public class AgentService : IAgentService
             Content = input,
             Timestamp = DateTime.UtcNow,
             CreatedAtUtc = DateTime.UtcNow
-                , Metatype = "TextResponse"
+                ,
+            Metatype = "TextResponse"
         };
         _db.ConversationMessages.Add(userMsg);
         await _db.SaveChangesAsync(ct);
@@ -327,7 +494,8 @@ public class AgentService : IAgentService
             Content = reply,
             Timestamp = DateTime.UtcNow,
             CreatedAtUtc = DateTime.UtcNow
-                , Metatype = "TextResponse"
+                ,
+            Metatype = "TextResponse"
         };
         _db.ConversationMessages.Add(assistantMsg);
         await _db.SaveChangesAsync(ct);
@@ -544,10 +712,9 @@ public class AgentService : IAgentService
         if (list.Count == 0) return string.Empty;
         var sb = new StringBuilder();
         sb.AppendLine("Tool Index:");
-        sb.AppendLine("- You may optionally call exactly one tool by returning pure JSON only on a single line:");
-        sb.AppendLine("  {\"toolId\":\"<GUID>\",\"args\":{...}}");
-        sb.AppendLine("- If no tool is needed, answer normally without JSON.");
-        sb.AppendLine("- Arguments must match the schema below (required marked with *).");
+        sb.AppendLine("- You MUST select exactly one tool per step (unless finishing). Return JSON only. No text or prose allowed.");
+        sb.AppendLine("- For each step, return: {\"toolId\":\"<GUID or Name>\",\"args\":{...}} (toolId can be GUID or name)");
+        sb.AppendLine("- Arguments must match the schema below (required marked with *). Example JSON for each tool:");
         sb.AppendLine("Available tools:");
         foreach (var t in list)
         {
@@ -559,8 +726,26 @@ public class AgentService : IAgentService
                 sb.Append(" | args: ");
                 sb.Append(string.Join(", ", inputs.Select(p => $"{p.Name}:{p.Type}{(p.Required ? "*" : "")}")));
             }
+            // Example JSON
+            var exampleArgs = string.Join(", ", inputs.Select(p => $"\"{p.Name}\":{GetExampleValue(p.Type)}"));
+            var exampleJson = $"{{\"toolId\":\"{t.Id}\",\"args\":{{{exampleArgs}}}}}";
+            sb.Append(" | example: ").Append(exampleJson);
             sb.AppendLine();
         }
         return sb.ToString();
+
+        // Helper for example values
+        static string GetExampleValue(string type)
+        {
+            return type.ToLower() switch
+            {
+                "string" => "\"example\"",
+                "int" => "1",
+                "float" => "1.0",
+                "bool" => "true",
+                _ => "null"
+            };
+        }
     }
+
 }

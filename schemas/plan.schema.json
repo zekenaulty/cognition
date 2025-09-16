@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ToolPlan",
+  "type": "object",
+  "properties": {
+    "Sequence": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Step" }
+    }
+  },
+  "required": ["Sequence"],
+  "definitions": {
+    "Step": {
+      "oneOf": [
+        { "$ref": "#/definitions/CallTool" },
+        { "$ref": "#/definitions/If" },
+        { "$ref": "#/definitions/Respond" }
+      ]
+    },
+    "CallTool": {
+      "type": "object",
+      "properties": {
+        "CallTool": {
+          "type": "object",
+          "properties": {
+            "tool": { "type": "string" },
+            "args": { "type": "object" }
+          },
+          "required": ["tool", "args"]
+        }
+      },
+      "required": ["CallTool"]
+    },
+    "If": {
+      "type": "object",
+      "properties": {
+        "If": {
+          "type": "object",
+          "properties": {
+            "condition": { "type": "string" },
+            "then": { "type": "array", "items": { "$ref": "#/definitions/Step" } }
+          },
+          "required": ["condition", "then"]
+        }
+      },
+      "required": ["If"]
+    },
+    "Respond": {
+      "type": "object",
+      "properties": {
+        "Respond": {
+          "type": "object",
+          "properties": {
+            "template": { "type": "string" }
+          },
+          "required": ["template"]
+        }
+      },
+      "required": ["Respond"]
+    }
+  }
+}

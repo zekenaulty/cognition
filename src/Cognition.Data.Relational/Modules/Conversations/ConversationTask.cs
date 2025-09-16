@@ -9,7 +9,15 @@ public class ConversationTask : BaseEntity
 
     public int StepNumber { get; set; }
     public string Thought { get; set; } = string.Empty;
-    public string? Action { get; set; }
-    public string? Result { get; set; }
+    public string? Goal { get; set; }
+    public string? Rationale { get; set; }
+    public Guid? ToolId { get; set; }
+    public string? ToolName { get; set; }
+    public string? ArgsJson { get; set; } // jsonb
+    public string? Observation { get; set; }
+    public string? Error { get; set; }
+    public bool Finish { get; set; }
+    public string? FinalAnswer { get; set; }
+    public string? Status { get; set; } // Pending/Success/Failure
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

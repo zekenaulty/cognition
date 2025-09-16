@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Cognition.Data.Relational;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cognition.Data.Relational.Migrations
 {
     [DbContext(typeof(CognitionDbContext))]
-    partial class CognitionDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250916033316_AddMoreThoughts")]
+    partial class AddMoreThoughts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -580,55 +583,6 @@ namespace Cognition.Data.Relational.Migrations
                     b.HasIndex("PersonaId");
 
                     b.ToTable("conversation_thoughts", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Conversations.ConversationWorkflowState", b =>
-                {
-                    b.Property<Guid>("ConversationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Blackboard")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<int>("Pointer")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Stage")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("ConversationId");
-
-                    b.ToTable("conversation_workflow_states");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Conversations.WorkflowEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ConversationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("workflow_events");
                 });
 
             modelBuilder.Entity("Cognition.Data.Relational.Modules.FeatureFlags.FeatureFlag", b =>
@@ -2600,17 +2554,6 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Conversation");
 
                     b.Navigation("Persona");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Conversations.ConversationWorkflowState", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Conversations.Conversation", "Conversation")
-                        .WithMany()
-                        .HasForeignKey("ConversationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Conversation");
                 });
 
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>

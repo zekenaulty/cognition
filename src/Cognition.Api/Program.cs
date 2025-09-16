@@ -11,12 +11,16 @@ using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Cognition.Api.Infrastructure.Swagger;
 using Cognition.Api.Infrastructure.Hangfire;
+using Rebus.ServiceProvider;
+using Rebus.Config;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddControllers().AddControllersAsServices();
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 
 // Add EF Core Postgres DbContext
 builder.Services.AddCognitionDb(builder.Configuration);
@@ -112,6 +116,16 @@ builder.Services.AddHangfire(config =>
 builder.Services.AddSingleton<JobStorage>(sp => Hangfire.JobStorage.Current);
 builder.Services.AddSingleton<IHangfireRunner, HangfireRunner>();
 
+// Rebus configuration
+var rebusConn = builder.Configuration.GetConnectionString("Postgres") ?? "Host=localhost;Port=5432;Database=cognition;Username=postgres;Password=postgres";
+builder.Services.AddRebus(config =>
+    config
+        .Transport(t => t.UsePostgreSql(rebusConn, "rebus_messages", "cognition-api"))
+        .Subscriptions(s => s.StoreInPostgres(rebusConn, "rebus_subscriptions"))
+        //.Options(o => o.SimpleRetryStrategy("rebus-errors"))
+);
+
+
 // JWT Auth
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtSecret = jwtSection["Secret"]
@@ -200,8 +214,9 @@ if (app.Environment.IsDevelopment())
     app.UseCors("DevCors");
 }
 
-// Require auth for all API controllers, but allow SPA/static/Swagger/Hangfire anonymously
+// Require auth for all API controllers, but allow SPA/static/Swagger/Hangfire/SignalR anonymously
 app.MapControllers().RequireAuthorization();
+app.MapHub<Cognition.Api.Controllers.ChatHub>("/hub/chat");
 
 // Expose Hangfire Dashboard
 if (app.Environment.IsDevelopment())
@@ -231,3 +246,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+// Log Rebus input queue name at startup
+{
+    var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("RebusStartup");
+    var rebusBus = app.Services.GetService<Rebus.Bus.IBus>();
+    logger.LogInformation("Rebus input queue: cognition-api");
+}

@@ -85,13 +85,16 @@ import EmojiButton from '../components/EmojiButton'
 import ImageViewer from '../components/ImageViewer'
 
 type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string; imgPrompt?: string; imgStyleName?: string; metatype?: string }
-type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string; imgPrompt?: string; imgStyleName?: string; metatype?: string }
 type Provider = { id: string; name: string; displayName?: string }
 type Model = { id: string; name: string; displayName?: string }
 type Persona = { id: string; name: string; gender?: string }
 type ImageStyle = { id: string; name: string; description?: string; promptPrefix?: string; negativePrompt?: string }
 
 export default function ChatPage() {
+  // ...existing code...
+  // SignalR: Real-time assistant message push
+  const signalRRef = useRef<any>(null)
+
   // Responsive gear/settings menu state
   const [settingsAnchor, setSettingsAnchor] = useState<null | HTMLElement>(null)
   const [settingsMenu, setSettingsMenu] = useState<string | null>(null)
@@ -205,6 +208,59 @@ export default function ChatPage() {
 
   const [personas, setPersonas] = useState<Persona[]>([])
   const [personaId, setPersonaId] = useState<string>(getLS(LS.persona))
+  // ...existing code...
+
+  // SignalR effect must come after all state declarations
+  useEffect(() => {
+    if (!conversationId || !accessToken) return
+    let isMounted = true
+    const { HubConnectionBuilder, LogLevel } = (window as any).signalR || {}
+    if (!HubConnectionBuilder) return
+    const connection = new HubConnectionBuilder()
+      .withUrl(`/hub/chat`, { accessTokenFactory: () => accessToken })
+      .configureLogging(LogLevel.Warning)
+      .withAutomaticReconnect()
+      .build()
+    signalRRef.current = connection
+    connection.start().then(() => {
+      if (!isMounted) return
+      connection.invoke('JoinConversation', conversationId)
+    }).catch(() => {})
+    connection.on('AssistantMessageAppended', (event: any) => {
+      if (!isMounted || !event) return
+      if (event.ConversationId !== conversationId) return
+      
+      // Try to find a pending placeholder and update it
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.role === 'assistant' && m.pending)
+        if (idx !== -1) {
+          const updated = [...prev]
+          updated[idx] = {
+            ...updated[idx],
+            pending: false,
+            content: event.Content,
+            timestamp: event.Timestamp
+          }
+          return updated
+        }
+        // If no placeholder, append as new
+        return [...prev, {
+          role: 'assistant',
+          content: event.Content,
+          fromName: personas.find(p => p.id === personaId)?.name || 'Assistant',
+          timestamp: event.Timestamp
+        }]
+      })
+      if (stickToBottomRef.current) forceScrollRef.current = true
+    })
+    return () => {
+      isMounted = false
+      if (signalRRef.current) {
+        signalRRef.current.stop()
+        signalRRef.current = null
+      }
+    }
+  }, [conversationId, accessToken, personaId, personas])
 
   type Conv = { id: string; title?: string | null }
   const [conversations, setConversations] = useState<Conv[]>([])
@@ -495,7 +551,7 @@ export default function ChatPage() {
         return
       }
       const body = await res.json()
-      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: body.reply } : m))
+      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: body.content } : m))
       if (stickToBottomRef.current) {
         forceScrollRef.current = true
       }
@@ -693,6 +749,7 @@ Rules:
               <Stack spacing={1}>
                 {messages.map((m, i) => {
                   const isUser = m.role === 'user'
+                  const isAssistantPending = m.role === 'assistant' && m.pending
                   return (
                     <Box
                       key={i}
@@ -713,6 +770,11 @@ Rules:
                     >
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: isUser ? 'right' : 'left', mb: 0.25 }}>
                         {m.fromName || m.role}
+                        {isAssistantPending && (
+                          <span style={{ marginLeft: 8, color: '#f5a623', fontStyle: 'italic', fontWeight: 500 }}>
+                            (thinking...)
+                          </span>
+                        )}
                       </Typography>
                       {m.imageId ? (
                         <Box sx={{ mt: 0.5 }}>
@@ -725,8 +787,8 @@ Rules:
                             sx={{ height: 240, width: 'auto', borderRadius: 1, cursor: 'zoom-in', maxWidth: '100%' }}
                           />
                         </Box>
-                      ) : m.pending ? (
-                        <Typography variant="body1" sx={{ textAlign: isUser ? 'right' : 'left' }}>
+                      ) : isAssistantPending ? (
+                        <Typography variant="body1" sx={{ textAlign: isUser ? 'right' : 'left', fontStyle: 'italic', color: '#f5a623' }}>
                           {m.content ? m.content + ' ' : ''}
                           <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
                         </Typography>
@@ -768,8 +830,19 @@ Rules:
           {/* Input */}
           <Divider />
           <Stack direction="row" spacing={1} alignItems="center">
-            <TextField inputRef={inputRef} fullWidth size="small" placeholder="Type a message." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
-            {/* STT record button */}
+            {/*  <TextField inputRef={inputRef} fullWidth size="small" placeholder="Type a message." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />   */}
+            {/* Suppress browser autocomplete/suggestions */}
+            <TextField
+              inputRef={inputRef}
+              fullWidth
+              size="small"
+              placeholder="Type a message."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+              autoComplete="off"
+              inputProps={{ autoCorrect: 'off', autoCapitalize: 'off', spellCheck: false }}
+            />
             <Tooltip title="Hold to record">
               <span>
                 <IconButton

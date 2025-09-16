@@ -3,6 +3,8 @@ using Cognition.Data.Relational;
 using Cognition.Clients;
 using Hangfire;
 using Hangfire.PostgreSql;
+using Rebus.ServiceProvider;
+using Rebus.Config;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -61,9 +63,18 @@ SetEnvFromConfig("GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY");
 SetEnvFromConfig("OLLAMA_BASE_URL", "OLLAMA_BASE_URL");
 SetEnvFromConfig("GITHUB_TOKEN", "GITHUB_TOKEN");
 
+// Rebus configuration
+var rebusConn = connectionString;
+builder.Services.AddRebus(config =>
+    config
+        .Transport(t => t.UsePostgreSql(rebusConn, "rebus_messages", "cognition-jobs"))
+        .Subscriptions(s => s.StoreInPostgres(rebusConn, "rebus_subscriptions"))
+);
+
 // Register Db + clients so jobs can use the same services as API
 builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddCognitionClients();
+
 
 // Register example + concrete jobs and recurring registration
 builder.Services.AddTransient<ExampleJob>();
@@ -71,5 +82,21 @@ builder.Services.AddTransient<TextJobs>();
 builder.Services.AddTransient<ImageJobs>();
 builder.Services.AddHostedService<RecurringJobsRegistrar>();
 
+// Register event handlers for Rebus
+builder.Services.AddTransient<UserMessageHandler>();
+builder.Services.AddTransient<PlanHandler>();
+builder.Services.AddTransient<PlanReadyHandler>();
+builder.Services.AddTransient<ToolExecutionHandler>();
+
+// Register SignalRNotifier and inject into ResponseHandler
+builder.Services.AddSingleton(sp => new SignalRNotifier("http://localhost:5000/hub/chat"));
+builder.Services.AddTransient<ResponseHandler>();
+
 var host = builder.Build();
 host.Run();
+
+// Log Rebus input queue name at startup
+{
+    var logger = host.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>().CreateLogger("RebusStartup");
+    logger.LogInformation("Rebus input queue: cognition-jobs");
+}

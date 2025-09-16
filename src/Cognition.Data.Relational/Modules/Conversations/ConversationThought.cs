@@ -11,5 +11,10 @@ public class ConversationThought : BaseEntity
     public Modules.Personas.Persona Persona { get; set; } = null!;
 
     public string Thought { get; set; } = string.Empty;
+    public int StepNumber { get; set; }
+    public string? Rationale { get; set; }
+    public string? PlanSnapshotJson { get; set; } // jsonb
+    public string? Prompt { get; set; }
+    public Guid? ParentThoughtId { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

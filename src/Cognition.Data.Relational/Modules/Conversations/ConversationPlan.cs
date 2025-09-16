@@ -14,4 +14,7 @@ public class ConversationPlan : BaseEntity
     public string? Description { get; set; }
     public List<ConversationTask> Tasks { get; set; } = [];
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // CoT v2 additions
+    public string? OutlineJson { get; set; } // jsonb: OUTLINE_PLAN array
 }
