@@ -37,8 +37,8 @@ public class AgentService : IAgentService
 
     public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
     {
-        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId, ct);
-        var sys = BuildSystemMessage(persona, rolePlay);
+        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
+        var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
         var client = await _factory.CreateAsync(providerId, modelId);
         var prompt = string.IsNullOrWhiteSpace(sys) ? input : $"{sys}\n\nUser: {input}";
         try
@@ -371,8 +371,8 @@ public class AgentService : IAgentService
     // Non-interface helper: include a Tool Index in the system message
     public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools, bool rolePlay = false)
     {
-        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId);
-        var sys = BuildSystemMessage(persona, rolePlay);
+        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId);
+        var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
         var toolIndex = BuildToolIndexSection(tools);
         var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
         var client = await _factory.CreateAsync(providerId, modelId);

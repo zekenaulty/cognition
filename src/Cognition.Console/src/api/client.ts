@@ -1,3 +1,4 @@
+
 export type LoginResponse = {
   id: string
   username: string
@@ -31,7 +32,7 @@ function joinUrl(base: string, path: string) {
   return base + path
 }
 
-async function request<T>(path: string, options: RequestInit = {}, accessToken?: string): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}, accessToken?: string): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined)
@@ -59,6 +60,20 @@ async function request<T>(path: string, options: RequestInit = {}, accessToken?:
 }
 
 export const api = {
+  grantPersonaAccess: (
+    personaId: string,
+    userId: string,
+    accessToken?: string,
+    isDefault: boolean = false,
+    label: string | null = null
+  ) => request<{ id: string }>(
+    `/api/personas/${personaId}/access`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ UserId: userId, IsDefault: isDefault, Label: label })
+    },
+    accessToken
+  ),
   register: (username: string, password: string, email?: string) =>
     request<{ id: string; username: string; primaryPersonaId?: string | null }>(
       '/api/users/register',
