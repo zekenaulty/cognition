@@ -15,6 +15,7 @@ public class ConversationMessage : BaseEntity
     public Guid? CreatedByUserId { get; set; }
 
     public ChatRole Role { get; set; }
+    public string? Metatype { get; set; } // e.g. Image, TextResponse, PlanThought, ToolResult
     public string Content { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

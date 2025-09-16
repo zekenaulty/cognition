@@ -48,6 +48,10 @@ public class CognitionDbContext : DbContext
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
     public DbSet<ConversationSummary> ConversationSummaries => Set<ConversationSummary>();
 
+        public DbSet<ConversationPlan> ConversationPlans => Set<ConversationPlan>();
+        public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
+        public DbSet<ConversationThought> ConversationThoughts => Set<ConversationThought>();
+
     public DbSet<Tool> Tools => Set<Tool>();
     public DbSet<ToolParameter> ToolParameters => Set<ToolParameter>();
     public DbSet<ToolProviderSupport> ToolProviderSupports => Set<ToolProviderSupport>();

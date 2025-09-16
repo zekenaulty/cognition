@@ -16,6 +16,7 @@ public interface IAgentService
     Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
     Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
     Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
+    Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, bool rolePlay = false, CancellationToken ct = default);
 }
 
 public class AgentService : IAgentService
@@ -52,6 +53,129 @@ public class AgentService : IAgentService
         }
     }
 
+    public async Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, bool rolePlay = false, CancellationToken ct = default)
+    {
+            // 1. Save original message
+            var userMsg = new ConversationMessage
+            {
+                ConversationId = conversationId,
+                FromPersonaId = personaId,
+                Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
+                Content = input,
+                Timestamp = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow,
+                Metatype = "TextResponse"
+            };
+            _db.ConversationMessages.Add(userMsg);
+            await _db.SaveChangesAsync(ct);
+
+            // 2. Create ConversationPlan
+            var plan = new ConversationPlan
+            {
+                ConversationId = conversationId,
+                PersonaId = personaId,
+                Title = $"Plan for: {input.Substring(0, Math.Min(40, input.Length))}",
+                Description = $"CoT plan generated for message {userMsg.Id}",
+                CreatedAt = DateTime.UtcNow,
+                Tasks = new List<ConversationTask>()
+            };
+            _db.ConversationPlans.Add(plan);
+            await _db.SaveChangesAsync(ct);
+
+            var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
+            // Discover available tools for this provider/model and expose a compact schema
+            var tools = await _db.Tools
+                .Include(t => t.Parameters)
+                .Where(t => t.IsActive)
+                .Where(t => _db.ToolProviderSupports.Any(s => s.ToolId == t.Id
+                                                            && s.ProviderId == providerId
+                                                            && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
+                                                            && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
+                .AsNoTracking()
+                .ToListAsync(ct);
+            var toolIndex = BuildToolIndexSection(tools);
+            var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
+            var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
+            var client = await _factory.CreateAsync(providerId, modelId);
+            var thoughts = new List<string>();
+            var results = new List<string>();
+
+            // 3. Planning loop: generate thoughts, tasks, and execute with tool awareness
+            int step = 1;
+            for (; step <= maxSteps; step++)
+            {
+                // Generate next thought with full tool/system context
+                var planPrompt = $"{fullSys}\n\nCurrent plan: {plan.Title}\nStep {step}: What should happen next?";
+                var thought = await client.GenerateAsync(planPrompt, track: false);
+                thoughts.Add(thought);
+
+                // Save thought
+                var thoughtEntity = new ConversationThought
+                {
+                    ConversationId = conversationId,
+                    PersonaId = personaId,
+                    Thought = thought,
+                    Timestamp = DateTime.UtcNow
+                };
+                _db.ConversationThoughts.Add(thoughtEntity);
+                await _db.SaveChangesAsync(ct);
+
+                // Create task
+                var task = new ConversationTask
+                {
+                    ConversationPlanId = plan.Id,
+                    StepNumber = step,
+                    Thought = thought,
+                    Action = $"Action for step {step}",
+                    CreatedAt = DateTime.UtcNow
+                };
+                _db.ConversationTasks.Add(task);
+                plan.Tasks.Add(task);
+                await _db.SaveChangesAsync(ct);
+
+                // Execute task with full tool awareness
+                var execPrompt = $"{fullSys}\n\nExecute: {thought}";
+                var result = await AskWithToolsAsync(personaId, providerId, modelId, execPrompt, rolePlay, ct);
+                task.Result = result;
+                results.Add(result);
+                await _db.SaveChangesAsync(ct);
+
+                // Optionally, add a 'thought' message to ConversationMessage
+                var thoughtMsg = new ConversationMessage
+                {
+                    ConversationId = conversationId,
+                    FromPersonaId = personaId,
+                    Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
+                    Content = result,
+                    Timestamp = DateTime.UtcNow,
+                    CreatedAtUtc = DateTime.UtcNow,
+                    Metatype = "PlanThought"
+                };
+                _db.ConversationMessages.Add(thoughtMsg);
+                await _db.SaveChangesAsync(ct);
+
+                // Early exit if minSteps reached and some stop condition (not implemented)
+                if (step >= minSteps && thought.Contains("[END]")) break;
+            }
+
+            // 5. Aggregate and return final response
+            var finalResponse = string.Join("\n", results);
+            var assistantMsg = new ConversationMessage
+            {
+                ConversationId = conversationId,
+                FromPersonaId = personaId,
+                Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
+                Content = finalResponse,
+                Timestamp = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow,
+                Metatype = "TextResponse"
+            };
+            _db.ConversationMessages.Add(assistantMsg);
+            await _db.SaveChangesAsync(ct);
+
+            return finalResponse;
+    }
+
     public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
     {
         // Feature-flag: if ToolsEnabled exists and is disabled, fall back to AskAsync
@@ -79,6 +203,10 @@ public class AgentService : IAgentService
             if (!TryGetJsonObjectText(draft, out var jsonText))
             {
                 return draft; // not JSON -> direct answer
+            }
+            if (string.IsNullOrWhiteSpace(jsonText))
+            {
+                return draft;
             }
             using var doc = JsonDocument.Parse(jsonText);
             var root = doc.RootElement;
@@ -129,6 +257,7 @@ public class AgentService : IAgentService
             Content = input,
             Timestamp = DateTime.UtcNow,
             CreatedAtUtc = DateTime.UtcNow
+                , Metatype = "TextResponse"
         };
         _db.ConversationMessages.Add(userMsg);
         await _db.SaveChangesAsync(ct);
@@ -198,6 +327,7 @@ public class AgentService : IAgentService
             Content = reply,
             Timestamp = DateTime.UtcNow,
             CreatedAtUtc = DateTime.UtcNow
+                , Metatype = "TextResponse"
         };
         _db.ConversationMessages.Add(assistantMsg);
         await _db.SaveChangesAsync(ct);

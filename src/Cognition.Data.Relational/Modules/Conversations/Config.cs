@@ -52,6 +52,7 @@ public class ConversationMessageConfiguration : IEntityTypeConfiguration<Convers
         b.HasOne(x => x.ToPersona).WithMany().HasForeignKey(x => x.ToPersonaId).HasConstraintName("fk_conversation_messages_to_persona");
         b.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
         b.Property(x => x.Role).HasColumnName("role").HasConversion<string>();
+        b.Property(x => x.Metatype).HasColumnName("metatype");
         b.Property(x => x.Content).HasColumnName("content");
         b.Property(x => x.Timestamp).HasColumnName("timestamp");
         b.HasIndex(x => new { x.ConversationId, x.Timestamp }).HasDatabaseName("ix_conversation_messages_conversation_ts");
@@ -77,5 +78,55 @@ public class ConversationSummaryConfiguration : IEntityTypeConfiguration<Convers
         b.Property(x => x.Timestamp).HasColumnName("timestamp");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+    }
+}
+
+public class ConversationPlanConfiguration : IEntityTypeConfiguration<ConversationPlan>
+{
+    public void Configure(EntityTypeBuilder<ConversationPlan> b)
+    {
+        b.ToTable("conversation_plans");
+        b.HasKey(x => x.Id).HasName("pk_conversation_plans");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.ConversationId).HasColumnName("conversation_id");
+        b.HasOne(x => x.Conversation).WithMany().HasForeignKey(x => x.ConversationId).HasConstraintName("fk_conversation_plans_conversations");
+        b.Property(x => x.PersonaId).HasColumnName("persona_id");
+        b.HasOne(x => x.Persona).WithMany().HasForeignKey(x => x.PersonaId).HasConstraintName("fk_conversation_plans_persona");
+        b.Property(x => x.Title).HasColumnName("title");
+        b.Property(x => x.Description).HasColumnName("description");
+        b.Property(x => x.CreatedAt).HasColumnName("created_at");
+    }
+}
+
+public class ConversationTaskConfiguration : IEntityTypeConfiguration<ConversationTask>
+{
+    public void Configure(EntityTypeBuilder<ConversationTask> b)
+    {
+        b.ToTable("conversation_tasks");
+        b.HasKey(x => x.Id).HasName("pk_conversation_tasks");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.ConversationPlanId).HasColumnName("conversation_plan_id");
+        b.HasOne(x => x.ConversationPlan).WithMany(p => p.Tasks).HasForeignKey(x => x.ConversationPlanId).HasConstraintName("fk_conversation_tasks_plan");
+        b.Property(x => x.StepNumber).HasColumnName("step_number");
+        b.Property(x => x.Thought).HasColumnName("thought");
+        b.Property(x => x.Action).HasColumnName("action");
+        b.Property(x => x.Result).HasColumnName("result");
+        b.Property(x => x.CreatedAt).HasColumnName("created_at");
+    }
+}
+
+public class ConversationThoughtConfiguration : IEntityTypeConfiguration<ConversationThought>
+{
+    public void Configure(EntityTypeBuilder<ConversationThought> b)
+    {
+        b.ToTable("conversation_thoughts");
+        b.HasKey(x => x.Id).HasName("pk_conversation_thoughts");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.ConversationId).HasColumnName("conversation_id");
+        b.HasOne(x => x.Conversation).WithMany().HasForeignKey(x => x.ConversationId).HasConstraintName("fk_conversation_thoughts_conversations");
+        b.Property(x => x.PersonaId).HasColumnName("persona_id");
+        b.HasOne(x => x.Persona).WithMany().HasForeignKey(x => x.PersonaId).HasConstraintName("fk_conversation_thoughts_persona");
+        b.Property(x => x.Thought).HasColumnName("thought");
+        b.Property(x => x.Timestamp).HasColumnName("timestamp");
     }
 }

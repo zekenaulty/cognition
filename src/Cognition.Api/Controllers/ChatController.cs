@@ -74,4 +74,32 @@ public class ChatController : ControllerBase
             return StatusCode(500, new { code = "chat_failed", message = ex.Message });
         }
     }
+
+    public record AskWithPlanRequest(
+        Guid ConversationId,
+        Guid PersonaId,
+        Guid ProviderId,
+        Guid? ModelId,
+        string Input,
+        int MinSteps,
+        int MaxSteps,
+        bool RolePlay = false);
+
+    [HttpPost("ask-with-plan")]
+    public async Task<IActionResult> AskWithPlan([FromBody] AskWithPlanRequest req)
+    {
+        try
+        {
+            var reply = await _agents.AskWithPlanAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.MinSteps, req.MaxSteps, req.RolePlay, HttpContext.RequestAborted);
+            return Ok(new { reply });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { code = "conversation_not_found", message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { code = "ask_with_plan_failed", message = ex.Message });
+        }
+    }
 }

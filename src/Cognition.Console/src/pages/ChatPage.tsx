@@ -84,7 +84,8 @@ import MarkdownView from '../components/MarkdownView'
 import EmojiButton from '../components/EmojiButton'
 import ImageViewer from '../components/ImageViewer'
 
-type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string; imgPrompt?: string; imgStyleName?: string }
+type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string; imgPrompt?: string; imgStyleName?: string; metatype?: string }
+type Message = { role: 'system' | 'user' | 'assistant'; content: string; fromId?: string; fromName?: string; timestamp?: string; imageId?: string; pending?: boolean; localId?: string; imgPrompt?: string; imgStyleName?: string; metatype?: string }
 type Provider = { id: string; name: string; displayName?: string }
 type Model = { id: string; name: string; displayName?: string }
 type Persona = { id: string; name: string; gender?: string }
@@ -425,7 +426,8 @@ export default function ChatPage() {
           fromName: personas.find(p => p.id === personaId)?.name || 'Assistant',
           timestamp: i.createdAtUtc ?? i.CreatedAtUtc,
           imgPrompt: i.prompt ?? i.Prompt,
-          imgStyleName: i.styleName ?? i.StyleName
+          imgStyleName: i.styleName ?? i.StyleName,
+          metatype: 'Image'
         }))
       }
 
@@ -526,7 +528,7 @@ Rules:
       // Add placeholder assistant message for image generation
       const placeholderId = `img-${Date.now()}-${Math.random().toString(36).slice(2)}`
       const assistantName = personas.find(p => p.id === personaId)?.name || 'Assistant'
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Generating image', fromName: assistantName, pending: true, localId: placeholderId, imgPrompt: '', imgStyleName: style?.name }])
+  setMessages(prev => [...prev, { role: 'assistant', content: 'Generating image', fromName: assistantName, pending: true, localId: placeholderId, imgPrompt: '', imgStyleName: style?.name, metatype: 'Image' }])
       if (stickToBottomRef.current) forceScrollRef.current = true
       // Step 1: ask LLM to synthesize an image prompt from recent chat + style
       let finalPrompt = ''
@@ -546,7 +548,7 @@ Rules:
         finalPrompt = `${style?.promptPrefix ? style.promptPrefix + '\n' : ''}${lines}`.slice(0, 2500)
       }
       // Update placeholder with the prompt we will use (for thumbnail titles)
-      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, imgPrompt: finalPrompt } : m))
+  setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, imgPrompt: finalPrompt, metatype: 'Image' } : m))
       // Step 2: request image generation
       const payload = { ConversationId: conversationId, PersonaId: personaId, Prompt: finalPrompt, Width: 1024, Height: 1024, StyleId: imgStyleId || undefined, NegativePrompt: style?.negativePrompt || undefined, Provider: 'OpenAI', Model: imgModel }
       const res = await fetch('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(payload) })
@@ -557,7 +559,7 @@ Rules:
       }
       const data = await res.json()
       const id = data.id || data.Id
-      setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: '', imageId: String(id), imgPrompt: finalPrompt, imgStyleName: style?.name } : m))
+  setMessages(prev => prev.map(m => m.localId === placeholderId ? { ...m, pending: false, content: '', imageId: String(id), imgPrompt: finalPrompt, imgStyleName: style?.name, metatype: 'Image' } : m))
       if (stickToBottomRef.current) {
         forceScrollRef.current = true
       }
