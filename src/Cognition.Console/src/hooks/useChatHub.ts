@@ -7,6 +7,7 @@ import {
   ToolExecutionCompleted,
   ChatBusEvent,
 } from '../types/events';
+import { chatBus } from '../bus/chatBus';
 
 export interface UseChatHubOptions {
   conversationId: string;
@@ -53,6 +54,25 @@ export function useChatHub(options: UseChatHubOptions) {
       }
     };
 
+    // Send a user message to an explicit conversation id
+    const sendUserMessageTo = async (
+      convId: string,
+      text: string,
+      personaId?: string,
+      providerId?: string,
+      modelId?: string
+    ): Promise<boolean> => {
+      const conn = connectionRef.current;
+      if (!conn || conn.state !== signalR.HubConnectionState.Connected) return false;
+      try {
+        await conn.invoke('AppendUserMessage', convId, text, personaId, providerId, modelId);
+        return true;
+      } catch (err) {
+        console.error('Hub sendUserMessageTo error:', err);
+        return false;
+      }
+    };
+
     // Request a plan from the server
     const requestPlan = async (): Promise<boolean> => {
       const conn = connectionRef.current;
@@ -90,32 +110,47 @@ export function useChatHub(options: UseChatHubOptions) {
       connectionRef.current = connection;
 
       connection.on('AssistantMessageAppended', (msg: AssistantMessageAppended) => {
+        chatBus.emit('assistant-message', msg);
         if (onAssistantMessage) onAssistantMessage(msg);
       });
       connection.on('PlanReady', (evt: PlanReady) => {
+        chatBus.emit('plan-ready', evt);
         if (onPlanReady) onPlanReady(evt);
       });
       connection.on('ToolExecutionRequested', (evt: ToolExecutionRequested) => {
+        chatBus.emit('tool-requested', evt);
         if (onToolExecutionRequested) onToolExecutionRequested(evt);
       });
       connection.on('ToolExecutionCompleted', (evt: ToolExecutionCompleted) => {
+        chatBus.emit('tool-completed', evt);
         if (onToolExecutionCompleted) onToolExecutionCompleted(evt);
       });
 
+      chatBus.emit('connection-state', { state: 'connecting' });
       connection.start().then(() => {
         if (!isMounted) return;
+        chatBus.emit('connection-state', { state: 'connected' });
         connection.invoke('JoinConversation', conversationId);
+      }).catch(err => console.warn('Hub start error', err));
+
+      connection.onreconnected(() => {
+        chatBus.emit('connection-state', { state: 'reconnecting' });
+        // Rejoin the conversation after reconnect
+        try { connection.invoke('JoinConversation', conversationId); } catch (e) { console.warn('Rejoin failed', e); }
+        chatBus.emit('connection-state', { state: 'connected' });
       });
 
       return () => {
         isMounted = false;
         connection.stop();
         connectionRef.current = null;
+        chatBus.emit('connection-state', { state: 'disconnected' });
       };
     }, [conversationId, accessToken, onAssistantMessage, onPlanReady, onToolExecutionRequested, onToolExecutionCompleted]);
 
     return {
       sendUserMessage,
+      sendUserMessageTo,
       requestPlan,
       ackToolStep,
       connectionRef,

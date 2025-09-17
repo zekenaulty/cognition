@@ -1,15 +1,14 @@
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchPersonas } from '../api/client';
-import { request } from '../api/client';
 import { ChatLayout } from '../components/chat/ChatLayout';
 import { FeedbackBar } from '../components/chat/FeedbackBar';
 import { useAuth } from '../auth/AuthContext';
 import { useChatHub } from '../hooks/useChatHub';
 import { useConversationsMessages } from '../hooks/useConversationsMessages';
 import { useImageStyles } from '../hooks/useImageStyles';
-import { useImageActions } from '../hooks/useImageActions';
 import { MessageItemProps } from '../components/chat/MessageItem';
+import { normalizeRole } from '../utils/chat';
 
 // Types
 type Provider = { id: string; name: string; displayName?: string };
@@ -44,13 +43,6 @@ export default function ChatPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [modelId, setModelId] = useState<string>(getLS(LS.model));
   // Conversations/messages hook
-  // Normalize all loaded messages from backend to MessageItemProps
-  const normalizeRole = (r: any): 'system' | 'user' | 'assistant' => {
-    if (r === 1 || r === '1' || r === 'user') return 'user';
-    if (r === 2 || r === '2' || r === 'assistant') return 'assistant';
-    if (r === 0 || r === '0' || r === 'system') return 'system';
-    return 'user';
-  };
   const {
     conversations,
     conversationId,
@@ -65,7 +57,7 @@ export default function ChatPage() {
   }, []);
 
   // Image actions hook
-  const { createImageMessage, pendingImageId } = useImageActions(setMessages);
+  const [imgPending, setImgPending] = useState(false);
 
   // ChatHub event bus
   const chatHub = useChatHub({
@@ -73,36 +65,28 @@ export default function ChatPage() {
     accessToken,
     onAssistantMessage: (msg) => {
       console.log('AssistantMessageAppended event:', msg);
-      // Remove pending flag from matching user message if present
+      // Resolve the first pending assistant bubble, or append new one
       setMessages(prev => {
-        // Normalize all roles to MessageItemProps type
-        const normalizeRole = (r: any): 'system' | 'user' | 'assistant' => {
-          if (r === 1 || r === '1' || r === 'user') return 'user';
-          if (r === 2 || r === '2' || r === 'assistant') return 'assistant';
-          if (r === 0 || r === '0' || r === 'system') return 'system';
-          return 'user';
-        };
-        // Fix all previous messages
-        const updated = prev.map(m => ({
-          ...m,
-          role: normalizeRole(m.role)
-        })).map(m =>
-          m.role === 'user' && m.pending && m.content === msg.content
-            ? { ...m, pending: false }
-            : m
-        );
-        // Append assistant message, strictly typed
+        const updated = prev.map(m => ({ ...m, role: normalizeRole(m.role) }));
+        const idx = updated.findIndex(m => m.role === 'assistant' && m.pending);
+        if (idx !== -1) {
+          const copy = [...updated];
+          copy[idx] = { ...copy[idx], pending: false, content: msg.content, timestamp: msg.timestamp } as MessageItemProps;
+          return copy;
+        }
         const assistantMsg: MessageItemProps = {
           role: 'assistant',
           content: msg.content,
           fromName: personas.find(p => p.id === personaId)?.name || 'Assistant',
           timestamp: msg.timestamp,
         };
-        return [
-          ...updated,
-          assistantMsg,
-        ];
+        return [...updated, assistantMsg];
       });
+      // Clear any pending send timeout
+      if (pendingAssistantTimerRef.current) {
+        clearTimeout(pendingAssistantTimerRef.current);
+        pendingAssistantTimerRef.current = null;
+      }
     },
     onPlanReady: (evt) => {
       // If plan is an array of steps, use it; otherwise, wrap in array
@@ -208,30 +192,116 @@ export default function ChatPage() {
     if (!accessToken || !text.trim()) return;
     setBusy(true);
     try {
-      // If no conversationId, let server create it
+      // Ensure a conversation exists
       let convId = conversationId;
       if (!convId) {
-        // Server will create a new conversation and push the id back via event
-        // Optionally, you could set a temporary id or wait for the event
+        const res = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+          body: JSON.stringify({ Title: null, ParticipantIds: personaId ? [personaId] : [] })
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          throw new Error(err || 'Failed to create conversation');
+        }
+        const body = await res.json();
+        convId = body.id || body.Id;
+        setConversationId(convId);
+        try { localStorage.setItem('cognition.chat.conversationId', convId); } catch {}
+        // Make sure hub has joined this conversation
+        try { await chatHub.connectionRef.current?.invoke('JoinConversation', convId); } catch {}
       }
-      const localId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      await chatHub.sendUserMessage(text, personaId, providerId, modelId);
-      setMessages(prev => [
+
+      // Append user message immediately (no pending)
+      const placeholderId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setMessages(prev => ([
         ...prev,
-        {
-          role: normalizeRole(1),
-          content: text,
-          fromId: userId,
-          fromName: personas.find(p => p.id === personaId)?.name || 'User',
-          timestamp: new Date().toISOString(),
-          pending: true,
-          localId,
-        } as MessageItemProps,
-      ]);
+        { role: 'user', content: text, fromId: userId, fromName: 'You', timestamp: new Date().toISOString() } as MessageItemProps,
+        // Add a pending assistant placeholder with localId
+        { role: 'assistant', content: '', fromName: personas.find(p => p.id === personaId)?.name || 'Assistant', pending: true, localId: placeholderId } as any,
+      ]));
+
+      // Send via hub
+      const ok = await (async () => {
+        if (convId) {
+          try { await chatHub.connectionRef.current?.invoke('AppendUserMessage', convId, text, personaId, providerId, modelId); return true; } catch {}
+        }
+        return await chatHub.sendUserMessage(text, personaId, providerId, modelId);
+      })();
+      // Start a timeout to convert pending assistant to error only if no reply arrives
+      if (!ok) {
+        // Let the timeout handle marking error to avoid false negatives
+      }
+      if (pendingAssistantTimerRef.current) clearTimeout(pendingAssistantTimerRef.current);
+      pendingAssistantTimerRef.current = window.setTimeout(() => {
+        setMessages(prev => prev.map(m => (m.role === 'assistant' && (m as any).localId === placeholderId && m.pending)
+          ? { ...m, pending: false, content: 'Error sending message.' }
+          : m
+        ));
+        pendingAssistantTimerRef.current = null;
+      }, 8000) as any;
     } catch (e: any) {
       setError(e.message || 'Failed to send message');
+      // Do not immediately mark pending assistant as error; allow timeout to handle to avoid dupes
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Track pending assistant timeout
+  const pendingAssistantTimerRef = useRef<number | null>(null);
+
+  // Generate image from recent chat using style
+  const handleGenerateImage = async () => {
+    if (!accessToken || !conversationId || !personaId || !providerId) return;
+    setImgPending(true);
+    try {
+      const style = imgStyles.find(s => s.id === imgStyleId);
+      const recent = messages.slice(-6);
+      const lines = recent.map(m => `${m.fromName || m.role}: ${m.content}`).join('\n');
+      const styleRecipe = [`Style: ${style?.name || ''}`, style?.description || '', style?.promptPrefix || ''].filter(Boolean).join('\n');
+      const sysInstr = `You are an expert prompt-writer for image models.\nGiven a conversation transcript and a style recipe, produce ONE concise, vivid, concrete image prompt.\nRules:\n- 1-4 sentences. <= 2500 characters total.\n- Describe subject, setting, background, foreground, lighting, mood, and camera.\n- Avoid copyrighted characters/logos and explicit sexual content.\n- Do NOT include disclaimers or the transcript itself. Output only the prompt.`;
+      const userInstr = `Style recipe:\n${styleRecipe}\n\nConversation (recent):\n${lines}\n\nWrite the single best image prompt now.`;
+      const promptBuildInput = `${sysInstr}\n\n${userInstr}`;
+
+      // Add placeholder assistant message for image generation
+      const assistantName = personas.find(p => p.id === personaId)?.name || 'Assistant';
+      const placeholderId = `img-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Generating image', fromName: assistantName, pending: true, localId: placeholderId, imgPrompt: '', imgStyleName: style?.name, metatype: 'Image' } as any]);
+
+      // Step 1: ask LLM to synthesize an image prompt
+      let finalPrompt = '';
+      try {
+        const resp = await fetch('/api/chat/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ PersonaId: personaId, ProviderId: providerId, ModelId: modelId || null, Input: promptBuildInput, RolePlay: false })
+        });
+        if (resp.ok) {
+          const rj = await resp.json();
+          finalPrompt = String(rj.reply || '').trim();
+        }
+      } catch {}
+      if (!finalPrompt) {
+        finalPrompt = `${style?.promptPrefix ? style.promptPrefix + '\n' : ''}${lines}`.slice(0, 2500);
+      }
+      setMessages(prev => prev.map(m => (m as any).localId === placeholderId ? { ...m, imgPrompt: finalPrompt, metatype: 'Image' } : m));
+
+      // Step 2: request image generation
+      const payload = { ConversationId: conversationId, PersonaId: personaId, Prompt: finalPrompt, Width: 1024, Height: 1024, StyleId: imgStyleId || undefined, NegativePrompt: style?.negativePrompt || undefined, Provider: 'OpenAI', Model: 'dall-e-3' };
+      const res = await fetch('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(payload) });
+      if (!res.ok) {
+        const txt = await res.text();
+        setMessages(prev => prev.map(m => (m as any).localId === placeholderId ? { ...m, pending: false, content: `Image error: ${txt}` } : m));
+        return;
+      }
+      const data = await res.json();
+      const id = data.id || data.Id;
+      setMessages(prev => prev.map(m => (m as any).localId === placeholderId ? { ...m, pending: false, content: '', imageId: String(id), imgPrompt: finalPrompt, imgStyleName: style?.name, metatype: 'Image' } : m));
+    } catch (e: any) {
+      setMessages(prev => prev.map(m => (m as any).pending ? { ...m, pending: false, content: `Image error: ${String(e?.message || e)}` } : m));
+    } finally {
+      setImgPending(false);
     }
   };
 
@@ -256,10 +326,13 @@ export default function ChatPage() {
       toolActions={toolActions}
       conversations={conversations}
       conversationId={conversationId ?? ''}
-      onConversationChange={setConversationId}
+      onConversationChange={(id) => { setMessages([]); setConversationId(id); }}
       imgStyles={imgStyles}
       imgStyleId={imgStyleId}
       onImgStyleChange={setImgStyleId}
+      imgPending={imgPending}
+      onGenerateImage={handleGenerateImage}
+      onNewConversation={() => { setMessages([]); setConversationId(null); try { localStorage.removeItem('cognition.chat.conversationId'); } catch {} }}
     />
   );
 }

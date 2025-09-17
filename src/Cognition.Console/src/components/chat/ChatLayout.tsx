@@ -1,12 +1,8 @@
 import React from 'react';
-import { Box, Stack, Card, CardContent } from '@mui/material';
-import { PersonaPicker } from './PersonaPicker';
-import { ProviderModelPicker } from './ProviderModelPicker';
+import { Box, Stack, Card, CardContent, Alert, CircularProgress, Typography } from '@mui/material';
 import { PlanTimeline } from './PlanTimeline';
 import { ToolTrace } from './ToolTrace';
 import { MessageList } from './MessageList';
-import { MessageComposer } from './MessageComposer';
-import { FeedbackBar } from './FeedbackBar';
 import { MessageInput } from './MessageInput';
 import ImageViewer from '../ImageViewer';
 import { ChatMenu } from './ChatMenu';
@@ -34,18 +30,20 @@ export type ChatLayoutProps = {
   imgStyles: { id: string; name: string; description?: string; promptPrefix?: string; negativePrompt?: string }[];
   imgStyleId: string;
   onImgStyleChange: (id: string) => void;
+  imgPending?: boolean;
+  onGenerateImage?: () => void;
+  onNewConversation?: () => void;
 };
 
-export function ChatLayout({ personas, personaId, onPersonaChange, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange }: ChatLayoutProps) {
-  // Placeholder state for image menu, image model, image count, image pending, viewer, and input only.
+export function ChatLayout({ personas, personaId, onPersonaChange, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, error, loading, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange, imgPending, onGenerateImage, onNewConversation }: ChatLayoutProps) {
+  // Placeholder state for image menu, image model, image count, viewer, and input only.
   const [imgModel, setImgModel] = React.useState('dall-e-3');
   const [imgMsgCount, setImgMsgCount] = React.useState(6);
-  const [imgPending, setImgPending] = React.useState(false);
-  const [viewer, setViewer] = React.useState<{ open: boolean, id?: string, title?: string }>({ open: false });
+  const [viewer, setViewer] = React.useState<{ open: boolean, id?: string, title?: string, prompt?: string }>({ open: false });
   const [input, setInput] = React.useState('');
 
   // Image click handler for MessageList
-  const handleImageClick = (id: string, title?: string) => setViewer({ open: true, id, title });
+  const handleImageClick = (id: string, prompt?: string) => setViewer({ open: true, id, prompt });
 
   // Restore single column layout with Card, correct height/overflow
   return (
@@ -71,13 +69,13 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                 imgModel={imgModel}
                 onImgModelChange={setImgModel}
                 imgMsgCount={imgMsgCount}
-                onImgMsgCountChange={setImgMsgCount}
-                imgPending={imgPending}
-                onGenerateImage={() => {}}
+              onImgMsgCountChange={setImgMsgCount}
+                imgPending={!!imgPending}
+                onGenerateImage={() => { onGenerateImage && onGenerateImage(); }}
                 conversations={conversations}
                 conversationId={conversationId ?? ''}
                 onConversationChange={onConversationChange}
-                onNewConversation={() => {}}
+                onNewConversation={() => { onNewConversation && onNewConversation(); }}
               />
               {/* Conversation title next to gear/settings */}
               <Box sx={{ ml: 2 }}>
@@ -92,7 +90,7 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
               <ToolTrace actions={toolActions} />
             </Box>
             {/* Chat area */}
-            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', pr: 1 }}>
+            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', pr: 1 }}>
               <MessageList messages={messages} onImageClick={handleImageClick} />
             </Box>
             {/* Input bar */}
@@ -101,13 +99,26 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
               onChange={setInput}
               onSend={() => { onSend(input); setInput(''); }}
               busy={busy}
+              onSTT={(t) => setInput(prev => prev + (prev ? ' ' : '') + t)}
             />
-            {/* Error/loading states (to be restored) */}
-            {/* TODO: Render error/loading states here */}
+            {/* Error/loading states */}
+            {error && (
+              <Alert severity="error">{error}</Alert>
+            )}
+            {loading && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={18} />
+                <Typography variant="caption" color="text.secondary">Loading…</Typography>
+              </Box>
+            )}
+            {/* Context caption */}
+            <Typography variant="caption" color="text.secondary">
+              {`Chatting as ${personas.find((p: any) => p.id === personaId)?.name || 'Assistant'} via ${providers.find((p: any) => p.id === providerId)?.displayName || providers.find((p: any) => p.id === providerId)?.name || 'Provider'}${modelId ? ` · ${models.find((m: any) => m.id === modelId)?.displayName || models.find((m: any) => m.id === modelId)?.name || modelId}` : ''}${conversationId ? '' : ' · New conversation on first send'}`}
+            </Typography>
           </CardContent>
         </Card>
       </Box>
-      <ImageViewer open={viewer.open} onClose={() => setViewer({ open: false })} imageId={viewer.id} title={viewer.title} />
+      <ImageViewer open={viewer.open} onClose={() => setViewer({ open: false })} imageId={viewer.id} title={viewer.title} prompt={viewer.prompt} />
     </Box>
   );
 }

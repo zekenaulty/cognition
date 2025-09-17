@@ -50,15 +50,16 @@ export default function MarkdownView({ content }: Props) {
       </ReactMarkdown>
       <style>{`
         .md-body p { margin: 0.2rem 0; }
-        .md-body pre { background: rgba(255,255,255,0.06); padding: 10px; border-radius: 6px; overflow: auto; }
-        .md-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.95em; }
-        .md-body table { border-collapse: collapse; width: 100%; }
+        .md-body pre { background: rgba(255,255,255,0.06); padding: 10px; border-radius: 6px; overflow: auto; max-width: 100%; }
+        .md-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.95em; word-break: break-word; overflow-wrap: anywhere; }
+        .md-body table { border-collapse: collapse; width: 100%; max-width: 100%; display: block; overflow-x: auto; }
         .md-body th, .md-body td { border: 1px solid rgba(255,255,255,0.12); padding: 6px 8px; }
         .md-body blockquote { border-left: 3px solid rgba(255,255,255,0.2); margin: 8px 0; padding: 4px 12px; color: rgba(255,255,255,0.75); }
         .md-body ul, .md-body ol { padding-left: 1.2rem; }
         .md-body hr { border: none; border-top: 1px solid rgba(255,255,255,0.12); margin: 12px 0; }
+        .md-body img { max-width: 100%; height: auto; }
+        .md-body { overflow-wrap: anywhere; word-break: break-word; }
       `}</style>
     </div>
   )
 }
-

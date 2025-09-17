@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchConversations, fetchMessages } from '../api/client';
+import { normalizeRole } from '../utils/chat';
 
 type Conv = { id: string; title?: string | null };
 type Message = {
@@ -33,9 +34,11 @@ export function useConversationsMessages(accessToken: string, personaId: string)
       const list = await fetchConversations(accessToken, personaId);
       const items: Conv[] = (list as any[]).map((c: any) => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }));
       setConversations(items);
-      // Auto-select first or saved
-  const pick = items[0]?.id || null;
-  setConversationId(pick);
+      // Auto-select saved if valid, else first
+      let saved: string | null = null;
+      try { saved = localStorage.getItem('cognition.chat.conversationId'); } catch {}
+      const pick = (saved && items.find(x => x.id === saved)) ? saved : (items[0]?.id || null);
+      setConversationId(pick);
     };
     loadConvs();
   }, [accessToken, personaId]);
@@ -52,7 +55,7 @@ export function useConversationsMessages(accessToken: string, personaId: string)
 
       // Normalize chat messages
       const baseMsgs: Message[] = (msgList as any[]).map((m: any) => ({
-        role: m.role ?? m.Role,
+        role: normalizeRole(m.role ?? m.Role),
         content: m.content ?? m.Content,
         fromId: m.fromPersonaId ?? m.FromPersonaId,
         fromName: m.fromName ?? m.FromName,
@@ -87,6 +90,11 @@ export function useConversationsMessages(accessToken: string, personaId: string)
     };
     loadMsgs();
   }, [accessToken, conversationId]);
+
+  // Clear messages when persona changes (new convo context)
+  useEffect(() => {
+    setMessages([]);
+  }, [personaId]);
 
   return {
     conversations,

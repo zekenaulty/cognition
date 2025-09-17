@@ -5,6 +5,7 @@ import { Box, Typography, IconButton } from '@mui/material';
 import { FeedbackBar } from './FeedbackBar';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import MarkdownView from '../MarkdownView';
+import { normalizeRole } from '../../utils/chat';
 
 export type MessageItemProps = {
     role: 'system' | 'user' | 'assistant';
@@ -20,14 +21,6 @@ export type MessageItemProps = {
 
 export function MessageItem({ role, content, fromName, timestamp, pending }: MessageItemProps) {
     const { speak } = useTts();
-    // Robust role normalization (string/number)
-    function normalizeRole(r: any): 'system' | 'user' | 'assistant' {
-        if (r === 1 || r === '1' || r === 'user') return 'user';
-        if (r === 2 || r === '2' || r === 'assistant') return 'assistant';
-        if (r === 0 || r === '0' || r === 'system') return 'system';
-        return 'user';
-    }
-
     const normRole = normalizeRole(role);
     const isUser = normRole === 'user';
     const isAssistantPending = normRole === 'assistant' && pending;

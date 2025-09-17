@@ -77,14 +77,22 @@ export function ChatMenu(props: ChatMenuProps) {
           {subMenu === 'persona' && props.personas.map(p => (
             <MenuItem key={p.id} selected={props.personaId === p.id} onClick={() => { props.onPersonaChange(p.id); setSubMenu(null); setSubMenuAnchor(null); }}>{p.name}</MenuItem>
           ))}
-          {subMenu === 'provider' && [
-            <MenuItem key="provider" selected disabled>{props.providers.find(p => p.id === props.providerId)?.name || 'Provider'}</MenuItem>,
-            ...props.models.map(m => (
-              <MenuItem key={m.id} selected={props.modelId === m.id} onClick={() => { props.onModelChange(m.id); setSubMenu(null); setSubMenuAnchor(null); }}>{m.displayName || m.name}</MenuItem>
-            ))
-          ]}
+          {subMenu === 'provider' && (
+            <React.Fragment>
+              {props.providers.map(pr => (
+                <MenuItem key={pr.id} selected={props.providerId === pr.id} onClick={() => { props.onProviderChange(pr.id); }}>{pr.displayName || pr.name}</MenuItem>
+              ))}
+              {props.models.length > 0 && <Divider />}
+              {props.models.map(m => (
+                <MenuItem key={m.id} selected={props.modelId === m.id} onClick={() => { props.onModelChange(m.id); setSubMenu(null); setSubMenuAnchor(null); }}>{m.displayName || m.name}</MenuItem>
+              ))}
+            </React.Fragment>
+          )}
           {subMenu === 'images' && (
             <React.Fragment>
+              {/* Generate at top */}
+              <MenuItem key="img-generate" disabled={props.imgPending} onClick={() => { props.onGenerateImage(); setSubMenu(null); setSubMenuAnchor(null); }}>{props.imgPending ? 'Generating…' : 'Generate Image'}</MenuItem>
+              <Divider />
               {props.imgStyles.map(s => (
                 <MenuItem key={s.id} selected={props.imgStyleId === s.id} onClick={() => { props.onImgStyleChange(s.id); setSubMenu(null); setSubMenuAnchor(null); }}>{s.name}</MenuItem>
               ))}
