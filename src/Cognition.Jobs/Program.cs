@@ -77,7 +77,6 @@ builder.Services.AddCognitionClients();
 
 
 // Register example + concrete jobs and recurring registration
-builder.Services.AddTransient<ExampleJob>();
 builder.Services.AddTransient<TextJobs>();
 builder.Services.AddTransient<ImageJobs>();
 builder.Services.AddHostedService<RecurringJobsRegistrar>();
@@ -91,6 +90,10 @@ builder.Services.AddTransient<ToolExecutionHandler>();
 // Register SignalRNotifier and inject into ResponseHandler
 builder.Services.AddSingleton(sp => new SignalRNotifier("http://localhost:5000/hub/chat"));
 builder.Services.AddTransient<ResponseHandler>();
+builder.Services.AddTransient<HubForwarderHandler>();
+
+// Register SignalRNotifier as a hosted service
+builder.Services.AddHostedService<SignalRNotifierHostedService>();
 
 var host = builder.Build();
 host.Run();

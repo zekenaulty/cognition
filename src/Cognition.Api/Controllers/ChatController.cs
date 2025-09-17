@@ -118,12 +118,6 @@ public class ChatController : ControllerBase
         // Emit UserMessageAppended
         var userMsgEvt = new UserMessageAppended(req.ConversationId, req.PersonaId, req.Input, req.RolePlay);
         await _bus.Publish(userMsgEvt);
-        await _hubContext.Clients.Group(req.ConversationId.ToString()).SendAsync("UserMessageAppended", new {
-            ConversationId = req.ConversationId,
-            PersonaId = req.PersonaId,
-            Content = req.Input,
-            Timestamp = message.CreatedAtUtc.ToString("o")
-        });
 
         var assistantContent = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
         if (string.IsNullOrWhiteSpace(assistantContent))
@@ -145,12 +139,6 @@ public class ChatController : ControllerBase
         await _db.SaveChangesAsync();
         var assistantEvt = new AssistantMessageAppended(req.ConversationId, req.PersonaId, assistantContent);
         await _bus.Publish(assistantEvt);
-        await _hubContext.Clients.Group(req.ConversationId.ToString()).SendAsync("AssistantMessageAppended", new {
-            ConversationId = req.ConversationId,
-            PersonaId = req.PersonaId,
-            Content = assistantContent,
-            Timestamp = assistantMessage.CreatedAtUtc.ToString("o")
-        });
 
         // Return 202 Accepted
         return Accepted(new { 

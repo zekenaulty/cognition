@@ -1,3 +1,50 @@
+export async function fetchImageStyles(accessToken: string): Promise<any[]> {
+  const headers: HeadersInit = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const res = await fetch('/api/image-styles', { headers });
+  if (res.ok) return await res.json();
+  return [];
+}
+export async function fetchConversations(accessToken: string, personaId?: string): Promise<any[]> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const url = personaId ? `/api/conversations?participantId=${personaId}` : `/api/conversations`;
+  const res = await fetch(url, { headers });
+  if (res.ok) return await res.json();
+  return [];
+}
+
+export async function fetchMessages(accessToken: string, conversationId: string): Promise<any[]> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const res = await fetch(`/api/conversations/${conversationId}/messages`, { headers });
+  if (res.ok) return await res.json();
+  return [];
+}
+export async function fetchProviders(accessToken: string): Promise<any[]> {
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+  const res = await fetch('/api/llm/providers', { headers });
+  if (res.ok) return await res.json();
+  return [];
+}
+
+export async function fetchModels(accessToken: string, providerId: string): Promise<any[]> {
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+  const res = await fetch(`/api/llm/providers/${providerId}/models`, { headers });
+  if (res.ok) return await res.json();
+  return [];
+}
+// Persona API client
+export async function fetchPersonas(accessToken: string, userId: string): Promise<any[]> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const res = await fetch(`/api/users/${userId}/personas`, { headers });
+  if (res.ok) {
+    return await res.json();
+  }
+  // Fallback: global assistants
+  const globalRes = await fetch('/api/personas', { headers });
+  if (globalRes.ok) {
+    return await globalRes.json();
+  }
+  return [];
+}
 
 export type LoginResponse = {
   id: string
@@ -7,8 +54,8 @@ export type LoginResponse = {
   expiresAt: string
   refreshToken: string
 }
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+// Vite exposes env variables via import.meta.env
+const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || '';
 
 export class ApiError extends Error {
   status?: number
@@ -153,4 +200,11 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify({ PersonaId: personaId }) },
       accessToken
     )
+}
+
+export async function fetchImageMessages(accessToken: string, conversationId: string): Promise<any[]> {
+  const headers: Record<string, string> = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const res = await fetch(`/api/images/by-conversation/${conversationId}`, { headers });
+  if (res.ok) return await res.json();
+  return [];
 }

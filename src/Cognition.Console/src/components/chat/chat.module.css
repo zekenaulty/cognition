@@ -1,0 +1,114 @@
+/* Conversation title next to gear/settings */
+.conversation-title {
+  font-weight: 500;
+  font-size: 1.1em;
+}
+.bubble-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+.bubble-header.user {
+  justify-content: flex-end;
+}
+.bubble-header.assistant {
+  justify-content: flex-start;
+}
+.bubble-name {
+  color: #666;
+  font-size: 0.85em;
+}
+.bubble-timestamp {
+  margin-left: 8px;
+  color: #999;
+  font-size: 0.85em;
+}
+.bubble-footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin-top: 1rem;
+}
+.bubble-footer.user {
+  justify-content: flex-end;
+}
+.bubble-footer.assistant {
+  justify-content: flex-start;
+}
+.bubble-tts {
+  margin-left: 8px;
+}
+/* Bubble base style */
+.chat-bubble {
+  padding: 1.25rem;
+  max-width: 78%;
+  word-break: break-word;
+  margin-bottom: 0.5rem;
+  box-sizing: border-box;
+}
+.chat-bubble.user {
+  background: linear-gradient(135deg, rgba(100,181,246,0.22) 0%, rgba(33,150,243,0.18) 100%);
+  color: #e3f2fd;
+  align-self: flex-end;
+  margin-left: 2rem;
+  margin-right: 0;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 8px;
+}
+.chat-bubble.assistant {
+  background: linear-gradient(135deg, rgba(33,150,243,0.12) 0%, rgba(21,101,192,0.18) 100%);
+  color: #fff;
+  align-self: flex-start;
+  margin-left: 0;
+  margin-right: 2rem;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  .chat-bubble.user {
+    background: linear-gradient(135deg, rgba(100,181,246,0.32) 0%, rgba(33,150,243,0.28) 100%);
+    color: #e3f2fd;
+  }
+  .chat-bubble.assistant {
+    background: linear-gradient(135deg, rgba(33,150,243,0.22) 0%, rgba(21,101,192,0.28) 100%);
+    color: #fff;
+  }
+}
+.bubble-right {
+  text-align: right;
+}
+.bubble-left {
+  text-align: left;
+}
+.pending-state {
+  margin-left: 8px;
+  color: #f5a623;
+  font-style: italic;
+  font-weight: 500;
+  display: inline;
+}
+.loading-dots span {
+  display: inline-block;
+  animation: blink 1.2s infinite;
+}
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+/* Image caption style for image messages */
+.image-caption {
+  font-size: 0.85em;
+  color: #888;
+  margin-top: 0.5rem;
+}
+@keyframes blink {
+  0% { opacity: 0.2; }
+  20% { opacity: 1; }
+  100% { opacity: 0.2; }
+}

@@ -15,15 +15,6 @@ public class RecurringJobsRegistrar : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        // Register recurring jobs on startup
-        RecurringJob.AddOrUpdate<ExampleJob>(
-            "example-job",
-            job => job.RunAsync(CancellationToken.None),
-            () => Cron.Minutely(),
-            new RecurringJobOptions
-            {
-                TimeZone = TimeZoneInfo.Local
-            });
 
         _logger.LogInformation("Recurring jobs registered.");
         return Task.CompletedTask;

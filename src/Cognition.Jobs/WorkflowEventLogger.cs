@@ -24,7 +24,7 @@ namespace Cognition.Jobs
                 ConversationId = conversationId,
                 Kind = kind,
                 Payload = payload,
-                CreatedAtUtc = DateTime.UtcNow
+                Timestamp = DateTime.UtcNow
             };
             _db.WorkflowEvents.Add(evt);
             await _db.SaveChangesAsync();

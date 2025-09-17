@@ -28,6 +28,9 @@ builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddOpenApi();
 builder.Services.AddCognitionClients();
 builder.Services.AddCognitionTools();
+// Wire AgentService DI for API controllers
+builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Clients.Agents.AgentService>();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {

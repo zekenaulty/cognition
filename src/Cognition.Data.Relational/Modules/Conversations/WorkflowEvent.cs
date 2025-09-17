@@ -13,6 +13,6 @@ namespace Cognition.Data.Relational.Modules.Conversations
         public Guid ConversationId { get; set; }
         public string Kind { get; set; } = "";
         public JObject Payload { get; set; } = new JObject();
-        public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     }
 }
