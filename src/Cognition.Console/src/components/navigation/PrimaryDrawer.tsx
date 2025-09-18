@@ -1,5 +1,5 @@
 import React from 'react';
-import { Drawer, Box, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Accordion, AccordionSummary, AccordionDetails, Tooltip, IconButton, Typography } from '@mui/material';
+import { Drawer, Box, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Accordion, AccordionSummary, AccordionDetails, Tooltip, IconButton, Typography, Chip } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import ImageIcon from '@mui/icons-material/Image';
 import WorkIcon from '@mui/icons-material/Work';
@@ -18,7 +18,7 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
   const navigate = useNavigate();
   const { isAuthenticated, auth } = useAuth();
   const security = useSecurity();
-  const [personas, setPersonas] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [personas, setPersonas] = React.useState<Array<{ id: string; name: string; isSystem?: boolean }>>([]);
   const [expandedId, setExpandedId] = React.useState<string | false>(false);
   const [convsByPersona, setConvsByPersona] = React.useState<Record<string, Array<{ id: string; title?: string | null }>>>({});
   const [recent, setRecent] = React.useState<Array<{ id: string; title?: string | null; createdAtUtc?: string }>>([]);
@@ -26,13 +26,36 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
   async function loadPersonas() {
     try {
       const list = await request<Array<{ id: string; name: string; type?: number | string }>>('/api/personas', {}, auth?.accessToken);
+      // Fetch system personas to identify default assistant
+      let systemList: Array<{ id: string; name: string; type?: number | string; ownedBy?: string }> = [];
+      try { systemList = await request('/api/personas/system', {}, auth?.accessToken) } catch {}
+      const defaultSystem = (systemList || []).find((p: any) => p.type === 'Assistant' || p.type === 1);
       const filtered = (list || []).filter(p => {
         const t: any = (p as any).type;
         return t === 1 || t === 'Assistant' || t === 3 || t === 'RolePlayCharacter';
       }).map(p => ({ id: (p as any).id, name: (p as any).name }));
-      setPersonas(filtered);
+      // Pin default system assistant to top if present
+      const pinnedId = defaultSystem ? (defaultSystem as any).id as string : '';
+      const ordered = pinnedId ? ([...filtered.filter(x => x.id === pinnedId), ...filtered.filter(x => x.id !== pinnedId)]) : filtered;
+      // Drop personas that have no conversations (except the pinned system persona)
+      const toCheck = ordered.filter(p => p.id !== pinnedId);
+      const results = await Promise.all(toCheck.map(async (p) => {
+        try {
+          const convs = await request<Array<{ id: string }>>(`/api/conversations?participantId=${p.id}`, {}, auth?.accessToken);
+          return { p, convs };
+        } catch { return { p, convs: [] as Array<{ id: string }> } }
+      }));
+      const kept = [
+        ...(pinnedId ? ordered.filter(x => x.id === pinnedId) : []),
+        ...results.filter(r => (r.convs || []).length > 0).map(r => r.p)
+      ].map(x => ({ ...x, isSystem: x.id === pinnedId }));
+      setPersonas(kept);
       // Prune conversations for personas no longer visible
-      setConvsByPersona(prev => Object.fromEntries(Object.entries(prev).filter(([pid]) => filtered.some(f => f.id === pid))));
+      const preloads = Object.fromEntries(results.map(r => [r.p.id, r.convs || []]));
+      setConvsByPersona(prev => {
+        const merged = { ...prev, ...preloads };
+        return Object.fromEntries(Object.entries(merged).filter(([pid]) => kept.some(f => f.id === pid)));
+      });
     } catch {}
   }
   async function loadConversations(pid: string) { try { const list = await request<Array<{ id: string; title?: string | null }>>(`/api/conversations?participantId=${pid}`, {}, auth?.accessToken); setConvsByPersona(prev => ({ ...prev, [pid]: list })); } catch {} }
@@ -144,7 +167,10 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
               <Accordion key={p.id} expanded={expandedId === p.id} onChange={handleAccordion(p.id)} sx={{ bgcolor: '#0f1115', color: '#e0e0e0' }}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon htmlColor="#bbb" />}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', justifyContent: 'space-between' }} onClick={(e) => e.stopPropagation()}>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
+                      {p.isSystem && <Chip size="small" label="System" variant="outlined" sx={{ height: 18 }} />}
+                    </Box>
                     <Tooltip title="New chat">
                       <IconButton size="small" onClick={(e) => { e.stopPropagation(); navigate(`/chat/${p.id}`); onClose(); }} sx={{ color: '#9ad' }}>
                         <ChatIcon fontSize="small" />

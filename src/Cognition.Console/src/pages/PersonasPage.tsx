@@ -377,7 +377,7 @@ export default function PersonasPage() {
           <Typography variant="h5">Personas</Typography>
           <Stack direction="row" spacing={1} alignItems="center">
             <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd}>New</Button>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAgenticOpen(true)}>+ Agentic</Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAgenticOpen(true)}>Agentic</Button>
           </Stack>
         </Stack>
         <Stack direction="row" spacing={2} alignItems="center">

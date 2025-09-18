@@ -20,6 +20,23 @@ public static class StartupDataSeeder
 
         var user = await EnsureUserAsync(db, logger, username: "Zythis", password: "root");
 
+        // Safety net: ensure a system-owned default assistant persona exists
+        if (!await db.Personas.AsNoTracking().AnyAsync(p => p.OwnedBy == OwnedBy.System && p.Type == PersonaType.Assistant))
+        {
+            db.Personas.Add(new Persona
+            {
+                Name = "Cognition Assistant",
+                Nickname = "Assistant",
+                Role = "Default AI Assistant",
+                Type = PersonaType.Assistant,
+                OwnedBy = OwnedBy.System,
+                IsPublic = true,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+            logger.LogInformation("Created system default assistant persona.");
+        }
+
         // Backfill: ensure primary persona types are correct (User) and owner set
         var users = await db.Users.AsNoTracking().ToListAsync();
         foreach (var u in users)

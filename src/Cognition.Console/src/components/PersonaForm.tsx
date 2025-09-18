@@ -53,7 +53,7 @@ export function PersonaForm({ value, onChange }: { value: PersonaModel; onChange
               fullWidth
               value={model.type as any ?? 1}
               onChange={e => set('type', Number(e.target.value))}
-              SelectProps={{ native: true }}
+              SelectProps={{ native: true, inputProps: { title: 'Type' } }}
               helperText="Choose how this persona behaves"
             >
               {/* Intentionally omit 'User' from options */}
@@ -138,7 +138,7 @@ function VoicePicker({ value, onChange }: { value: string; onChange: (v: string)
         label="TTS Voice"
         value={value}
         onChange={e => onChange(e.target.value)}
-        SelectProps={{ native: true }}
+        SelectProps={{ native: true, inputProps: { title: 'TTS Voice' } }}
       >
         <option value=""></option>
         {options.map(o => (

@@ -48,8 +48,18 @@ public class ConversationsController : ControllerBase
         var conv = new Conversation { Title = req.Title, CreatedAtUtc = DateTime.UtcNow };
         _db.Conversations.Add(conv);
         await _db.SaveChangesAsync();
-        // participants
-        foreach (var pid in req.ParticipantIds.Distinct())
+        // participants (use default system assistant persona when none provided)
+        var participants = (req.ParticipantIds ?? Array.Empty<Guid>()).Distinct().ToList();
+        if (participants.Count == 0)
+        {
+            var defaultPid = await _db.Personas
+                .AsNoTracking()
+                .Where(p => p.OwnedBy == Cognition.Data.Relational.Modules.Personas.OwnedBy.System && p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.Assistant)
+                .Select(p => (Guid?)p.Id)
+                .FirstOrDefaultAsync();
+            if (defaultPid.HasValue) participants.Add(defaultPid.Value);
+        }
+        foreach (var pid in participants)
         {
             _db.ConversationParticipants.Add(new ConversationParticipant
             {

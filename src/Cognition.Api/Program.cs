@@ -11,6 +11,7 @@ using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Cognition.Api.Infrastructure.Swagger;
 using Cognition.Api.Infrastructure.Hangfire;
+using Microsoft.EntityFrameworkCore;
 using Rebus.ServiceProvider;
 using Rebus.Config;
 
@@ -241,6 +242,12 @@ if (File.Exists(Path.Combine(wwwroot, "index.html")))
     app.MapFallbackToFile("/index.html");
 }
 
+// Apply pending migrations then seed default data (user + personas)
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<CognitionDbContext>();
+    try { db.Database.Migrate(); } catch { }
+}
 // Seed default data (user + personas)
 using (var scope = app.Services.CreateScope())
 {
