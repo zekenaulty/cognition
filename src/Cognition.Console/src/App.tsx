@@ -23,7 +23,9 @@ import DescriptionIcon from '@mui/icons-material/Description'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import AddIcon from '@mui/icons-material/Add'
 import ChatIcon from '@mui/icons-material/Chat'
+import DeleteIcon from '@mui/icons-material/Delete'
 import { request } from './api/client'
+import { PrimaryDrawer } from './components/navigation/PrimaryDrawer'
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material'
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -111,102 +113,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           </Stack>
         </Toolbar>
       </AppBar>
-      <Drawer anchor="left" open={drawerOpen} onClose={handleDrawerClose} PaperProps={{ sx: { bgcolor: '#0b0c10', color: '#e0e0e0' } }}>
-        <Box sx={{ width: 300 }} role="presentation">
-          <List>
-            <ListItem disablePadding>
-              <ListItemButton component={Link} href="/" onClick={handleDrawerClose}>
-                <ListItemIcon><HomeIcon /></ListItemIcon>
-                <ListItemText primary="Home" />
-              </ListItemButton>
-            </ListItem>
-            {isAuthenticated && (
-              <ListItem disablePadding>
-                <ListItemButton component={Link} href="/image-lab" onClick={handleDrawerClose}>
-                  <ListItemIcon><ImageIcon /></ListItemIcon>
-                  <ListItemText primary="Image Lab" />
-                </ListItemButton>
-              </ListItem>
-            )}
-            {security.isAdmin && (
-              <>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => { window.open('/hangfire', 'hangfireTab'); handleDrawerClose(); }}>
-                    <ListItemIcon><WorkIcon /></ListItemIcon>
-                    <ListItemText primary="Jobs" />
-                  </ListItemButton>
-                </ListItem>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => { window.open('/openapi/v1.json', 'apiJsonTab'); handleDrawerClose(); }}>
-                    <ListItemIcon><ApiIcon /></ListItemIcon>
-                    <ListItemText primary="API JSON" />
-                  </ListItemButton>
-                </ListItem>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => { window.open('/swagger', 'swaggerTab'); handleDrawerClose(); }}>
-                    <ListItemIcon><DescriptionIcon /></ListItemIcon>
-                    <ListItemText primary="Swagger" />
-                  </ListItemButton>
-                </ListItem>
-              </>
-            )}
-          </List>
-          <Divider />
-          {isAuthenticated && (
-            <Box sx={{ px: 1, pb: 1 }}>
-              <Typography variant="subtitle2" sx={{ px: 1, pt: 1, pb: 1, opacity: 0.9 }}>Recent</Typography>
-              <List dense>
-                {recent.map(r => (
-                  <ListItem key={r.id} disablePadding>
-                    <ListItemButton onClick={() => openRecentConversation(r.id)}>
-                      <ListItemIcon><ChatIcon fontSize="small" /></ListItemIcon>
-                      <ListItemText primary={r.title || `Conversation ${r.id.slice(0,8)}`} />
-                    </ListItemButton>
-                  </ListItem>
-                ))}
-                {recent.length === 0 && (
-                  <Typography variant="caption" color="text.secondary" sx={{ px: 2 }}>No recent conversations</Typography>
-                )}
-              </List>
-            </Box>
-          )}
-          {/* Personas accordion */}
-          {isAuthenticated && (
-            <Box sx={{ px: 1, pb: 2 }}>
-              <Typography variant="subtitle2" sx={{ px: 1, pt: 1, pb: 1, opacity: 0.9 }}>Personas</Typography>
-              {personas.map(p => (
-                <Accordion key={p.id} expanded={expandedId === p.id} onChange={handleAccordion(p.id)} sx={{ bgcolor: '#0f1115', color: '#e0e0e0' }}>
-                  <AccordionSummary expandIcon={<ExpandMoreIcon htmlColor="#bbb" />}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', justifyContent: 'space-between' }} onClick={(e) => e.stopPropagation()}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
-                      <Tooltip title="New chat">
-                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); navigate(`/chat/${p.id}`); setDrawerOpen(false); }} sx={{ color: '#9ad' }}>
-                          <ChatIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    <List dense>
-                      {(convsByPersona[p.id] || []).map(c => (
-                        <ListItem key={c.id} disablePadding>
-                          <ListItemButton onClick={() => { navigate(`/chat/${p.id}/${c.id}`); setDrawerOpen(false); }}>
-                            <ListItemIcon><ChatIcon fontSize="small" /></ListItemIcon>
-                            <ListItemText primary={c.title || `Conversation ${c.id.slice(0,8)}`} />
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                      {(!convsByPersona[p.id] || convsByPersona[p.id].length === 0) && (
-                        <Typography variant="caption" color="text.secondary">No conversations</Typography>
-                      )}
-                    </List>
-                  </AccordionDetails>
-                </Accordion>
-              ))}
-            </Box>
-          )}
-        </Box>
-      </Drawer>
+            <PrimaryDrawer open={drawerOpen} onClose={handleDrawerClose} />
       <Container sx={{ flex: 1, py: 4 }}>{children}</Container>
       <Box component="footer" sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>
         <Typography variant="caption">© {new Date().getFullYear()} Cognition</Typography>
@@ -253,3 +160,6 @@ export default function App() {
     </ThemeProvider>
   )
 }
+
+
+

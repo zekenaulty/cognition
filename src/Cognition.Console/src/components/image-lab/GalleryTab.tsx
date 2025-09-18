@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CircularProgress, FormControl, Grid, InputLabel, MenuItem, Select, Stack, Typography } from '@mui/material'
-import type { Style } from '../ImageLabPage'
+import type { Persona, Style } from '../../pages/ImageLabPage'
 
 type GalleryItem = { id: string; prompt?: string; styleName?: string; createdAtUtc?: string }
 
 type Props = {
   accessToken: string
+  personas: Persona[]
   personaId: string
+  onChangePersona: (id: string) => void
   styles: Style[]
   onOpenViewer: (id: string, title?: string) => void
 }
 
-export default function GalleryTab({ accessToken, personaId, styles, onOpenViewer }: Props) {
+export default function GalleryTab({ accessToken, personas, personaId, onChangePersona, styles, onOpenViewer }: Props) {
   const [items, setItems] = useState<GalleryItem[]>([])
   const [loading, setLoading] = useState(false)
   const [styleFilter, setStyleFilter] = useState<string>('')
@@ -47,15 +49,21 @@ export default function GalleryTab({ accessToken, personaId, styles, onOpenViewe
 
   return (
     <Stack spacing={2} sx={{ flex: 1, minHeight: 0 }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
-        <FormControl size="small" sx={{ minWidth: 240 }}>
-          <InputLabel id="gal-style">Filter by style</InputLabel>
-          <Select labelId="gal-style" label="Filter by style" value={styleFilter} onChange={e => setStyleFilter(String(e.target.value))}>
-            <MenuItem value=""><em>All styles</em></MenuItem>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'nowrap' }}>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="persona">Persona</InputLabel>
+          <Select labelId="persona" label="Persona" value={personaId} onChange={e => onChangePersona(String(e.target.value))}>
+            {personas.map(p => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="gal-style">Style</InputLabel>
+          <Select labelId="gal-style" label="Style" value={styleFilter} onChange={e => setStyleFilter(String(e.target.value))}>
+            <MenuItem value=""><em>All</em></MenuItem>
             {styles.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
           </Select>
         </FormControl>
-        {loading && <CircularProgress size={20} />}
+        {loading && <CircularProgress size={18} />}
         <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
           {filtered.length} image{filtered.length === 1 ? '' : 's'}
         </Typography>

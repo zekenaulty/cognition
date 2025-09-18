@@ -339,7 +339,7 @@ export default function ChatPage() {
         const body = await res.json();
         convId = body.id || body.Id;
         setConversationId(convId);
-        try { localStorage.setItem('cognition.chat.conversationId', convId); } catch {}
+        try { localStorage.setItem('cognition.chat.conversationId', convId ?? ''); } catch {}
         // Make sure hub has joined this conversation
         try { await chatHub.connectionRef.current?.invoke('JoinConversation', convId); } catch {}
       }

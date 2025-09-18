@@ -3,7 +3,7 @@ import {
   Alert, Button, Card, CardContent, Checkbox, Divider, FormControlLabel,
   List, ListItem, ListItemButton, ListItemText, Stack, TextField, Typography
 } from '@mui/material'
-import type { Style } from '../ImageLabPage'
+import type { Style } from '../../pages/ImageLabPage'
 
 type Props = {
   accessToken: string

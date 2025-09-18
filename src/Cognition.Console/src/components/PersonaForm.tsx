@@ -1,5 +1,6 @@
 import { Box, Button, Chip, Grid2 as Grid, Stack, Switch, TextField, Typography } from '@mui/material'
 import { useEffect, useState } from 'react'
+import { useSecurity } from '../hooks/useSecurity'
 
 export type PersonaModel = {
   id?: string
@@ -8,6 +9,7 @@ export type PersonaModel = {
   role?: string
   gender?: string
   isOwner?: boolean
+  type?: number | 'User' | 'Assistant' | 'Agent' | 'RolePlayCharacter'
   essence?: string
   beliefs?: string
   background?: string
@@ -22,6 +24,7 @@ export type PersonaModel = {
 
 export function PersonaForm({ value, onChange }: { value: PersonaModel; onChange: (p: PersonaModel) => void }) {
   const [model, setModel] = useState<PersonaModel>(value)
+  const security = useSecurity()
   useEffect(() => setModel(value), [value])
   function set<K extends keyof PersonaModel>(k: K, v: PersonaModel[K]) {
     const next = { ...model, [k]: v }
@@ -42,6 +45,24 @@ export function PersonaForm({ value, onChange }: { value: PersonaModel; onChange
         <Grid size={{ xs: 12, md: 6 }}>
           <TextField label="Nickname" value={model.nickname || ''} onChange={e => set('nickname', e.target.value)} fullWidth />
         </Grid>
+        {(model.isOwner || security.isAdmin) && (
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField
+              label="Type"
+              select
+              fullWidth
+              value={model.type as any ?? 1}
+              onChange={e => set('type', Number(e.target.value))}
+              SelectProps={{ native: true }}
+              helperText="Choose how this persona behaves"
+            >
+              {/* Intentionally omit 'User' from options */}
+              <option value={1}>Assistant</option>
+              <option value={2}>Agent</option>
+              <option value={3}>Role Play Character</option>
+            </TextField>
+          </Grid>
+        )}
         <Grid size={{ xs: 12, md: 6 }}>
           <TextField label="Role" value={model.role || ''} onChange={e => set('role', e.target.value)} fullWidth />
         </Grid>

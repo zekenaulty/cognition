@@ -169,8 +169,8 @@ export const api = {
       accessToken
     ),
 
-  // type comes from backend enum: 0 = User, 1 = Assistant (or string if enum serialized as string)
-  listPersonas: (accessToken?: string) => request<Array<{ id: string; name: string; type?: number | 'User' | 'Assistant' }>>('/api/personas', {}, accessToken),
+  // type comes from backend enum: 0=User, 1=Assistant, 2=Agent, 3=RolePlayCharacter (or string if enum serialized as string)
+  listPersonas: (accessToken?: string) => request<Array<{ id: string; name: string; type?: number | 'User' | 'Assistant' | 'Agent' | 'RolePlayCharacter' }>>('/api/personas', {}, accessToken),
   getPersona: (id: string, accessToken?: string) => request<any>(`/api/personas/${id}`, {}, accessToken),
   createPersona: (
     payload: {

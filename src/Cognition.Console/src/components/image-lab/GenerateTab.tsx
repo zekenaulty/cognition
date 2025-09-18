@@ -1,28 +1,33 @@
 import { useMemo, useState } from 'react'
 import { Button, Chip, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Tooltip, Typography } from '@mui/material'
-import type { Style } from '../ImageLabPage'
+import type { Style } from '../../pages/ImageLabPage'
 
 type Props = {
   accessToken: string
   personaId: string
-  providerId: string
-  providerName: string
-  imageModel: string
   styles: Style[]
   onOpenViewer: (id: string, title?: string) => void
 }
 
 export default function GenerateTab(props: Props) {
-  const { accessToken, personaId, providerId, providerName, imageModel, styles, onOpenViewer } = props
+  const { accessToken, personaId, styles, onOpenViewer } = props
   const [styleId, setStyleId] = useState<string>('')
   const [prompt, setPrompt] = useState<string>('')
+  const [model, setModel] = useState<string>('dall-e-3')
+  const [size, setSize] = useState<string>('1024x1024')
   const [w, setW] = useState<number>(1024)
   const [h, setH] = useState<number>(1024)
   const [pending, setPending] = useState(false)
 
   const selectedStyle = useMemo(() => styles.find(s => s.id === styleId), [styles, styleId])
 
-  const canGenerate = !!personaId && !!providerId && !!imageModel && prompt.trim().length > 0 && !pending
+  const canGenerate = !!personaId && prompt.trim().length > 0 && !pending
+
+  const handleSizeChange = (val: string) => {
+    setSize(val)
+    const [sw, sh] = val.split('x').map(v => parseInt(v, 10))
+    if (!isNaN(sw) && !isNaN(sh)) { setW(sw); setH(sh) }
+  }
 
   const doGenerate = async () => {
     if (!canGenerate) return
@@ -43,8 +48,8 @@ export default function GenerateTab(props: Props) {
           Height: h,
           StyleId: styleId || undefined,
           NegativePrompt: selectedStyle?.negativePrompt || undefined,
-          Provider: providerName || 'OpenAI',
-          Model: imageModel || 'dall-e-3',
+          Provider: 'OpenAI',
+          Model: model || 'dall-e-3',
         })
       })
       if (!res.ok) {
@@ -64,6 +69,12 @@ export default function GenerateTab(props: Props) {
   return (
     <Stack spacing={2}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="mod">Image Model</InputLabel>
+          <Select labelId="mod" label="Image Model" value={model} onChange={e => setModel(String(e.target.value))}>
+            <MenuItem value="dall-e-3">DALL·E 3</MenuItem>
+          </Select>
+        </FormControl>
         <FormControl size="small" sx={{ minWidth: 240 }}>
           <InputLabel id="sty">Style</InputLabel>
           <Select labelId="sty" label="Style" value={styleId} onChange={e => setStyleId(String(e.target.value))}>
@@ -75,8 +86,14 @@ export default function GenerateTab(props: Props) {
       </Stack>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-        <TextField label="Width" type="number" size="small" value={w} onChange={e => setW(parseInt(e.target.value || '0', 10) || 0)} sx={{ maxWidth: 160 }} />
-        <TextField label="Height" type="number" size="small" value={h} onChange={e => setH(parseInt(e.target.value || '0', 10) || 0)} sx={{ maxWidth: 160 }} />
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel id="size">Size</InputLabel>
+          <Select labelId="size" label="Size" value={size} onChange={e => handleSizeChange(String(e.target.value))}>
+            <MenuItem value="1024x1024">1024 x 1024 (Square)</MenuItem>
+            <MenuItem value="1792x1024">1792 x 1024 (Wide)</MenuItem>
+            <MenuItem value="1024x1792">1024 x 1792 (Tall)</MenuItem>
+          </Select>
+        </FormControl>
       </Stack>
 
       <TextField
@@ -89,7 +106,7 @@ export default function GenerateTab(props: Props) {
       />
 
       <Stack direction="row" spacing={2} alignItems="center">
-        <Tooltip title={!personaId ? 'Choose a persona' : (!providerId ? 'Choose a provider' : (prompt.trim().length === 0 ? 'Write a prompt' : ''))}>
+        <Tooltip title={!personaId ? 'Choose a persona' : (prompt.trim().length === 0 ? 'Write a prompt' : '')}>
           <span>
             <Button variant="contained" disabled={!canGenerate} onClick={doGenerate}>
               {pending ? 'Generating…' : 'Generate'}

@@ -37,7 +37,8 @@ public class PersonasController : ControllerBase
         string[]? NarrativeThemes,
         string[]? DomainExpertise,
         bool? IsPublic,
-        string? Voice
+        string? Voice,
+        Cognition.Data.Relational.Modules.Personas.PersonaType? Type
     );
 
     
@@ -150,6 +151,17 @@ public class PersonasController : ControllerBase
         if (req.DomainExpertise != null) p.DomainExpertise = req.DomainExpertise;
         if (req.IsPublic.HasValue) p.IsPublic = req.IsPublic.Value;
         if (req.Voice != null) p.Voice = req.Voice;
+        // Persona type guards:
+        // - Never allow setting type to User via update
+        // - If persona is already User, its type is locked and cannot change
+        if (req.Type.HasValue)
+        {
+            if (req.Type.Value == Cognition.Data.Relational.Modules.Personas.PersonaType.User)
+                return BadRequest("Cannot change persona type to User.");
+            if (p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.User && req.Type.Value != Cognition.Data.Relational.Modules.Personas.PersonaType.User)
+                return BadRequest("User persona type is locked and cannot be changed.");
+            p.Type = req.Type.Value;
+        }
         p.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();

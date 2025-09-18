@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, request } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { useSecurity } from '../hooks/useSecurity'
 import { Alert, Box, Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography, FormControl, InputLabel, Select, MenuItem, Chip } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
@@ -9,12 +10,13 @@ import { PersonaForm, PersonaModel } from '../components/PersonaForm'
 
 export default function PersonasPage() {
   const { auth } = useAuth()
-  const [items, setItems] = useState<Array<{ id: string; name: string; type?: number | 'User' | 'Assistant' }>>([])
+  const security = useSecurity()
+  const [items, setItems] = useState<Array<{ id: string; name: string; type?: number | 'User' | 'Assistant' | 'Agent' | 'RolePlayCharacter' }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<PersonaModel | null>(null)
-  const [filterType, setFilterType] = useState<'All'|'User'|'Assistant'>('All')
+  const [filterType, setFilterType] = useState<'All'|'User'|'Assistant'|'Agent'|'RolePlay'>('All')
 
   // Agentic create dialog state
   const [agenticOpen, setAgenticOpen] = useState(false)
@@ -68,11 +70,21 @@ export default function PersonasPage() {
   }, [providerId, auth?.accessToken])
 
   const isUserType = (t: any) => t === 0 || t === 'User'
-  const typeText = (t: any) => (isUserType(t) ? 'User' : 'Assistant')
+  const typeText = (t: any) => {
+    if (t === 0 || t === 'User') return 'User'
+    if (t === 1 || t === 'Assistant') return 'Assistant'
+    if (t === 2 || t === 'Agent') return 'Agent'
+    if (t === 3 || t === 'RolePlayCharacter') return 'Role Play Character'
+    return String(t)
+  }
 
   const filtered = useMemo(() => {
     if (filterType === 'All') return items
-    return items.filter(p => (filterType === 'User' ? isUserType(p.type) : !isUserType(p.type)))
+    if (filterType === 'User') return items.filter(p => isUserType(p.type))
+    if (filterType === 'Assistant') return items.filter(p => (p.type === 1 || p.type === 'Assistant'))
+    if (filterType === 'Agent') return items.filter(p => (p.type === 2 || p.type === 'Agent'))
+    if (filterType === 'RolePlay') return items.filter(p => (p.type === 3 || p.type === 'RolePlayCharacter'))
+    return items
   }, [items, filterType])
 
   async function onEdit(id: string) {
@@ -84,7 +96,8 @@ export default function PersonasPage() {
         nickname: p.nickname,
         role: p.role,
         gender: p.gender,
-        isOwner: !!p.isOwner,
+        isOwner: !!(p.isOwner ?? (p as any).IsOwner),
+        type: p.type,
         voice: p.voice,
         essence: p.essence,
         beliefs: p.beliefs,
@@ -112,16 +125,18 @@ export default function PersonasPage() {
     try {
       await api.deletePersona(id, auth?.accessToken)
       await load()
+      try { window.dispatchEvent(new CustomEvent('cognition-personas-changed')); } catch {}
     } catch (e: any) { setError(e.message || 'Failed to delete') }
   }
 
   async function onSave() {
     if (!editing) return
     const isOwner = !!editing.isOwner
+    const canFull = isOwner || security.isAdmin
     try {
       let personaId = editing.id
       if (editing.id) {
-        const payload: any = isOwner ? {
+        const payload: any = canFull ? {
           Name: editing.name,
           Nickname: editing.nickname,
           Role: editing.role,
@@ -135,7 +150,8 @@ export default function PersonasPage() {
           SignatureTraits: editing.signatureTraits,
           NarrativeThemes: editing.narrativeThemes,
           DomainExpertise: editing.domainExpertise,
-          IsPublic: editing.isPublic
+          IsPublic: editing.isPublic,
+          Type: (editing.type === 'Assistant' ? 1 : editing.type === 'Agent' ? 2 : editing.type === 'RolePlayCharacter' ? 3 : (typeof editing.type === 'number' ? editing.type : undefined))
         } : { Voice: editing.voice }
         await api.updatePersona(editing.id, payload, auth?.accessToken)
       } else {
@@ -166,6 +182,7 @@ export default function PersonasPage() {
       setOpen(false)
       setEditing(null)
       await load()
+      try { window.dispatchEvent(new CustomEvent('cognition-personas-changed')); } catch {}
     } catch (e: any) {
       setError(e.message || 'Failed to save')
     }
@@ -355,19 +372,25 @@ export default function PersonasPage() {
 
   return (
     <Box>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-        <Typography variant="h5">Personas</Typography>
+      <Stack spacing={1} sx={{ mb: 2 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between">
+          <Typography variant="h5">Personas</Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd}>New</Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAgenticOpen(true)}>+ Agentic</Button>
+          </Stack>
+        </Stack>
         <Stack direction="row" spacing={2} alignItems="center">
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel id="filter-type-label">Type</InputLabel>
             <Select labelId="filter-type-label" label="Type" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
               <MenuItem value="All">All</MenuItem>
               <MenuItem value="Assistant">Assistant</MenuItem>
+              <MenuItem value="Agent">Agent</MenuItem>
+              <MenuItem value="RolePlay">Role Play</MenuItem>
               <MenuItem value="User">User</MenuItem>
             </Select>
           </FormControl>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd}>New</Button>
-          <Button variant="outlined" onClick={() => setAgenticOpen(true)}>Agentic Create</Button>
         </Stack>
       </Stack>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -462,4 +485,6 @@ export default function PersonasPage() {
     </Box>
   )
 }
+
+
 

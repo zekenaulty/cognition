@@ -70,6 +70,58 @@ public class ConversationsController : ControllerBase
         return Ok(new { conv.Id, conv.Title, conv.CreatedAtUtc });
     }
 
+    [HttpDelete("{id:guid}")]
+    [Authorize]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id);
+        if (conv == null) return NotFound();
+
+        // Delete related rows explicitly
+        var msgIds = await _db.ConversationMessages
+            .AsNoTracking()
+            .Where(m => m.ConversationId == id)
+            .Select(m => m.Id)
+            .ToListAsync();
+        if (msgIds.Count > 0)
+        {
+            var versions = _db.ConversationMessageVersions.Where(v => msgIds.Contains(v.ConversationMessageId));
+            _db.ConversationMessageVersions.RemoveRange(versions);
+            await _db.SaveChangesAsync();
+        }
+        var messages = _db.ConversationMessages.Where(m => m.ConversationId == id);
+        _db.ConversationMessages.RemoveRange(messages);
+
+        var participants = _db.ConversationParticipants.Where(p => p.ConversationId == id);
+        _db.ConversationParticipants.RemoveRange(participants);
+
+        var summaries = _db.ConversationSummaries.Where(s => s.ConversationId == id);
+        _db.ConversationSummaries.RemoveRange(summaries);
+
+        var plans = _db.ConversationPlans.Where(p => p.ConversationId == id);
+        var planIds = await plans.Select(p => p.Id).ToListAsync();
+        if (planIds.Count > 0)
+        {
+            var tasks = _db.ConversationTasks.Where(t => planIds.Contains(t.ConversationPlanId));
+            _db.ConversationTasks.RemoveRange(tasks);
+        }
+        _db.ConversationPlans.RemoveRange(plans);
+
+        var thoughts = _db.ConversationThoughts.Where(t => t.ConversationId == id);
+        _db.ConversationThoughts.RemoveRange(thoughts);
+
+        var wfState = await _db.ConversationWorkflowStates.FirstOrDefaultAsync(s => s.ConversationId == id);
+        if (wfState != null) _db.ConversationWorkflowStates.Remove(wfState);
+
+        var wfEvents = _db.WorkflowEvents.Where(e => e.ConversationId == id);
+        _db.WorkflowEvents.RemoveRange(wfEvents);
+
+        // Finally remove conversation
+        _db.Conversations.Remove(conv);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     [HttpGet("{id:guid}/messages")]
     public async Task<IActionResult> ListMessages(Guid id)
     {

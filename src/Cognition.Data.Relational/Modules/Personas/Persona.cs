@@ -31,7 +31,9 @@ public class Persona : BaseEntity
 public enum PersonaType
 {
     User,
-    Assistant
+    Assistant,
+    Agent,
+    RolePlayCharacter
 }
 
 public enum OwnedBy
