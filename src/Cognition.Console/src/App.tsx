@@ -99,7 +99,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Cognition Console
+            <Link href="/" color="inherit" underline="none">Cognition Console</Link>
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
             {isAuthenticated ? (
