@@ -7,6 +7,7 @@ import ApiIcon from '@mui/icons-material/Api';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChatIcon from '@mui/icons-material/Chat';
+import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
@@ -66,6 +67,13 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <Drawer anchor="left" open={open} onClose={onClose} PaperProps={{ sx: { bgcolor: '#0b0c10', color: '#e0e0e0' } }}>
       <Box sx={{ width: 375 }} role="presentation">
+        <Box sx={{ position: 'sticky', top: 0, zIndex: 1, bgcolor: '#0b0c10', display: 'flex', justifyContent: 'flex-end', p: 1, borderBottom: '1px solid #1a1c22' }}>
+          <Tooltip title="Close">
+            <IconButton size="small" onClick={onClose} sx={{ color: '#bbb' }}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
         <List>
           <ListItem disablePadding>
             <ListItemButton component={Link} to="/" onClick={onClose}>
