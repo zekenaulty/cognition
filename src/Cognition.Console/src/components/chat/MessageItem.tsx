@@ -88,7 +88,7 @@ export function MessageItem({ role, content, fromName, timestamp, pending, versi
                           </span>
                         </Tooltip>
                         {typeof versionIndex === 'number' && versions && versions.length > 0 && (
-                          <span style={{ fontSize: '0.85em', opacity: 0.9, marginLeft: 6 }}>v{versionIndex! + 1}/{versions.length}</span>
+                          <span className={styles['bubble-version']}>v{versionIndex! + 1}/{versions.length}</span>
                         )}
                       </Box>
                     )}

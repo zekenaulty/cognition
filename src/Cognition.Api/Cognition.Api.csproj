@@ -28,6 +28,7 @@
     <ProjectReference Include="..\Cognition.Clients\Cognition.Clients.csproj" />
     <ProjectReference Include="..\Cognition.Jobs\Cognition.Jobs.csproj" />
     <ProjectReference Include="..\Cognition.Contracts\Cognition.Contracts.csproj" />
+    <ProjectReference Include="..\Cognition.Data.Vectors\Cognition.Data.Vectors.csproj" />
   </ItemGroup>
 
 </Project>

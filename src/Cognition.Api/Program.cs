@@ -14,6 +14,7 @@ using Cognition.Api.Infrastructure.Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Rebus.ServiceProvider;
 using Rebus.Config;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +29,7 @@ builder.Services.AddCognitionDb(builder.Configuration);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddCognitionClients();
+builder.Services.AddCognitionOpenSearchVectors(builder.Configuration);
 builder.Services.AddCognitionTools();
 // Wire AgentService DI for API controllers
 builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Clients.Agents.AgentService>();

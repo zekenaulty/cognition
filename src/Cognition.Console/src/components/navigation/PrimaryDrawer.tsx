@@ -99,17 +99,17 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
             </IconButton>
           </Tooltip>
         </Box>
-        <List>
+        <List disablePadding>
           <ListItem disablePadding>
-            <ListItemButton component={Link} to="/" onClick={onClose}>
-              <ListItemIcon><HomeIcon /></ListItemIcon>
+            <ListItemButton component={Link} to="/" onClick={onClose} sx={{ pl: 0 }}>
+              <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><HomeIcon /></ListItemIcon>
               <ListItemText primary="Home" />
             </ListItemButton>
           </ListItem>
           {isAuthenticated && (
             <ListItem disablePadding>
-              <ListItemButton component={Link} to="/image-lab" onClick={onClose}>
-                <ListItemIcon><ImageIcon /></ListItemIcon>
+              <ListItemButton component={Link} to="/image-lab" onClick={onClose} sx={{ pl: 0 }}>
+                <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><ImageIcon /></ListItemIcon>
                 <ListItemText primary="Image Lab" />
               </ListItemButton>
             </ListItem>
@@ -117,20 +117,20 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
           {security.isAdmin && (
             <>
               <ListItem disablePadding>
-                <ListItemButton onClick={() => { window.open('/hangfire', 'hangfireTab'); onClose(); }}>
-                  <ListItemIcon><WorkIcon /></ListItemIcon>
+                <ListItemButton onClick={() => { window.open('/hangfire', 'hangfireTab'); onClose(); }} sx={{ pl: 0 }}>
+                  <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><WorkIcon /></ListItemIcon>
                   <ListItemText primary="Jobs" />
                 </ListItemButton>
               </ListItem>
               <ListItem disablePadding>
-                <ListItemButton onClick={() => { window.open('/openapi/v1.json', 'apiJsonTab'); onClose(); }}>
-                  <ListItemIcon><ApiIcon /></ListItemIcon>
+                <ListItemButton onClick={() => { window.open('/openapi/v1.json', 'apiJsonTab'); onClose(); }} sx={{ pl: 0 }}>
+                  <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><ApiIcon /></ListItemIcon>
                   <ListItemText primary="API JSON" />
                 </ListItemButton>
               </ListItem>
               <ListItem disablePadding>
-                <ListItemButton onClick={() => { window.open('/swagger', 'swaggerTab'); onClose(); }}>
-                  <ListItemIcon><DescriptionIcon /></ListItemIcon>
+                <ListItemButton onClick={() => { window.open('/swagger', 'swaggerTab'); onClose(); }} sx={{ pl: 0 }}>
+                  <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><DescriptionIcon /></ListItemIcon>
                   <ListItemText primary="Swagger" />
                 </ListItemButton>
               </ListItem>
@@ -139,9 +139,9 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
         </List>
         <Divider />
         {isAuthenticated && (
-          <Box sx={{ px: 1, pb: 1 }}>
-            <Typography variant="subtitle2" sx={{ px: 1, pt: 1, pb: 1, opacity: 0.9 }}>Recent</Typography>
-            <List dense>
+          <Box sx={{ pr: 1, pb: 1 }}>
+            <Typography variant="subtitle2" sx={{ pl: 1, pr: 1, pt: 1, pb: 1, opacity: 0.9 }}>Recent</Typography>
+            <List dense disablePadding>
               {recent.map(r => (
                 <ListItem key={r.id} disablePadding secondaryAction={
                   <Tooltip title="Delete">
@@ -150,8 +150,8 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                     </IconButton>
                   </Tooltip>
                 }>
-                  <ListItemButton onClick={() => openRecentConversation(r.id)}>
-                    <ListItemIcon><ChatIcon fontSize="small" /></ListItemIcon>
+                  <ListItemButton onClick={() => openRecentConversation(r.id)} sx={{ pl: 2 }}>
+                    <ListItemIcon sx={{ minWidth: 0, mr: 1 }}><ChatIcon fontSize="small" /></ListItemIcon>
                     <ListItemText primary={r.title || `Conversation ${r.id.slice(0,8)}`} />
                   </ListItemButton>
                 </ListItem>
@@ -163,11 +163,11 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
           </Box>
         )}
         {isAuthenticated && (
-          <Box sx={{ px: 1, pb: 2 }}>
-            <Typography variant="subtitle2" sx={{ px: 1, pt: 1, pb: 1, opacity: 0.9 }}>Personas</Typography>
+          <Box sx={{ pr: 1, pb: 2 }}>
+            <Typography variant="subtitle2" sx={{ pl: 1, pr: 1, pt: 1, pb: 1, opacity: 0.9 }}>Personas</Typography>
             {personas.map(p => (
               <Accordion key={p.id} expanded={expandedId === p.id} onChange={handleAccordion(p.id)} sx={{ bgcolor: '#0f1115', color: '#e0e0e0' }}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon htmlColor="#bbb" />}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon htmlColor="#bbb" />} sx={{ pl: 2, pr: 0 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', justifyContent: 'space-between' }} onClick={(e) => e.stopPropagation()}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
@@ -180,8 +180,8 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                     </Tooltip>
                   </Box>
                 </AccordionSummary>
-                <AccordionDetails>
-                  <List dense>
+                <AccordionDetails sx={{ pl: 2, pr: 0 }}>
+                  <List dense disablePadding>
                     {(convsByPersona[p.id] || []).map(c => (
                       <ListItem key={c.id} disablePadding secondaryAction={
                         <Tooltip title="Delete">
@@ -190,8 +190,8 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                           </IconButton>
                         </Tooltip>
                       }>
-                        <ListItemButton onClick={() => { navigate(`/chat/${p.id}/${c.id}`); onClose(); }}>
-                          <ListItemIcon><ChatIcon fontSize="small" /></ListItemIcon>
+                        <ListItemButton onClick={() => { navigate(`/chat/${p.id}/${c.id}`); onClose(); }} sx={{ pl: 2 }}>
+                          <ListItemIcon sx={{ minWidth: 0, mr: 1 }}><ChatIcon fontSize="small" /></ListItemIcon>
                           <ListItemText primary={c.title || `Conversation ${c.id.slice(0,8)}`} />
                         </ListItemButton>
                       </ListItem>

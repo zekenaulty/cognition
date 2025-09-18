@@ -23,6 +23,11 @@
   color: #999;
   font-size: 0.85em;
 }
+.bubble-version {
+  font-size: 0.85em;
+  opacity: 0.9;
+  margin-left: 6px;
+}
 .bubble-footer {
   width: 100%;
   display: flex;

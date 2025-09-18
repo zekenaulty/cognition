@@ -44,6 +44,8 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     outDir: resolve(__dirname, '../Cognition.Api/wwwroot'),
-    emptyOutDir: true
+    emptyOutDir: true,
+    // Increase chunk size warning limit to 4 MB (4096 kB)
+    chunkSizeWarningLimit: 4096
   }
 }))
