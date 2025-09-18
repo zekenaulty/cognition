@@ -12,6 +12,7 @@ import { useChatBus } from '../hooks/useChatBus';
 import { useProvidersModels } from '../hooks/useProvidersModels';
 import { MessageItemProps } from '../components/chat/MessageItem';
 import { normalizeRole } from '../utils/chat';
+import { useUserSettings } from '../hooks/useUserSettings';
 
 // Types
 type Provider = { id: string; name: string; displayName?: string };
@@ -26,23 +27,13 @@ export default function ChatPage() {
   const userId = auth?.userId;
 
   // LocalStorage keys
-  const LS = {
-    persona: 'cognition.chat.personaId',
-    provider: 'cognition.chat.providerId',
-    model: 'cognition.chat.modelId',
-  } as const;
-  const getLS = (k: string) => {
-    try { return localStorage.getItem(k) || ''; } catch { return ''; }
-  };
-  const setLS = (k: string, v: string | null) => {
-    try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch { }
-  };
+  const settings = useUserSettings();
 
   // State
   const [personas, setPersonas] = useState<Persona[]>([]);
   const route = useParams<{ personaId?: string; conversationId?: string }>();
   const navigate = useNavigate();
-  const [personaId, setPersonaId] = useState<string>(route.personaId || getLS(LS.persona));
+  const [personaId, setPersonaId] = useState<string>(route.personaId || (settings.get<string>('chat.personaId') || ''));
   const {
     providers,
     providerId,
@@ -50,7 +41,7 @@ export default function ChatPage() {
     models,
     modelId,
     setModelId,
-  } = useProvidersModels(accessToken || '', getLS(LS.provider), getLS(LS.model));
+  } = useProvidersModels(accessToken || '', settings.get<string>('chat.providerId') || '', settings.get<string>('chat.modelId') || '');
   // Conversations/messages hook
   const {
     conversations,
@@ -210,18 +201,18 @@ export default function ChatPage() {
   useChatBus('conversation-created', evt => {
     if (!evt) return;
     setConversationId(evt.conversationId);
-    try { localStorage.setItem('cognition.chat.conversationId', evt.conversationId); } catch {}
+    try { settings.set('chat.conversationId', evt.conversationId); } catch {}
   });
   useChatBus('conversation-joined', evt => {
     if (!evt) return;
     setConversationId(evt.conversationId);
-    try { localStorage.setItem('cognition.chat.conversationId', evt.conversationId); } catch {}
+    try { settings.set('chat.conversationId', evt.conversationId); } catch {}
   });
   useChatBus('conversation-left', evt => {
     if (!evt) return;
     if (evt.conversationId === (conversationId ?? '')) {
       setConversationId(null);
-      try { localStorage.removeItem('cognition.chat.conversationId'); } catch {}
+      try { settings.remove('chat.conversationId'); } catch {}
     }
   });
 
@@ -252,7 +243,17 @@ export default function ChatPage() {
           if (typeof t === 'string') return t.toLowerCase() === 'assistant';
           return false;
         });
-        const items: Persona[] = assistants.map((p: any) => ({ id: p.id ?? p.Id, name: p.name ?? p.Name }));
+        let items: Persona[] = assistants.map((p: any) => ({ id: p.id ?? p.Id, name: p.name ?? p.Name }));
+        // Ensure default assistant is available for new chats
+        try {
+          const res = await fetch('/api/personas/default-assistant', { headers: { Authorization: `Bearer ${accessToken}` } });
+          if (res.ok) {
+            const def = await res.json();
+            const defId = String(def.id ?? def.Id);
+            const defName = String(def.name ?? def.Name);
+            if (!items.some(x => x.id === defId)) items = [{ id: defId, name: defName }, ...items];
+          }
+        } catch {}
         setPersonas(items);
         if (!personaId) {
           const saved = getLS(LS.persona);
@@ -283,6 +284,22 @@ export default function ChatPage() {
     }
   }, [route.conversationId]);
 
+  // Guard: if user navigates to a conversation they cannot access, redirect home
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!accessToken || !conversationId) return;
+        const res = await fetch(`/api/conversations/${conversationId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!res.ok) {
+          navigate('/', { replace: true });
+          return;
+        }
+      } catch {
+        navigate('/', { replace: true });
+      }
+    })();
+  }, [conversationId, accessToken]);
+
   // Load selected persona details (for gender/voice)
   useEffect(() => {
     (async () => {
@@ -307,12 +324,12 @@ export default function ChatPage() {
   // Providers/models handled by useProvidersModels
 
   // Persist selections to localStorage on change
-  useEffect(() => { if (personaId) setLS(LS.persona, personaId); }, [personaId]);
-  useEffect(() => { if (providerId) setLS(LS.provider, providerId); }, [providerId]);
-  useEffect(() => { if (modelId) setLS(LS.model, modelId); }, [modelId]);
+  useEffect(() => { if (personaId) settings.set('chat.personaId', personaId); }, [personaId]);
+  useEffect(() => { if (providerId) settings.set('chat.providerId', providerId); }, [providerId]);
+  useEffect(() => { if (modelId) settings.set('chat.modelId', modelId); }, [modelId]);
   useEffect(() => {
     if (conversationId) {
-      localStorage.setItem('cognition.chat.conversationId', conversationId);
+      settings.set('chat.conversationId', conversationId);
       if (personaId && (route.personaId !== personaId || route.conversationId !== conversationId)) {
         navigate(`/chat/${personaId}/${conversationId}`, { replace: true });
       }
@@ -339,7 +356,7 @@ export default function ChatPage() {
         const body = await res.json();
         convId = body.id || body.Id;
         setConversationId(convId);
-        try { localStorage.setItem('cognition.chat.conversationId', convId ?? ''); } catch {}
+        try { if (convId) settings.set('chat.conversationId', convId); } catch {}
         // Make sure hub has joined this conversation
         try { await chatHub.connectionRef.current?.invoke('JoinConversation', convId); } catch {}
       }
@@ -353,13 +370,31 @@ export default function ChatPage() {
         { role: 'assistant', content: '', fromName: personas.find(p => p.id === personaId)?.name || 'Assistant', pending: true, localId: placeholderId } as any,
       ]));
 
-      // Send via hub
+      // Send via hub; if not connected, fall back to REST that persists both sides
       const ok = await (async () => {
         if (convId) {
           try { await chatHub.connectionRef.current?.invoke('AppendUserMessage', convId, text, personaId, providerId, modelId); return true; } catch {}
         }
         return await chatHub.sendUserMessage(text, personaId, providerId, modelId);
       })();
+      if (!ok && convId) {
+        try {
+          const resp = await fetch('/api/chat/ask-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+            body: JSON.stringify({ ConversationId: convId, PersonaId: personaId, ProviderId: providerId, ModelId: modelId || null, Input: text, RolePlay: false })
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            const reply = String((data?.content?.Reply) ?? (data?.content?.reply) ?? '').trim();
+            if (reply) {
+              setMessages(prev => prev.map(m => ((m as any).localId === placeholderId && m.pending)
+                ? ({ ...m, pending: false, content: reply } as any)
+                : m));
+            }
+          }
+        } catch {}
+      }
       // Start a timeout to convert pending assistant to error only if no reply arrives
       if (!ok) {
         // Let the timeout handle marking error to avoid false negatives
@@ -413,7 +448,7 @@ export default function ChatPage() {
       onImgStyleChange={setImgStyleId}
       imgPending={imgPending}
       onGenerateImage={(model, count) => { generateFromChat(model, count); }}
-      onNewConversation={() => { setMessages([]); setConversationId(null); try { localStorage.removeItem('cognition.chat.conversationId'); } catch {} }}
+      onNewConversation={() => { setMessages([]); setConversationId(null); try { settings.remove('chat.conversationId'); } catch {} }}
       connectionState={hubState}
       assistantVoiceName={assistantVoiceName}
       assistantGender={assistantGender}

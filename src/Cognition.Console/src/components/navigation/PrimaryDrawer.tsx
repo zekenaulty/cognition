@@ -26,17 +26,19 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
   async function loadPersonas() {
     try {
       const list = await request<Array<{ id: string; name: string; type?: number | string }>>('/api/personas', {}, auth?.accessToken);
-      // Fetch system personas to identify default assistant
-      let systemList: Array<{ id: string; name: string; type?: number | string; ownedBy?: string }> = [];
-      try { systemList = await request('/api/personas/system', {}, auth?.accessToken) } catch {}
-      const defaultSystem = (systemList || []).find((p: any) => p.type === 'Assistant' || p.type === 1);
-      const filtered = (list || []).filter(p => {
+      // Fetch default assistant persona (available to all authenticated users)
+      let defaultSystem: { id: string; name: string } | null = null;
+      try { defaultSystem = await request('/api/personas/default-assistant', {}, auth?.accessToken) as any } catch {}
+      let filtered = (list || []).filter(p => {
         const t: any = (p as any).type;
         return t === 1 || t === 'Assistant' || t === 3 || t === 'RolePlayCharacter';
       }).map(p => ({ id: (p as any).id, name: (p as any).name }));
-      // Pin default system assistant to top if present
+      // Ensure default system assistant is present for starting chats
       const pinnedId = defaultSystem ? (defaultSystem as any).id as string : '';
-      const ordered = pinnedId ? ([...filtered.filter(x => x.id === pinnedId), ...filtered.filter(x => x.id !== pinnedId)]) : filtered;
+      if (pinnedId && !filtered.some(x => x.id === pinnedId)) {
+        filtered = [{ id: pinnedId, name: (defaultSystem as any).name as string }, ...filtered];
+      }
+      const ordered = filtered;
       // Drop personas that have no conversations (except the pinned system persona)
       const toCheck = ordered.filter(p => p.id !== pinnedId);
       const results = await Promise.all(toCheck.map(async (p) => {

@@ -70,7 +70,7 @@ public class PersonasController : ControllerBase
 
     // Returns personas owned by the system
     [HttpGet("system")]
-    [Authorize]
+    [Authorize(Roles = nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator))]
     public async Task<IActionResult> ListSystem([FromQuery] bool? publicOnly)
     {
         var q = _db.Personas.AsNoTracking().Where(p => p.OwnedBy == OwnedBy.System);
@@ -81,10 +81,43 @@ public class PersonasController : ControllerBase
             .ToListAsync();
         return Ok(items);
     }
-[HttpGet]
+
+    // Returns the default system assistant persona (minimal), available to all authenticated users
+    [HttpGet("default-assistant")]
+    [Authorize]
+    public async Task<IActionResult> GetDefaultAssistant()
+    {
+        var p = await _db.Personas.AsNoTracking()
+            .Where(x => x.OwnedBy == OwnedBy.System && x.Type == PersonaType.Assistant)
+            .OrderBy(x => x.Name)
+            .Select(x => new { x.Id, x.Name })
+            .FirstOrDefaultAsync();
+        if (p == null) return NotFound();
+        return Ok(p);
+    }
+    [HttpGet]
+    [Authorize]
     public async Task<IActionResult> List([FromQuery] bool? publicOnly)
     {
-        var q = _db.Personas.AsNoTracking().AsQueryable();
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller)) return Forbid();
+        var isAdmin = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator);
+
+        var linkedIds = await _db.UserPersonas.AsNoTracking()
+            .Where(up => up.UserId == caller)
+            .Select(up => up.PersonaId)
+            .ToListAsync();
+        var primaryId = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == caller)
+            .Select(u => u.PrimaryPersonaId)
+            .FirstOrDefaultAsync();
+
+        var ids = new HashSet<Guid>(linkedIds);
+        if (primaryId.HasValue) ids.Add(primaryId.Value);
+
+        var q = _db.Personas.AsNoTracking()
+            .Where(p => ids.Contains(p.Id) || (isAdmin && p.OwnedBy == OwnedBy.System));
         if (publicOnly == true) q = q.Where(p => p.IsPublic);
         var items = await q
             .OrderBy(p => p.Name)

@@ -28,13 +28,57 @@ public class ConversationsController : ControllerBase
     public record SetActiveVersionRequest(int Index);
 
     [HttpGet]
+    [Authorize]
     public async Task<IActionResult> List([FromQuery] Guid? participantId)
     {
         var q = _db.Conversations.AsNoTracking().AsQueryable();
+
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(sub, out var caller)) return Forbid();
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        var isAdmin = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator);
+
+        var linkedIds = await _db.UserPersonas.AsNoTracking()
+            .Where(up => up.UserId == caller)
+            .Select(up => up.PersonaId)
+            .ToListAsync();
+        var primaryId = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == caller)
+            .Select(u => u.PrimaryPersonaId)
+            .FirstOrDefaultAsync();
+        var allowedPersonaIds = new HashSet<Guid>(linkedIds);
+        if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
+
+        Guid? defaultSystemId = await _db.Personas.AsNoTracking()
+            .Where(p => p.OwnedBy == Cognition.Data.Relational.Modules.Personas.OwnedBy.System && p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.Assistant)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefaultAsync();
+
         if (participantId.HasValue)
         {
-            q = q.Where(c => _db.ConversationParticipants.Any(p => p.ConversationId == c.Id && p.PersonaId == participantId.Value));
+            var pid = participantId.Value;
+            var pidIsAllowed = allowedPersonaIds.Contains(pid) || (defaultSystemId.HasValue && pid == defaultSystemId.Value);
+            if (!pidIsAllowed) return Ok(Array.Empty<ConversationListItem>());
+
+            if (!isAdmin && defaultSystemId.HasValue && pid == defaultSystemId.Value)
+            {
+                q = q.Where(c =>
+                    _db.ConversationParticipants.Any(p => p.ConversationId == c.Id && p.PersonaId == pid)
+                    && _db.ConversationMessages.Any(m => m.ConversationId == c.Id && m.CreatedByUserId == caller));
+            }
+            else
+            {
+                q = q.Where(c => _db.ConversationParticipants.Any(p => p.ConversationId == c.Id && p.PersonaId == pid));
+            }
         }
+        else
+        {
+            q = q.Where(c =>
+                _db.ConversationMessages.Any(m => m.ConversationId == c.Id && m.CreatedByUserId == caller)
+                || _db.ConversationParticipants.Any(p => p.ConversationId == c.Id && allowedPersonaIds.Contains(p.PersonaId))
+            );
+        }
+
         var items = await q
             .OrderByDescending(c => c.CreatedAtUtc)
             .Select(c => new ConversationListItem(c.Id, c.Title, c.CreatedAtUtc))
@@ -43,6 +87,7 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize]
     public async Task<IActionResult> Create([FromBody] CreateConversationRequest req)
     {
         var conv = new Conversation { Title = req.Title, CreatedAtUtc = DateTime.UtcNow };
@@ -50,6 +95,13 @@ public class ConversationsController : ControllerBase
         await _db.SaveChangesAsync();
         // participants (use default system assistant persona when none provided)
         var participants = (req.ParticipantIds ?? Array.Empty<Guid>()).Distinct().ToList();
+        // Always include the caller's primary persona as a participant if available
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(sub, out var caller))
+        {
+            var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync();
+            if (primaryId.HasValue && !participants.Contains(primaryId.Value)) participants.Add(primaryId.Value);
+        }
         if (participants.Count == 0)
         {
             var defaultPid = await _db.Personas
@@ -73,10 +125,35 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
+    [Authorize]
     public async Task<IActionResult> Get(Guid id)
     {
         var conv = await _db.Conversations.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
         if (conv == null) return NotFound();
+
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(sub, out var caller)) return Forbid();
+
+        var linkedIds = await _db.UserPersonas.AsNoTracking()
+            .Where(up => up.UserId == caller)
+            .Select(up => up.PersonaId)
+            .ToListAsync();
+        var primaryId = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == caller)
+            .Select(u => u.PrimaryPersonaId)
+            .FirstOrDefaultAsync();
+        var allowedPersonaIds = new HashSet<Guid>(linkedIds);
+        if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
+
+        var participants = await _db.ConversationParticipants.AsNoTracking()
+            .Where(p => p.ConversationId == id)
+            .Select(p => p.PersonaId)
+            .ToListAsync();
+
+        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == id && m.CreatedByUserId == caller);
+        var allowed = userHasMsg || participants.Any(pid => allowedPersonaIds.Contains(pid));
+        if (!allowed) return Forbid();
+
         return Ok(new { conv.Id, conv.Title, conv.CreatedAtUtc });
     }
 
@@ -133,8 +210,20 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/messages")]
+    [Authorize]
     public async Task<IActionResult> ListMessages(Guid id)
     {
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(sub, out var caller)) return Forbid();
+        var linkedIds = await _db.UserPersonas.AsNoTracking().Where(up => up.UserId == caller).Select(up => up.PersonaId).ToListAsync();
+        var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync();
+        var allowedPersonaIds = new HashSet<Guid>(linkedIds);
+        if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
+        var participants = await _db.ConversationParticipants.AsNoTracking().Where(p => p.ConversationId == id).Select(p => p.PersonaId).ToListAsync();
+        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == id && m.CreatedByUserId == caller);
+        var allowed = userHasMsg || participants.Any(pid => allowedPersonaIds.Contains(pid));
+        if (!allowed) return Forbid();
+
         var msgs = await _db.ConversationMessages.AsNoTracking()
             .Where(m => m.ConversationId == id)
             .OrderBy(m => m.Timestamp)

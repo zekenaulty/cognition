@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchConversations, fetchMessages } from '../api/client';
 import { normalizeRole } from '../utils/chat';
+import { useUserSettings } from './useUserSettings';
 
 type Conv = { id: string; title?: string | null };
 type Message = {
@@ -30,6 +31,7 @@ export function useConversationsMessages(accessToken: string, personaId: string)
   const [conversations, setConversations] = useState<Conv[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const settings = useUserSettings();
 
   useEffect(() => {
     const loadConvs = async () => {
@@ -38,10 +40,10 @@ export function useConversationsMessages(accessToken: string, personaId: string)
       const items: Conv[] = (list as any[]).map((c: any) => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }));
       setConversations(items);
       // Auto-select saved if valid, else first
-      let saved: string | null = null;
-      try { saved = localStorage.getItem('cognition.chat.conversationId'); } catch {}
+      let saved: string | null = (settings.get<string>('chat.conversationId') || null) as any;
       const pick = (saved && items.find(x => x.id === saved)) ? saved : (items[0]?.id || null);
       setConversationId(pick);
+      if (pick) settings.set('chat.conversationId', pick);
     };
     loadConvs();
   }, [accessToken, personaId]);

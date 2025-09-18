@@ -26,6 +26,7 @@ import ChatIcon from '@mui/icons-material/Chat'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { request } from './api/client'
 import { PrimaryDrawer } from './components/navigation/PrimaryDrawer'
+import { useUserSettings } from './hooks/useUserSettings'
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material'
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -39,6 +40,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [expandedId, setExpandedId] = useState<string | false>(false)
   const [convsByPersona, setConvsByPersona] = useState<Record<string, Array<{ id: string; title?: string | null }>>>({})
   const [recent, setRecent] = useState<Array<{ id: string; title?: string | null; createdAtUtc?: string }>>([])
+  const settings = useUserSettings()
 
   async function loadPersonas() {
     try {
@@ -78,10 +80,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       }
       const assistant = (msgs || []).find(m => normalizeRole((m as any).role) === 'assistant')
       if (assistant) pid = String((assistant as any).fromPersonaId ?? (assistant as any).FromPersonaId ?? '')
-      if (!pid) {
-        // fallback to saved persona
-        try { pid = localStorage.getItem('cognition.chat.personaId') || '' } catch {}
-      }
+      if (!pid) { pid = settings.get<string>('chat.personaId') || '' }
       if (!pid && personas.length > 0) pid = personas[0].id
       if (pid) {
         navigate(`/chat/${pid}/${convId}`)

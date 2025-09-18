@@ -428,16 +428,30 @@ public class AgentService : IAgentService
         var persona = await _db.Personas.FirstAsync(p => p.Id == personaId, ct);
         var system = BuildSystemMessage(persona, rolePlay);
 
-        // Persist user message first
+        // Determine the caller's user persona participating in this conversation (if any)
+        Guid? userPersonaId = await (from cp in _db.ConversationParticipants.AsNoTracking()
+                                     join p in _db.Personas.AsNoTracking() on cp.PersonaId equals p.Id
+                                     where cp.ConversationId == conversationId && cp.PersonaId != personaId && p.OwnedBy == OwnedBy.User
+                                     select (Guid?)cp.PersonaId).FirstOrDefaultAsync(ct);
+        Guid? createdByUserId = null;
+        if (userPersonaId.HasValue)
+        {
+            createdByUserId = await _db.UserPersonas.AsNoTracking()
+                .Where(up => up.PersonaId == userPersonaId.Value && up.IsOwner)
+                .Select(up => (Guid?)up.UserId)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        // Persist user message first (from the user's persona when available)
         var userMsg = new ConversationMessage
         {
             ConversationId = conversationId,
-            FromPersonaId = personaId,
+            FromPersonaId = userPersonaId ?? personaId,
             Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
             Content = input,
             Timestamp = DateTime.UtcNow,
-            CreatedAtUtc = DateTime.UtcNow
-                ,
+            CreatedAtUtc = DateTime.UtcNow,
+            CreatedByUserId = createdByUserId,
             Metatype = "TextResponse"
         };
         _db.ConversationMessages.Add(userMsg);

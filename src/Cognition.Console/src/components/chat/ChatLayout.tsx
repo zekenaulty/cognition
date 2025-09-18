@@ -58,7 +58,7 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
         <Card variant="outlined" sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 210px)' }}>
           <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%' }}>
             {/* Menu bar (gear/settings, etc.) */}
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper' }}>
               <ChatMenu
                 personas={personas}
                 personaId={personaId}
@@ -88,10 +88,20 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                 <span className={"conversation-title"}>
                   {conversations.find(c => c.id === (conversationId ?? ''))?.title || (conversationId ? conversationId.slice(0,8) + '...' : 'New Conversation')}
                 </span>
+              </Box>
+              {/* Connection status sticky right */}
+              <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
                 {connectionState && (
-                  <span style={{ marginLeft: 8, fontSize: '0.8em', opacity: 0.75 }}>
-                    ● {connectionState}
-                  </span>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: (
+                      connectionState === 'connected' ? 'success.main' :
+                      connectionState === 'connecting' ? 'warning.main' :
+                      connectionState === 'reconnecting' ? 'warning.main' : 'error.main'
+                    ) }} />
+                    <Typography variant="caption" color="text.secondary">
+                      {connectionState === 'connected' ? 'Connected' : (connectionState === 'connecting' ? 'Connecting…' : (connectionState === 'reconnecting' ? 'Reconnecting…' : 'Offline'))}
+                    </Typography>
+                  </Box>
                 )}
               </Box>
             </Box>
@@ -135,3 +145,8 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
     </Box>
   );
 }
+
+
+
+
+
