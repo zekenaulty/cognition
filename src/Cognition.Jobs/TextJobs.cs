@@ -11,11 +11,10 @@ public class TextJobs
         _agents = agents;
     }
 
-    public async Task<string> ChatOnce(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay, CancellationToken ct = default)
+    public async Task<string> ChatOnce(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
     {
         // Delegate to agent service which persists messages and returns reply
-        var reply = await _agents.ChatAsync(conversationId, personaId, providerId, modelId, input, rolePlay, ct);
+        var reply = await _agents.ChatAsync(conversationId, personaId, providerId, modelId, input, ct);
         return reply.Reply;
     }
 }
-

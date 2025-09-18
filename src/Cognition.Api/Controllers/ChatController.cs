@@ -32,15 +32,14 @@ public class ChatController : ControllerBase
         Guid PersonaId,
         Guid ProviderId,
         Guid? ModelId,
-        string Input,
-        bool RolePlay = false);
+        string Input);
 
     [HttpPost("ask")]
     public async Task<IActionResult> Ask([FromBody] AskRequest req)
     {
         try
         {
-            var reply = await _agents.AskAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
+            var reply = await _agents.AskAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
             return Ok(new { reply });
         }
         catch (Exception ex)
@@ -54,7 +53,7 @@ public class ChatController : ControllerBase
     {
         try
         {
-            var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
+            var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
             return Ok(new { reply });
         }
         catch (Exception ex)
@@ -68,8 +67,7 @@ public class ChatController : ControllerBase
         Guid PersonaId,
         Guid ProviderId,
         Guid? ModelId,
-        string Input,
-        bool RolePlay = false);
+        string Input);
 
 /*
 
@@ -78,15 +76,14 @@ public class ChatController : ControllerBase
         Guid PersonaId,
         Guid ProviderId,
         Guid? ModelId,
-        string Input,
-        bool RolePlay = false);
+        string Input);
 
     [HttpPost("ask-chat")]
     public async Task<IActionResult> AskChat([FromBody] ChatRequest req)
     {
         try
         {
-            var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
+            var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
             return Ok(new { reply });
         }
         catch (InvalidOperationException ex)
@@ -116,10 +113,10 @@ public class ChatController : ControllerBase
         await _db.SaveChangesAsync();
 
         // Emit UserMessageAppended
-        var userMsgEvt = new UserMessageAppended(req.ConversationId, req.PersonaId, req.Input, req.RolePlay);
+        var userMsgEvt = new UserMessageAppended(req.ConversationId, req.PersonaId, req.Input);
         await _bus.Publish(userMsgEvt);
 
-        var assistantContent = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
+        var assistantContent = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
         if (string.IsNullOrWhiteSpace(assistantContent.Reply))
         {
             assistantContent.Reply = "(No reply...)";
@@ -155,8 +152,7 @@ public class ChatController : ControllerBase
         Guid? ModelId,
         string Input,
         int MinSteps,
-        int MaxSteps,
-        bool RolePlay = false);
+        int MaxSteps);
 
     [HttpPost("ask-with-plan")]
     public async Task<IActionResult> AskWithPlan([FromBody] AskWithPlanRequest req)
@@ -175,7 +171,7 @@ public class ChatController : ControllerBase
         await _db.SaveChangesAsync();
 
         // Publish UserMessageAppended and PlanRequested events
-        await _bus.Publish(new UserMessageAppended(req.ConversationId, req.PersonaId, req.Input, req.RolePlay));
+        await _bus.Publish(new UserMessageAppended(req.ConversationId, req.PersonaId, req.Input));
         await _bus.Publish(new PlanRequested(req.ConversationId, req.PersonaId, req.Input));
 
         // Return 202 Accepted

@@ -16,10 +16,10 @@ namespace Cognition.Clients.Agents;
 
 public interface IAgentService
 {
-    Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
-    Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
-    Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
-    Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, bool rolePlay = false, CancellationToken ct = default);
+    Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
+    Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
+    Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
+    Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default);
 }
 
 
@@ -78,10 +78,10 @@ public class AgentService : IAgentService
         _logger = logger;
     }
 
-    public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
+    public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
     {
         var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
-        var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
+        var sys = persona is null ? "" : BuildSystemMessage(persona);
         var client = await _factory.CreateAsync(providerId, modelId);
         var prompt = string.IsNullOrWhiteSpace(sys) ? input : $"{sys}\n\nUser: {input}";
         try
@@ -95,7 +95,7 @@ public class AgentService : IAgentService
         }
     }
 
-    public async Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, bool rolePlay = false, CancellationToken ct = default)
+    public async Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default)
     {
         // 1. Save original message
         var userMsg = new ConversationMessage
@@ -123,7 +123,7 @@ public class AgentService : IAgentService
             .AsNoTracking()
             .ToListAsync(ct);
         var toolIndex = BuildToolIndexSection(tools);
-        var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
+        var sys = persona is null ? "" : BuildSystemMessage(persona);
         var client = await _factory.CreateAsync(providerId, modelId);
 
         // 3. Generate OUTLINE_PLAN
@@ -356,13 +356,13 @@ public class AgentService : IAgentService
         return finalResponse;
     }
 
-    public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
+    public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
     {
         // Feature-flag: if ToolsEnabled exists and is disabled, fall back to AskAsync
         var flag = await _db.FeatureFlags.AsNoTracking().FirstOrDefaultAsync(f => f.Key == "ToolsEnabled", ct);
         if (flag != null && !flag.IsEnabled)
         {
-            return await AskAsync(personaId, providerId, modelId, input, rolePlay, ct);
+            return await AskAsync(personaId, providerId, modelId, input, ct);
         }
         // Discover available tools for this provider/model and expose a compact schema
         var tools = await _db.Tools
@@ -375,7 +375,7 @@ public class AgentService : IAgentService
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var draft = await AskWithToolIndexAsync(personaId, providerId, modelId, input, tools, rolePlay);
+        var draft = await AskWithToolIndexAsync(personaId, providerId, modelId, input, tools);
 
         // Try to parse a tool plan (by id or name)
         try
@@ -419,14 +419,14 @@ public class AgentService : IAgentService
     }
 
     // Chat with conversation history and summaries; persists user/assistant messages
-    public async Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
+    public async Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
     {
         // Ensure the conversation exists without loading heavy navigations
         var exists = await _db.Conversations.AsNoTracking().AnyAsync(c => c.Id == conversationId, ct);
         if (!exists) throw new InvalidOperationException("Conversation not found");
 
         var persona = await _db.Personas.FirstAsync(p => p.Id == personaId, ct);
-        var system = BuildSystemMessage(persona, rolePlay);
+        var system = BuildSystemMessage(persona);
 
         // Determine the caller's user persona participating in this conversation (if any)
         Guid? userPersonaId = await (from cp in _db.ConversationParticipants.AsNoTracking()
@@ -477,7 +477,7 @@ public class AgentService : IAgentService
 
         var chat = new List<ChatMessage>();
         // 1) Instruction sets as distinct system messages (scoped: global/provider/model/persona)
-        var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, rolePlay, ct);
+        var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, ct);
         chat.AddRange(instructionMsgs);
         // 2) Persona baseline system message
         if (!string.IsNullOrWhiteSpace(system)) chat.Add(new ChatMessage("system", system));
@@ -604,8 +604,10 @@ public class AgentService : IAgentService
         return (reply, assistantMsg.Id);
     }
 
-    private async Task<IEnumerable<ChatMessage>> BuildInstructionMessages(Guid personaId, Guid providerId, Guid? modelId, bool rolePlay, CancellationToken ct = default)
+    private async Task<IEnumerable<ChatMessage>> BuildInstructionMessages(Guid personaId, Guid providerId, Guid? modelId, CancellationToken ct = default)
     {
+        var persona = await _db.Personas.AsNoTracking().FirstOrDefaultAsync(p => p.Id == personaId, ct);
+        var isRolePlay = persona?.Type == PersonaType.RolePlayCharacter;
         // Pull active instruction sets for relevant scopes
         var q = _db.InstructionSets
             .AsNoTracking()
@@ -642,7 +644,7 @@ public class AgentService : IAgentService
         };
 
         var filtered = items
-            .Where(i => !i.Instruction.RolePlay || rolePlay)
+            .Where(i => !i.Instruction.RolePlay || isRolePlay)
             .OrderBy(i => KindRank(i.Instruction.Kind))
             .ThenBy(i => i.Order)
             .ThenBy(i => i.Instruction.Name)
@@ -709,10 +711,10 @@ public class AgentService : IAgentService
     }
 
     // Non-interface helper: include a Tool Index in the system message
-    public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools, bool rolePlay = false)
+    public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools)
     {
         var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId);
-        var sys = persona is null ? "" : BuildSystemMessage(persona, rolePlay);
+        var sys = persona is null ? "" : BuildSystemMessage(persona);
         var toolIndex = BuildToolIndexSection(tools);
         var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
         var client = await _factory.CreateAsync(providerId, modelId);
@@ -728,10 +730,10 @@ public class AgentService : IAgentService
         }
     }
 
-    private static string BuildSystemMessage(Persona p, bool rolePlay)
+    private static string BuildSystemMessage(Persona p)
     {
         var sb = new StringBuilder();
-        if (rolePlay)
+        if (p.Type == PersonaType.RolePlayCharacter)
         {
             sb.AppendLine($"You are role-playing as {p.Name} ({p.Nickname}).");
         }

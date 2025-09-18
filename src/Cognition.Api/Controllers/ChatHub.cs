@@ -63,7 +63,6 @@ namespace Cognition.Api.Controllers
                 Guid.Parse(providerId),
                 Guid.Parse(modelId),
                 text,
-                true,
                 CancellationToken.None);
 
             await SendAssistantMessage(conversationId, personaId, response.Reply, response.MessageId.ToString());
