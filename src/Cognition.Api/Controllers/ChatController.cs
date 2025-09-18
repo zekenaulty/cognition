@@ -120,15 +120,15 @@ public class ChatController : ControllerBase
         await _bus.Publish(userMsgEvt);
 
         var assistantContent = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, req.RolePlay, HttpContext.RequestAborted);
-        if (string.IsNullOrWhiteSpace(assistantContent))
+        if (string.IsNullOrWhiteSpace(assistantContent.Reply))
         {
-            assistantContent = "(No reply...)";
+            assistantContent.Reply = "(No reply...)";
         }
         var assistantMessage = new ConversationMessage
         {
             ConversationId = req.ConversationId,
             FromPersonaId = req.PersonaId,
-            Content = assistantContent,
+            Content = assistantContent.Reply,
             Role = Data.Relational.Modules.Common.ChatRole.Assistant,
             CreatedAtUtc = DateTime.UtcNow,
             Metatype = "TextResponse"
@@ -137,7 +137,7 @@ public class ChatController : ControllerBase
 
         _db.ConversationMessages.Add(assistantMessage);
         await _db.SaveChangesAsync();
-        var assistantEvt = new AssistantMessageAppended(req.ConversationId, req.PersonaId, assistantContent);
+        var assistantEvt = new AssistantMessageAppended(req.ConversationId, req.PersonaId, assistantContent.Reply);
         await _bus.Publish(assistantEvt);
 
         // Return 202 Accepted

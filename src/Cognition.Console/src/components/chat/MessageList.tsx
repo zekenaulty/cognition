@@ -8,9 +8,14 @@ export type MessageListProps = {
   messages: MessageItemProps[];
   // Second param used to pass prompt string to viewer
   onImageClick?: (id: string, titleOrPrompt?: string) => void;
+  ttsVoiceName?: string;
+  assistantGender?: string;
+  onRegenerate?: (index: number) => void;
+  onPrevVersion?: (index: number) => void;
+  onNextVersion?: (index: number) => void;
 };
 
-export function MessageList({ messages, onImageClick }: MessageListProps) {
+export function MessageList({ messages, onImageClick, ttsVoiceName, assistantGender, onRegenerate, onPrevVersion, onNextVersion }: MessageListProps) {
   const listRef = useAutoScroll(messages);
   return (
     <div ref={listRef}>
@@ -31,7 +36,15 @@ export function MessageList({ messages, onImageClick }: MessageListProps) {
                 />
               </Box>
             ) : (
-              <MessageItem {...msg} role={normRole} />
+              <MessageItem
+                {...msg}
+                role={normRole}
+                ttsVoiceName={ttsVoiceName}
+                assistantGender={assistantGender}
+                onRegenerate={onRegenerate ? () => onRegenerate(idx) : undefined}
+                onPrevVersion={onPrevVersion ? () => onPrevVersion(idx) : undefined}
+                onNextVersion={onNextVersion ? () => onNextVersion(idx) : undefined}
+              />
             )}
           </React.Fragment>
         );

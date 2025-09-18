@@ -178,6 +178,7 @@ export const api = {
       Nickname?: string
       Role?: string
       Gender?: string
+      Voice?: string
       Essence?: string
       Beliefs?: string
       Background?: string

@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Cognition.Authoring.Fiction\Cognition.Authoring.Fiction.csproj" />
     <ProjectReference Include="..\Cognition.Data.Relational\Cognition.Data.Relational.csproj" />
     <ProjectReference Include="..\Cognition.Clients\Cognition.Clients.csproj" />
     <ProjectReference Include="..\Cognition.Jobs\Cognition.Jobs.csproj" />

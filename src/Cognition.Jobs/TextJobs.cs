@@ -15,7 +15,7 @@ public class TextJobs
     {
         // Delegate to agent service which persists messages and returns reply
         var reply = await _agents.ChatAsync(conversationId, personaId, providerId, modelId, input, rolePlay, ct);
-        return reply;
+        return reply.Reply;
     }
 }
 

@@ -14,6 +14,7 @@ export type MessageInputProps = {
 export function MessageInput({ value, onChange, onSend, busy, onSTT }: MessageInputProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [recognizing, setRecognizing] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   // Emoji insert handler
   const handleEmojiInsert = (emoji: string) => {
@@ -45,12 +46,17 @@ export function MessageInput({ value, onChange, onSend, busy, onSTT }: MessageIn
       if (onSTT) onSTT(transcript);
       setRecognizing(false);
     };
-    recognition.onerror = () => setRecognizing(false);
-    recognition.onend = () => setRecognizing(false);
+    recognition.onerror = () => { setRecognizing(false); recognitionRef.current = null; };
+    recognition.onend = () => { setRecognizing(false); recognitionRef.current = null; };
     recognition.start();
     setRecognizing(true);
+    recognitionRef.current = recognition;
   };
-  const stopRecognition = () => setRecognizing(false);
+  const stopRecognition = () => {
+    try { recognitionRef.current?.stop?.(); } catch {}
+    setRecognizing(false);
+    recognitionRef.current = null;
+  };
 
   return (
     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 2 }}>

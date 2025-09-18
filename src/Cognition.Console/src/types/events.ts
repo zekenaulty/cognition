@@ -5,6 +5,7 @@ export interface AssistantMessageAppended {
   personaId: string;
   content: string;
   timestamp: string;
+  messageId?: string;
 }
 
 export interface PlanReady {
@@ -32,8 +33,42 @@ export interface ToolExecutionCompleted {
   timestamp: string;
 }
 
+// Streaming token delta during assistant generation
+export interface AssistantTokenDelta {
+  conversationId: string;
+  personaId: string;
+  // server may send delta/content/token; accept any
+  delta?: string;
+  content?: string;
+  token?: string;
+  timestamp?: string;
+}
+
+export interface ConversationCreated {
+  conversationId: string;
+  personaId: string;
+  title?: string | null;
+  timestamp?: string;
+}
+
+export interface ConversationJoined {
+  conversationId: string;
+  personaId: string;
+  timestamp?: string;
+}
+
+export interface ConversationLeft {
+  conversationId: string;
+  personaId: string;
+  timestamp?: string;
+}
+
 export type ChatBusEvent =
   | AssistantMessageAppended
   | PlanReady
   | ToolExecutionRequested
-  | ToolExecutionCompleted;
+  | ToolExecutionCompleted
+  | AssistantTokenDelta
+  | ConversationCreated
+  | ConversationJoined
+  | ConversationLeft;

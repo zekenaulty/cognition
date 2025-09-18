@@ -14,7 +14,7 @@ namespace Cognition.Api.Controllers
         }
 
         // Called by server to push assistant messages to clients
-        public async Task SendAssistantMessage(string conversationId, string personaId, string content)
+        public async Task SendAssistantMessage(string conversationId, string personaId, string content, string messageId)
         {
             // Send structured event for UI placeholder matching
             var evt = new
@@ -22,9 +22,37 @@ namespace Cognition.Api.Controllers
                 ConversationId = conversationId,
                 Content = content,
                 PersonaId = personaId,
-                Timestamp = DateTime.UtcNow.ToString("o")
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                MessageId = messageId
             };
             await Clients.Group(conversationId).SendAsync("AssistantMessageAppended", evt);
+        }
+
+        // Overload to support callers that don't have a messageId yet
+        //public async Task SendAssistantMessage(string conversationId, string personaId, string content)
+        //{
+        //    var evt = new
+        //    {
+        //        ConversationId = conversationId,
+        //        Content = content,
+        //        PersonaId = personaId,
+        //        Timestamp = DateTime.UtcNow.ToString("o"),
+        //        MessageId = (string?)null
+        //    };
+        //    await Clients.Group(conversationId).SendAsync("AssistantMessageAppended", evt);
+        //}
+
+        // Streaming token delta from backend during generation
+        public async Task SendAssistantDelta(string conversationId, string personaId, string delta)
+        {
+            var evt = new
+            {
+                conversationId = conversationId,
+                personaId = personaId,
+                delta = delta,
+                timestamp = DateTime.UtcNow.ToString("o")
+            };
+            await Clients.Group(conversationId).SendAsync("AssistantTokenDelta", evt);
         }
 
         public async Task AppendUserMessage(string conversationId, string text, string personaId, string providerId, string modelId)
@@ -38,7 +66,7 @@ namespace Cognition.Api.Controllers
                 true,
                 CancellationToken.None);
 
-            await SendAssistantMessage(conversationId, personaId,response);
+            await SendAssistantMessage(conversationId, personaId, response.Reply, response.MessageId.ToString());
 
         }
 

@@ -31,11 +31,17 @@ export type ChatLayoutProps = {
   imgStyleId: string;
   onImgStyleChange: (id: string) => void;
   imgPending?: boolean;
-  onGenerateImage?: () => void;
+  onGenerateImage?: (model: string, count: number) => void;
   onNewConversation?: () => void;
+  connectionState?: 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+  assistantVoiceName?: string;
+  assistantGender?: string;
+  onRegenerate?: (index: number) => void;
+  onPrevVersion?: (index: number) => void;
+  onNextVersion?: (index: number) => void;
 };
 
-export function ChatLayout({ personas, personaId, onPersonaChange, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, error, loading, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange, imgPending, onGenerateImage, onNewConversation }: ChatLayoutProps) {
+export function ChatLayout({ personas, personaId, onPersonaChange, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, error, loading, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange, imgPending, onGenerateImage, onNewConversation, connectionState, assistantVoiceName, assistantGender, onRegenerate, onPrevVersion, onNextVersion }: ChatLayoutProps) {
   // Placeholder state for image menu, image model, image count, viewer, and input only.
   const [imgModel, setImgModel] = React.useState('dall-e-3');
   const [imgMsgCount, setImgMsgCount] = React.useState(6);
@@ -71,7 +77,7 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                 imgMsgCount={imgMsgCount}
               onImgMsgCountChange={setImgMsgCount}
                 imgPending={!!imgPending}
-                onGenerateImage={() => { onGenerateImage && onGenerateImage(); }}
+                onGenerateImage={() => { onGenerateImage && onGenerateImage(imgModel, imgMsgCount); }}
                 conversations={conversations}
                 conversationId={conversationId ?? ''}
                 onConversationChange={onConversationChange}
@@ -82,16 +88,23 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                 <span className={"conversation-title"}>
                   {conversations.find(c => c.id === (conversationId ?? ''))?.title || (conversationId ? conversationId.slice(0,8) + '...' : 'New Conversation')}
                 </span>
+                {connectionState && (
+                  <span style={{ marginLeft: 8, fontSize: '0.8em', opacity: 0.75 }}>
+                    ● {connectionState}
+                  </span>
+                )}
               </Box>
             </Box>
             {/* PlanTimeline and ToolTrace connected to hub state */}
-            <Box sx={{ mb: 2 }}>
-              <PlanTimeline steps={planSteps} />
-              <ToolTrace actions={toolActions} />
-            </Box>
+            {(planSteps?.length > 0 || toolActions?.length > 0) && (
+              <Box sx={{ mb: 2 }}>
+                {planSteps?.length > 0 && <PlanTimeline steps={planSteps} />}
+                {toolActions?.length > 0 && <ToolTrace actions={toolActions} />}
+              </Box>
+            )}
             {/* Chat area */}
             <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', pr: 1 }}>
-              <MessageList messages={messages} onImageClick={handleImageClick} />
+              <MessageList messages={messages} onImageClick={handleImageClick} ttsVoiceName={assistantVoiceName} assistantGender={assistantGender} onRegenerate={onRegenerate} onPrevVersion={onPrevVersion} onNextVersion={onNextVersion} />
             </Box>
             {/* Input bar */}
             <MessageInput

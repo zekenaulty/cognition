@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Cognition.Data.Relational;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cognition.Data.Relational.Migrations
 {
     [DbContext(typeof(CognitionDbContext))]
-    partial class CognitionDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250918043455_PersonaOwnershipRefactor")]
+    partial class PersonaOwnershipRefactor
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1930,49 +1933,6 @@ namespace Cognition.Data.Relational.Migrations
                     b.ToTable("persona_memory_types", (string)null);
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Personas.PersonaPersonas", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("FromPersonaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("from_persona_id");
-
-                    b.Property<bool>("IsOwner")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_owner");
-
-                    b.Property<string>("Label")
-                        .HasColumnType("text")
-                        .HasColumnName("label");
-
-                    b.Property<Guid>("ToPersonaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("to_persona_id");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id")
-                        .HasName("pk_persona_personas");
-
-                    b.HasIndex("ToPersonaId");
-
-                    b.HasIndex("FromPersonaId", "ToPersonaId")
-                        .IsUnique()
-                        .HasDatabaseName("ux_persona_personas_pair");
-
-                    b.ToTable("persona_personas", (string)null);
-                });
-
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Prompts.PromptTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2480,7 +2440,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.ToTable("users", (string)null);
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Users.UserPersonas", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Users.UserPersona", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -2918,27 +2878,6 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Type");
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Personas.PersonaPersonas", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Personas.Persona", "FromPersona")
-                        .WithMany()
-                        .HasForeignKey("FromPersonaId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_persona_personas_from");
-
-                    b.HasOne("Cognition.Data.Relational.Modules.Personas.Persona", "ToPersona")
-                        .WithMany()
-                        .HasForeignKey("ToPersonaId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_persona_personas_to");
-
-                    b.Navigation("FromPersona");
-
-                    b.Navigation("ToPersona");
-                });
-
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Questions.Question", b =>
                 {
                     b.HasOne("Cognition.Data.Relational.Modules.Questions.QuestionCategory", "Category")
@@ -3031,7 +2970,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("PrimaryPersona");
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Users.UserPersonas", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Users.UserPersona", b =>
                 {
                     b.HasOne("Cognition.Data.Relational.Modules.Personas.Persona", "Persona")
                         .WithMany()

@@ -35,7 +35,7 @@ namespace Cognition.Jobs
             await _bus.Publish(assistantAppended);
 
             // Notify SignalR hub
-            await _notifier.NotifyAssistantMessageAsync(message.ConversationId, message.Result?.ToString() ?? "");
+            await _notifier.NotifyAssistantMessageAsync(message.ConversationId, message.PersonaId, message.Result?.ToString() ?? "");
         }
     }
 }

@@ -7,6 +7,7 @@ export type PersonaModel = {
   nickname?: string
   role?: string
   gender?: string
+  isOwner?: boolean
   essence?: string
   beliefs?: string
   background?: string
@@ -16,6 +17,7 @@ export type PersonaModel = {
   narrativeThemes?: string[]
   domainExpertise?: string[]
   isPublic?: boolean
+  voice?: string
 }
 
 export function PersonaForm({ value, onChange }: { value: PersonaModel; onChange: (p: PersonaModel) => void }) {
@@ -45,6 +47,9 @@ export function PersonaForm({ value, onChange }: { value: PersonaModel; onChange
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
           <TextField label="Gender" value={model.gender || ''} onChange={e => set('gender', e.target.value)} fullWidth />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <VoicePicker value={model.voice || ''} onChange={(v) => set('voice', v)} />
         </Grid>
         <Grid size={12}>
           <TextField label="Essence" value={model.essence || ''} onChange={e => set('essence', e.target.value)} fullWidth multiline minRows={2} />
@@ -81,3 +86,45 @@ export function PersonaForm({ value, onChange }: { value: PersonaModel; onChange
   )
 }
 
+function VoicePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
+
+  useEffect(() => {
+    const load = () => {
+      try { setVoices(window.speechSynthesis?.getVoices?.() || []) } catch { setVoices([]) }
+    }
+    load()
+    try { window.speechSynthesis?.addEventListener?.('voiceschanged', load as any) } catch {}
+    return () => { try { window.speechSynthesis?.removeEventListener?.('voiceschanged', load as any) } catch {} }
+  }, [])
+
+  const handleTest = () => {
+    try {
+      const utter = new window.SpeechSynthesisUtterance('This is a test of the selected voice.');
+      const v = (window.speechSynthesis?.getVoices?.() || []).find(x => x.name === value || x.voiceURI === value)
+      if (v) utter.voice = v
+      window.speechSynthesis?.speak(utter)
+    } catch {}
+  }
+
+  const options = voices.map(v => ({ key: v.voiceURI || v.name, label: `${v.name} (${v.lang})` }))
+
+  return (
+    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+      <TextField
+        select
+        fullWidth
+        label="TTS Voice"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        SelectProps={{ native: true }}
+      >
+        <option value=""></option>
+        {options.map(o => (
+          <option key={o.key} value={o.key}>{o.label}</option>
+        ))}
+      </TextField>
+      <Button variant="outlined" onClick={handleTest}>Test</Button>
+    </Box>
+  )
+}

@@ -84,6 +84,8 @@ export default function PersonasPage() {
         nickname: p.nickname,
         role: p.role,
         gender: p.gender,
+        isOwner: !!p.isOwner,
+        voice: p.voice,
         essence: p.essence,
         beliefs: p.beliefs,
         background: p.background,
@@ -115,39 +117,57 @@ export default function PersonasPage() {
 
   async function onSave() {
     if (!editing) return
-    const payload: any = {
-      Name: editing.name,
-      Nickname: editing.nickname,
-      Role: editing.role,
-      Gender: editing.gender,
-      Essence: editing.essence,
-      Beliefs: editing.beliefs,
-      Background: editing.background,
-      CommunicationStyle: editing.communicationStyle,
-      EmotionalDrivers: editing.emotionalDrivers,
-      SignatureTraits: editing.signatureTraits,
-      NarrativeThemes: editing.narrativeThemes,
-      DomainExpertise: editing.domainExpertise,
-      IsPublic: editing.isPublic
-    }
+    const isOwner = !!editing.isOwner
     try {
-      let personaId = editing.id;
+      let personaId = editing.id
       if (editing.id) {
-        await api.updatePersona(editing.id, payload, auth?.accessToken);
+        const payload: any = isOwner ? {
+          Name: editing.name,
+          Nickname: editing.nickname,
+          Role: editing.role,
+          Gender: editing.gender,
+          Voice: editing.voice,
+          Essence: editing.essence,
+          Beliefs: editing.beliefs,
+          Background: editing.background,
+          CommunicationStyle: editing.communicationStyle,
+          EmotionalDrivers: editing.emotionalDrivers,
+          SignatureTraits: editing.signatureTraits,
+          NarrativeThemes: editing.narrativeThemes,
+          DomainExpertise: editing.domainExpertise,
+          IsPublic: editing.isPublic
+        } : { Voice: editing.voice }
+        await api.updatePersona(editing.id, payload, auth?.accessToken)
       } else {
         // Create persona and get new id
-        const result = await api.createPersona(payload, auth?.accessToken);
-        personaId = result?.id;
+        const payload: any = {
+          Name: editing.name,
+          Nickname: editing.nickname,
+          Role: editing.role,
+          Gender: editing.gender,
+          Voice: editing.voice,
+          Essence: editing.essence,
+          Beliefs: editing.beliefs,
+          Background: editing.background,
+          CommunicationStyle: editing.communicationStyle,
+          EmotionalDrivers: editing.emotionalDrivers,
+          SignatureTraits: editing.signatureTraits,
+          NarrativeThemes: editing.narrativeThemes,
+          DomainExpertise: editing.domainExpertise,
+          IsPublic: editing.isPublic
+        }
+        const result = await api.createPersona(payload, auth?.accessToken)
+        personaId = result?.id
         // Link persona to user (UserPersonas access list)
         if (personaId && auth?.userId) {
-          await api.grantPersonaAccess(personaId, auth.userId, auth?.accessToken);
+          await api.grantPersonaAccess(personaId, auth.userId, auth?.accessToken)
         }
       }
-      setOpen(false);
-      setEditing(null);
-      await load();
+      setOpen(false)
+      setEditing(null)
+      await load()
     } catch (e: any) {
-      setError(e.message || 'Failed to save');
+      setError(e.message || 'Failed to save')
     }
   }
 
@@ -442,3 +462,4 @@ export default function PersonasPage() {
     </Box>
   )
 }
+

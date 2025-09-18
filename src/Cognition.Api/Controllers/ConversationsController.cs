@@ -8,6 +8,8 @@ using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Common;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using Microsoft.AspNetCore.SignalR;
+using Cognition.Api.Controllers;
 
 namespace Cognition.Api.Controllers;
 
@@ -16,11 +18,14 @@ namespace Cognition.Api.Controllers;
 public class ConversationsController : ControllerBase
 {
     private readonly CognitionDbContext _db;
-    public ConversationsController(CognitionDbContext db) => _db = db;
+    private readonly IHubContext<ChatHub> _hub;
+    public ConversationsController(CognitionDbContext db, IHubContext<ChatHub> hub) { _db = db; _hub = hub; }
 
     public record CreateConversationRequest(string? Title, Guid[] ParticipantIds);
     public record AddMessageRequest(Guid FromPersonaId, Guid? ToPersonaId, ChatRole Role, string Content, string? Metatype = null);
     public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc);
+    public record AddVersionRequest(string Content);
+    public record SetActiveVersionRequest(int Index);
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? participantId)
@@ -71,7 +76,21 @@ public class ConversationsController : ControllerBase
         var msgs = await _db.ConversationMessages.AsNoTracking()
             .Where(m => m.ConversationId == id)
             .OrderBy(m => m.Timestamp)
-            .Select(m => new { m.Id, m.FromPersonaId, m.ToPersonaId, m.Role, m.Content, m.Timestamp })
+            .Select(m => new {
+                m.Id,
+                m.FromPersonaId,
+                m.ToPersonaId,
+                m.Role,
+                m.Content,
+                m.Timestamp,
+                Versions = _db.ConversationMessageVersions
+                    .AsNoTracking()
+                    .Where(v => v.ConversationMessageId == m.Id)
+                    .OrderBy(v => v.VersionIndex)
+                    .Select(v => v.Content)
+                    .ToList(),
+                VersionIndex = m.ActiveVersionIndex
+            })
             .ToListAsync();
         return Ok(msgs);
     }
@@ -105,6 +124,56 @@ public class ConversationsController : ControllerBase
         };
         _db.ConversationMessages.Add(msg);
         await _db.SaveChangesAsync();
+        // Initialize version 0
+        var versionEntity = new ConversationMessageVersion
+        {
+            ConversationMessageId = msg.Id,
+            VersionIndex = 0,
+            Content = req.Content,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        _db.ConversationMessageVersions.Add(versionEntity);
+        msg.ActiveVersionIndex = 0;
+        await _db.SaveChangesAsync();
+        await _hub.Clients.Group(id.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = id, MessageId = msg.Id, Content = versionEntity.Content, VersionIndex = versionEntity.VersionIndex });
         return Ok(new { msg.Id });
+    }
+
+    [HttpPost("{conversationId:guid}/messages/{messageId:guid}/versions")]
+    [Authorize]
+    public async Task<IActionResult> AddVersion(Guid conversationId, Guid messageId, [FromBody] AddVersionRequest req)
+    {
+        var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId);
+        if (msg == null) return NotFound();
+        var maxIndex = await _db.ConversationMessageVersions.Where(v => v.ConversationMessageId == messageId).Select(v => (int?)v.VersionIndex).MaxAsync() ?? -1;
+        var next = maxIndex + 1;
+        var v = new ConversationMessageVersion
+        {
+            ConversationMessageId = messageId,
+            VersionIndex = next,
+            Content = req.Content,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        _db.ConversationMessageVersions.Add(v);
+        msg.ActiveVersionIndex = next;
+        msg.Content = req.Content;
+        await _db.SaveChangesAsync();
+        await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = conversationId, MessageId = messageId, Content = v.Content, VersionIndex = next });
+        return Ok(new { msg.Id, VersionIndex = next });
+    }
+
+    [HttpPatch("{conversationId:guid}/messages/{messageId:guid}/active-version")]
+    [Authorize]
+    public async Task<IActionResult> SetActiveVersion(Guid conversationId, Guid messageId, [FromBody] SetActiveVersionRequest req)
+    {
+        var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId);
+        if (msg == null) return NotFound();
+        var target = await _db.ConversationMessageVersions.AsNoTracking().FirstOrDefaultAsync(v => v.ConversationMessageId == messageId && v.VersionIndex == req.Index);
+        if (target == null) return BadRequest("Version index not found");
+        msg.ActiveVersionIndex = req.Index;
+        msg.Content = target.Content;
+        await _db.SaveChangesAsync();
+        await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantActiveVersionChanged", new { ConversationId = conversationId, MessageId = messageId, VersionIndex = req.Index });
+        return Ok(new { msg.Id, msg.ActiveVersionIndex });
     }
 }

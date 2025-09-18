@@ -181,7 +181,7 @@ if (app.Environment.IsDevelopment())
 
 // Log env status (masked) for quick verification in logs
 {
-    string Mask(string? s) => string.IsNullOrEmpty(s) ? "" : new string('*', Math.Max(0, s.Length - Math.Min(4, s.Length))) + (s.Length >= 4 ? s[^4..] : s);
+    //string Mask(string? s) => string.IsNullOrEmpty(s) ? "" : new string('*', Math.Max(0, s.Length - Math.Min(4, s.Length))) + (s.Length >= 4 ? s[^4..] : s);
     var log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("EnvStatus");
     var openaiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? Environment.GetEnvironmentVariable("OPENAI_KEY");
     var openaiBase = Environment.GetEnvironmentVariable("OPENAI_BASE_URL");

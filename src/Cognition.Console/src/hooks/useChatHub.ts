@@ -6,6 +6,7 @@ import {
   ToolExecutionRequested,
   ToolExecutionCompleted,
   ChatBusEvent,
+  AssistantTokenDelta,
 } from '../types/events';
 import { chatBus } from '../bus/chatBus';
 
@@ -109,7 +110,7 @@ export function useChatHub(options: UseChatHubOptions) {
         .build();
       connectionRef.current = connection;
 
-      connection.on('AssistantMessageAppended', (msg: AssistantMessageAppended) => {
+      connection.on('AssistantMessageAppended', (msg: AssistantMessageAppended & { messageId?: string }) => {
         chatBus.emit('assistant-message', msg);
         if (onAssistantMessage) onAssistantMessage(msg);
       });
@@ -125,6 +126,31 @@ export function useChatHub(options: UseChatHubOptions) {
         chatBus.emit('tool-completed', evt);
         if (onToolExecutionCompleted) onToolExecutionCompleted(evt);
       });
+      connection.on('AssistantTokenDelta', (evt: AssistantTokenDelta) => {
+        const text = (evt.delta ?? (evt as any).content ?? (evt as any).token ?? '') as string;
+        try {
+          chatBus.emit('assistant-delta', { conversationId, personaId: evt.personaId, text, timestamp: evt.timestamp });
+        } catch {}
+      });
+
+      // Conversation lifecycle
+      connection.on('ConversationCreated', (evt: any) => {
+        try { chatBus.emit('conversation-created', evt); } catch {}
+      });
+      connection.on('ConversationJoined', (evt: any) => {
+        try { chatBus.emit('conversation-joined', evt); } catch {}
+      });
+      connection.on('ConversationLeft', (evt: any) => {
+        try { chatBus.emit('conversation-left', evt); } catch {}
+      });
+
+      // Assistant message version events
+      connection.on('AssistantMessageVersionAppended', (evt: any) => {
+        try { chatBus.emit('assistant-version-appended', evt); } catch {}
+      });
+      connection.on('AssistantActiveVersionChanged', (evt: any) => {
+        try { chatBus.emit('assistant-version-activated', evt); } catch {}
+      });
 
       chatBus.emit('connection-state', { state: 'connecting' });
       connection.start().then(() => {
@@ -133,8 +159,10 @@ export function useChatHub(options: UseChatHubOptions) {
         connection.invoke('JoinConversation', conversationId);
       }).catch(err => console.warn('Hub start error', err));
 
-      connection.onreconnected(() => {
+      connection.onreconnecting(() => {
         chatBus.emit('connection-state', { state: 'reconnecting' });
+      });
+      connection.onreconnected(() => {
         // Rejoin the conversation after reconnect
         try { connection.invoke('JoinConversation', conversationId); } catch (e) { console.warn('Rejoin failed', e); }
         chatBus.emit('connection-state', { state: 'connected' });

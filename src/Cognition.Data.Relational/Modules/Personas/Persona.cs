@@ -9,13 +9,14 @@ public class Persona : BaseEntity
     public string Role { get; set; } = string.Empty;
     public bool IsPublic { get; set; } = false;
     public PersonaType Type { get; set; } = PersonaType.Assistant;
-    public Guid? OwnerUserId { get; set; }
+    public OwnedBy OwnedBy { get; set; } = OwnedBy.System;
     public string Gender { get; set; } = string.Empty;
     public string Essence { get; set; } = string.Empty;
     public string Beliefs { get; set; } = string.Empty;
     public string Background { get; set; } = string.Empty;
     public string CommunicationStyle { get; set; } = string.Empty;
     public string EmotionalDrivers { get; set; } = string.Empty;
+    public string Voice { get; set; } = string.Empty;
 
     public string[]? SignatureTraits { get; set; }
     public string[]? NarrativeThemes { get; set; }
@@ -31,4 +32,11 @@ public enum PersonaType
 {
     User,
     Assistant
+}
+
+public enum OwnedBy
+{
+    System,
+    User,
+    Persona
 }

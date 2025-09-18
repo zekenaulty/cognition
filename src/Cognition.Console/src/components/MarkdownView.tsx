@@ -41,8 +41,16 @@ export default function MarkdownView({ content }: Props) {
           rehypeHighlight,
         ]}
         components={{
-          a({ node, ...props }) {
-            return <a {...props} target="_blank" rel="noopener noreferrer" />
+          a({ node, href, ...props }) {
+            const url = String(href || '').trim();
+            const lower = url.toLowerCase();
+            const isHash = url.startsWith('#');
+            const safe = isHash || lower.startsWith('http:') || lower.startsWith('https:') || lower.startsWith('mailto:') || lower.startsWith('tel:');
+            if (!safe) {
+              // render inert text if unsafe protocol
+              return <span {...props} />
+            }
+            return <a href={url} {...props} target="_blank" rel="noopener noreferrer" />
           }
         }}
       >

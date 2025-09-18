@@ -15,13 +15,14 @@ public class PersonaConfiguration : IEntityTypeConfiguration<Persona>
         b.Property(x => x.Role).HasColumnName("role").HasMaxLength(256);
         b.Property(x => x.IsPublic).HasColumnName("is_public").HasDefaultValue(false);
         b.Property(x => x.Type).HasColumnName("persona_type").HasConversion<string>();
-        b.Property(x => x.OwnerUserId).HasColumnName("owner_user_id");
+        b.Property(x => x.OwnedBy).HasColumnName("owned_by").HasConversion<string>();
         b.Property(x => x.Gender).HasColumnName("gender").HasMaxLength(64);
         b.Property(x => x.Essence).HasColumnName("essence");
         b.Property(x => x.Beliefs).HasColumnName("beliefs");
         b.Property(x => x.Background).HasColumnName("background");
         b.Property(x => x.CommunicationStyle).HasColumnName("communication_style");
         b.Property(x => x.EmotionalDrivers).HasColumnName("emotional_drivers");
+        b.Property(x => x.Voice).HasColumnName("voice").HasMaxLength(256);
 
         b.Property(x => x.SignatureTraits).HasColumnName("signature_traits");
         b.Property(x => x.NarrativeThemes).HasColumnName("narrative_themes");
@@ -29,7 +30,7 @@ public class PersonaConfiguration : IEntityTypeConfiguration<Persona>
         b.Property(x => x.KnownPersonas).HasColumnName("known_personas");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
-        b.HasIndex(x => x.OwnerUserId).HasDatabaseName("ix_personas_owner");
+        // Removed owner_user_id index; ownership is tracked via UserPersona links
     }
 }
 
@@ -48,6 +49,23 @@ public class PersonaLinkConfiguration : IEntityTypeConfiguration<PersonaLink>
         b.Property(x => x.Weight).HasColumnName("weight");
         b.Property(x => x.Description).HasColumnName("description");
         b.HasIndex(x => new { x.FromPersonaId, x.ToPersonaId }).HasDatabaseName("ix_persona_links_pair");
+    }
+}
+
+public class PersonaPersonasConfiguration : IEntityTypeConfiguration<PersonaPersonas>
+{
+    public void Configure(EntityTypeBuilder<PersonaPersonas> b)
+    {
+        b.ToTable("persona_personas");
+        b.HasKey(x => x.Id).HasName("pk_persona_personas");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.FromPersonaId).HasColumnName("from_persona_id");
+        b.Property(x => x.ToPersonaId).HasColumnName("to_persona_id");
+        b.Property(x => x.IsOwner).HasColumnName("is_owner").HasDefaultValue(false);
+        b.Property(x => x.Label).HasColumnName("label");
+        b.HasOne(x => x.FromPersona).WithMany().HasForeignKey(x => x.FromPersonaId).HasConstraintName("fk_persona_personas_from");
+        b.HasOne(x => x.ToPersona).WithMany().HasForeignKey(x => x.ToPersonaId).HasConstraintName("fk_persona_personas_to");
+        b.HasIndex(x => new { x.FromPersonaId, x.ToPersonaId }).IsUnique().HasDatabaseName("ux_persona_personas_pair");
     }
 }
 

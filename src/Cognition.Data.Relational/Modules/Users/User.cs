@@ -27,7 +27,7 @@ public class User : BaseEntity
     public Guid? PrimaryPersonaId { get; set; }
     public Persona? PrimaryPersona { get; set; }
 
-    public List<UserPersona> UserPersonas { get; set; } = [];
+    public List<UserPersonas> UserPersonas { get; set; } = [];
 }
 
 public enum UserRole

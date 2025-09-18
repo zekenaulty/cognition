@@ -15,7 +15,7 @@ namespace Cognition.Jobs
         public async Task Handle(AssistantMessageAppended message)
         {
             // Forward AssistantMessageAppended to SignalR hub
-            await _notifier.NotifyAssistantMessageAsync(message.ConversationId, message.Content);
+            await _notifier.NotifyAssistantMessageAsync(message.ConversationId, message.PersonaId, message.Content);
         }
     }
 }

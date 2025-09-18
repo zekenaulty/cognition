@@ -61,7 +61,7 @@ public class UsersController : ControllerBase
             Nickname = req.Username.Trim(),
             Role = "User",
             Type = Data.Relational.Modules.Personas.PersonaType.User,
-            OwnerUserId = user.Id,
+            OwnedBy = Data.Relational.Modules.Personas.OwnedBy.User,
             IsPublic = false,
             CreatedAtUtc = DateTime.UtcNow
         };
@@ -69,11 +69,12 @@ public class UsersController : ControllerBase
         await _db.SaveChangesAsync();
 
         user.PrimaryPersonaId = persona.Id;
-        _db.UserPersonas.Add(new Data.Relational.Modules.Users.UserPersona
+        _db.UserPersonas.Add(new Data.Relational.Modules.Users.UserPersonas
         {
             UserId = user.Id,
             PersonaId = persona.Id,
             IsDefault = true,
+            IsOwner = true,
             Label = persona.Nickname,
             CreatedAtUtc = DateTime.UtcNow
         });
@@ -205,8 +206,8 @@ public class UsersController : ControllerBase
         if (persona == null) return BadRequest("Persona not found");
         if (persona.Type != Data.Relational.Modules.Personas.PersonaType.User)
             return BadRequest("Primary persona must be a User persona.");
-        if (persona.OwnerUserId != id)
-            return BadRequest("Primary persona must be owned by the user.");
+        var isOwner = await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == id && up.PersonaId == req.PersonaId && up.IsOwner);
+        if (!isOwner) return BadRequest("Primary persona must be owned by the user.");
         u.PrimaryPersonaId = req.PersonaId;
         await _db.SaveChangesAsync();
         return NoContent();
@@ -224,7 +225,7 @@ public class UsersController : ControllerBase
         var link = await _db.UserPersonas.FirstOrDefaultAsync(up => up.UserId == id && up.PersonaId == req.PersonaId);
         if (link == null)
         {
-            link = new UserPersona { UserId = id, PersonaId = req.PersonaId, IsDefault = req.IsDefault, Label = req.Label, CreatedAtUtc = DateTime.UtcNow };
+            link = new UserPersonas { UserId = id, PersonaId = req.PersonaId, IsDefault = req.IsDefault, Label = req.Label, CreatedAtUtc = DateTime.UtcNow };
             _db.UserPersonas.Add(link);
         }
         else
@@ -267,3 +268,4 @@ public class UsersController : ControllerBase
         return Ok(items);
     }
 }
+

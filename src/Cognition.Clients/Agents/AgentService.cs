@@ -18,7 +18,7 @@ public interface IAgentService
 {
     Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
     Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
-    Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
+    Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default);
     Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, bool rolePlay = false, CancellationToken ct = default);
 }
 
@@ -339,6 +339,20 @@ public class AgentService : IAgentService
         _db.ConversationMessages.Add(assistantMsg);
         await _db.SaveChangesAsync(ct);
 
+        try
+        {
+            _db.ConversationMessageVersions.Add(new ConversationMessageVersion
+            {
+                ConversationMessageId = assistantMsg.Id,
+                VersionIndex = 0,
+                Content = finalResponse,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            assistantMsg.ActiveVersionIndex = 0;
+            await _db.SaveChangesAsync(ct);
+        }
+        catch { }
+
         return finalResponse;
     }
 
@@ -405,7 +419,7 @@ public class AgentService : IAgentService
     }
 
     // Chat with conversation history and summaries; persists user/assistant messages
-    public async Task<string> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
+    public async Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, bool rolePlay = false, CancellationToken ct = default)
     {
         // Ensure the conversation exists without loading heavy navigations
         var exists = await _db.Conversations.AsNoTracking().AnyAsync(c => c.Id == conversationId, ct);
@@ -500,6 +514,20 @@ public class AgentService : IAgentService
         _db.ConversationMessages.Add(assistantMsg);
         await _db.SaveChangesAsync(ct);
 
+        try
+        {
+            _db.ConversationMessageVersions.Add(new ConversationMessageVersion
+            {
+                ConversationMessageId = assistantMsg.Id,
+                VersionIndex = 0,
+                Content = reply,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            assistantMsg.ActiveVersionIndex = 0;
+            await _db.SaveChangesAsync(ct);
+        }
+        catch { }
+
         // If conversation has no title yet, ask the LLM to propose a concise title and save it
         try
         {
@@ -559,7 +587,7 @@ public class AgentService : IAgentService
             _logger.LogWarning(ex, "Conversation summarization failed for conversation {ConversationId}", conversationId);
         }
 
-        return reply;
+        return (reply, assistantMsg.Id);
     }
 
     private async Task<IEnumerable<ChatMessage>> BuildInstructionMessages(Guid personaId, Guid providerId, Guid? modelId, bool rolePlay, CancellationToken ct = default)

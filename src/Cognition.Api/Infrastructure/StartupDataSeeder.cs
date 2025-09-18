@@ -35,11 +35,7 @@ public static class StartupDataSeeder
                         p.Type = PersonaType.User;
                         changed = true;
                     }
-                    if (p.OwnerUserId != u.Id)
-                    {
-                        p.OwnerUserId = u.Id;
-                        changed = true;
-                    }
+                    // migrated: ownership now via UserPersona and OwnedBy\n                    if (p.OwnedBy != OwnedBy.User)\n                    {\n                        p.OwnedBy = OwnedBy.User;\n                        changed = true;\n                    }
                     if (changed)
                     {
                         p.UpdatedAtUtc = DateTime.UtcNow;
@@ -126,7 +122,7 @@ public static class StartupDataSeeder
                 // Link to user
                 if (!await db.UserPersonas.AnyAsync(up => up.UserId == user.Id && up.PersonaId == existing.Id))
                 {
-                    db.UserPersonas.Add(new UserPersona { UserId = user.Id, PersonaId = existing.Id, IsDefault = false, Label = existing.Nickname });
+                    db.UserPersonas.Add(new UserPersonas { UserId = user.Id, PersonaId = existing.Id, IsDefault = false, Label = existing.Nickname });
                     await db.SaveChangesAsync();
                 }
 
@@ -244,14 +240,14 @@ public static class StartupDataSeeder
                     Nickname = user.Username,
                     Role = "User",
                     Type = PersonaType.User,
-                    OwnerUserId = user.Id,
+                    OwnedBy = OwnedBy.User,
                     IsPublic = false,
                     CreatedAtUtc = DateTime.UtcNow
                 };
                 db.Personas.Add(persona);
                 await db.SaveChangesAsync();
                 user.PrimaryPersonaId = persona.Id;
-                db.UserPersonas.Add(new UserPersona { UserId = user.Id, PersonaId = persona.Id, IsDefault = true, Label = persona.Nickname, CreatedAtUtc = DateTime.UtcNow });
+                db.UserPersonas.Add(new UserPersonas { UserId = user.Id, PersonaId = persona.Id, IsDefault = true, Label = persona.Nickname, CreatedAtUtc = DateTime.UtcNow });
                 await db.SaveChangesAsync();
             }
             return user;
@@ -280,14 +276,14 @@ public static class StartupDataSeeder
             Nickname = username,
             Role = "User",
             Type = PersonaType.User,
-            OwnerUserId = user.Id,
+                    OwnedBy = OwnedBy.User,
             IsPublic = false,
             CreatedAtUtc = DateTime.UtcNow
         };
         db.Personas.Add(p);
         await db.SaveChangesAsync();
         user.PrimaryPersonaId = p.Id;
-        db.UserPersonas.Add(new UserPersona { UserId = user.Id, PersonaId = p.Id, IsDefault = true, Label = p.Nickname, CreatedAtUtc = DateTime.UtcNow });
+        db.UserPersonas.Add(new UserPersonas { UserId = user.Id, PersonaId = p.Id, IsDefault = true, IsOwner = true, Label = p.Nickname, CreatedAtUtc = DateTime.UtcNow });
         await db.SaveChangesAsync();
         logger.LogInformation("Seeded default user {Username} with persona {Persona}", username, p.Id);
         return user;
@@ -402,3 +398,8 @@ public static class StartupDataSeeder
         }
     }
 }
+
+
+
+
+

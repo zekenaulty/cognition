@@ -2,12 +2,13 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { api, LoginResponse } from '../api/client'
 import { jwtDecode } from 'jwt-decode'
 
-type JwtPayload = { sub: string; unique_name?: string; primary_persona?: string; exp?: number }
+type JwtPayload = { sub: string; unique_name?: string; primary_persona?: string; exp?: number; role?: string | string[]; [k: string]: any }
 
 export type AuthState = {
   userId: string
   username?: string
   primaryPersonaId?: string | null
+  role?: 'Viewer' | 'User' | 'Administrator'
   accessToken: string
   refreshToken: string
   expiresAt: string
@@ -71,10 +72,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function login(username: string, password: string) {
     const res = await api.login(username, password)
     const payload = jwtDecode<JwtPayload>(res.accessToken)
+    const roleClaim: any = payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']
+    const role = Array.isArray(roleClaim) ? (roleClaim[0] as string | undefined) : (roleClaim as string | undefined)
     setAuth({
       userId: payload.sub,
       username: payload.unique_name || res.username,
       primaryPersonaId: res.primaryPersonaId ?? payload.primary_persona ?? null,
+      role: (role as any) as any,
       accessToken: res.accessToken,
       refreshToken: res.refreshToken,
       expiresAt: res.expiresAt
@@ -89,10 +93,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!auth) return
     const res = await api.refresh(auth.refreshToken)
     const payload = jwtDecode<JwtPayload>(res.accessToken)
+    const roleClaim: any = payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']
+    const role = Array.isArray(roleClaim) ? (roleClaim[0] as string | undefined) : (roleClaim as string | undefined)
     setAuth({
       userId: payload.sub,
       username: payload.unique_name || auth.username,
       primaryPersonaId: payload.primary_persona ?? auth.primaryPersonaId ?? null,
+      role: (role as any) as any,
       accessToken: res.accessToken,
       refreshToken: res.refreshToken,
       expiresAt: res.expiresAt

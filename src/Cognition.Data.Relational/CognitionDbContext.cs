@@ -35,6 +35,7 @@ public class CognitionDbContext : DbContext
 
     public DbSet<Persona> Personas => Set<Persona>();
     public DbSet<PersonaLink> PersonaLinks => Set<PersonaLink>();
+    public DbSet<PersonaPersonas> PersonaPersonas => Set<PersonaPersonas>();
     public DbSet<PersonaMemoryType> PersonaMemoryTypes => Set<PersonaMemoryType>();
     public DbSet<PersonaMemory> PersonaMemories => Set<PersonaMemory>();
     public DbSet<PersonaEventType> PersonaEventTypes => Set<PersonaEventType>();
@@ -46,6 +47,7 @@ public class CognitionDbContext : DbContext
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
+    public DbSet<ConversationMessageVersion> ConversationMessageVersions => Set<ConversationMessageVersion>();
     public DbSet<ConversationSummary> ConversationSummaries => Set<ConversationSummary>();
 
     public DbSet<ConversationPlan> ConversationPlans => Set<ConversationPlan>();
@@ -71,7 +73,7 @@ public class CognitionDbContext : DbContext
     public DbSet<SystemVariable> SystemVariables => Set<SystemVariable>();
 
     public DbSet<User> Users => Set<User>();
-    public DbSet<UserPersona> UserPersonas => Set<UserPersona>();
+    public DbSet<UserPersonas> UserPersonas => Set<UserPersonas>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     public DbSet<ImageAsset> ImageAssets => Set<ImageAsset>();

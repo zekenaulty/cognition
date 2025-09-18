@@ -4,6 +4,7 @@ import { normalizeRole } from '../utils/chat';
 
 type Conv = { id: string; title?: string | null };
 type Message = {
+  id?: string;
   role: 'system' | 'user' | 'assistant';
   content: string;
   fromId?: string;
@@ -15,6 +16,8 @@ type Message = {
   imgPrompt?: string;
   imgStyleName?: string;
   metatype?: string;
+  versions?: string[];
+  versionIndex?: number;
 };
 
 export function useConversationsMessages(accessToken: string, personaId: string): {
@@ -55,6 +58,7 @@ export function useConversationsMessages(accessToken: string, personaId: string)
 
       // Normalize chat messages
       const baseMsgs: Message[] = (msgList as any[]).map((m: any) => ({
+        id: m.id ?? m.Id,
         role: normalizeRole(m.role ?? m.Role),
         content: m.content ?? m.Content,
         fromId: m.fromPersonaId ?? m.FromPersonaId,
@@ -65,6 +69,8 @@ export function useConversationsMessages(accessToken: string, personaId: string)
         imgPrompt: m.imgPrompt,
         imgStyleName: m.imgStyleName,
         metatype: m.metatype,
+        versions: m.versions ?? m.Versions,
+        versionIndex: m.versionIndex ?? m.VersionIndex,
       }));
 
       // Normalize image messages

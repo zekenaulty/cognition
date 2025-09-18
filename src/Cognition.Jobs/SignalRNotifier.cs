@@ -23,9 +23,29 @@ namespace Cognition.Jobs
             await _connection.StartAsync();
         }
 
-        public async Task NotifyAssistantMessageAsync(Guid conversationId, string content)
+        public async Task NotifyAssistantMessageAsync(Guid conversationId, Guid personaId, string content, Guid? messageId = null)
         {
-            await _connection.InvokeAsync("SendAssistantMessage", conversationId.ToString(), content);
+            if (_connection.State != HubConnectionState.Connected)
+            {
+                await _connection.StartAsync();
+            }
+            if (messageId.HasValue)
+            {
+                await _connection.InvokeAsync("SendAssistantMessage", conversationId.ToString(), personaId.ToString(), content, messageId.Value.ToString());
+            }
+            else
+            {
+                await _connection.InvokeAsync("SendAssistantMessage", conversationId.ToString(), personaId.ToString(), content);
+            }
+        }
+
+        public async Task NotifyAssistantDeltaAsync(Guid conversationId, Guid personaId, string delta)
+        {
+            if (_connection.State != HubConnectionState.Connected)
+            {
+                await _connection.StartAsync();
+            }
+            await _connection.InvokeAsync("SendAssistantDelta", conversationId.ToString(), personaId.ToString(), delta);
         }
     }
 }

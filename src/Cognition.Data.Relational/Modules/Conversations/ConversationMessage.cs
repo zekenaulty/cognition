@@ -16,6 +16,7 @@ public class ConversationMessage : BaseEntity
 
     public ChatRole Role { get; set; }
     public string? Metatype { get; set; } // e.g. Image, TextResponse, PlanThought, ToolResult
-    public string Content { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty; // Active content (current version)
+    public int ActiveVersionIndex { get; set; } = 0;
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

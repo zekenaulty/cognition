@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
 import { IconButton, Popover, MenuList, MenuItem, Divider, ListItemIcon, ListItemText } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
+import AddIcon from '@mui/icons-material/Add';
+import PersonIcon from '@mui/icons-material/Person';
+import DnsIcon from '@mui/icons-material/Dns';
+import MemoryIcon from '@mui/icons-material/Memory';
+import ImageIcon from '@mui/icons-material/Image';
+import ForumIcon from '@mui/icons-material/Forum';
+import PaletteIcon from '@mui/icons-material/Palette';
+import ViewModuleIcon from '@mui/icons-material/ViewModule';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 
 export type ChatMenuProps = {
   personas: { id: string; name: string }[];
@@ -20,7 +30,7 @@ export type ChatMenuProps = {
   imgMsgCount: number;
   onImgMsgCountChange: (n: number) => void;
   imgPending: boolean;
-  onGenerateImage: () => void;
+  onGenerateImage: (model: string, count: number) => void;
   conversations: { id: string; title?: string | null }[];
   conversationId: string;
   onConversationChange: (id: string) => void;
@@ -48,21 +58,25 @@ export function ChatMenu(props: ChatMenuProps) {
         transformOrigin={{ vertical: 'top', horizontal: 'left' }}
       >
         <MenuList>
+          <MenuItem onClick={() => { props.onNewConversation(); }}>
+            <ListItemIcon><AddIcon /></ListItemIcon>
+            <ListItemText>New Conversation</ListItemText>
+          </MenuItem>
           <MenuItem onClick={e => { setSubMenu('persona'); setSubMenuAnchor(e.currentTarget); }}>
-            <ListItemIcon><SettingsIcon /></ListItemIcon>
+            <ListItemIcon><PersonIcon /></ListItemIcon>
             <ListItemText>Persona</ListItemText>
           </MenuItem>
           <MenuItem onClick={e => { setSubMenu('provider'); setSubMenuAnchor(e.currentTarget); }}>
-            <ListItemIcon><SettingsIcon /></ListItemIcon>
+            <ListItemIcon><DnsIcon /></ListItemIcon>
             <ListItemText>Provider & Model</ListItemText>
           </MenuItem>
           <MenuItem onClick={e => { setSubMenu('images'); setSubMenuAnchor(e.currentTarget); }}>
-            <ListItemIcon><SettingsIcon /></ListItemIcon>
+            <ListItemIcon><ImageIcon /></ListItemIcon>
             <ListItemText>Images</ListItemText>
           </MenuItem>
-          <MenuItem onClick={e => { setSubMenu('conversation'); setSubMenuAnchor(e.currentTarget); }}>
-            <ListItemIcon><SettingsIcon /></ListItemIcon>
-            <ListItemText>Conversation</ListItemText>
+          <MenuItem onClick={e => { setSubMenu('conversation-list'); setSubMenuAnchor(e.currentTarget); }}>
+            <ListItemIcon><ForumIcon /></ListItemIcon>
+            <ListItemText>Conversations</ListItemText>
           </MenuItem>
         </MenuList>
       </Popover>
@@ -75,40 +89,73 @@ export function ChatMenu(props: ChatMenuProps) {
       >
         <MenuList>
           {subMenu === 'persona' && props.personas.map(p => (
-            <MenuItem key={p.id} selected={props.personaId === p.id} onClick={() => { props.onPersonaChange(p.id); setSubMenu(null); setSubMenuAnchor(null); }}>{p.name}</MenuItem>
+            <MenuItem key={p.id} selected={props.personaId === p.id} onClick={() => { props.onPersonaChange(p.id); setSubMenu(null); setSubMenuAnchor(null); }}>
+              <ListItemIcon><PersonIcon /></ListItemIcon>
+              <ListItemText>{p.name}</ListItemText>
+            </MenuItem>
           ))}
           {subMenu === 'provider' && (
             <React.Fragment>
               {props.providers.map(pr => (
-                <MenuItem key={pr.id} selected={props.providerId === pr.id} onClick={() => { props.onProviderChange(pr.id); }}>{pr.displayName || pr.name}</MenuItem>
+                <MenuItem key={pr.id} selected={props.providerId === pr.id} onClick={() => { props.onProviderChange(pr.id); }}>
+                  <ListItemIcon><DnsIcon /></ListItemIcon>
+                  <ListItemText>{pr.displayName || pr.name}</ListItemText>
+                </MenuItem>
               ))}
               {props.models.length > 0 && <Divider />}
               {props.models.map(m => (
-                <MenuItem key={m.id} selected={props.modelId === m.id} onClick={() => { props.onModelChange(m.id); setSubMenu(null); setSubMenuAnchor(null); }}>{m.displayName || m.name}</MenuItem>
+                <MenuItem key={m.id} selected={props.modelId === m.id} onClick={() => { props.onModelChange(m.id); setSubMenu(null); setSubMenuAnchor(null); }}>
+                  <ListItemIcon><MemoryIcon /></ListItemIcon>
+                  <ListItemText>{m.displayName || m.name}</ListItemText>
+                </MenuItem>
               ))}
             </React.Fragment>
           )}
           {subMenu === 'images' && (
             <React.Fragment>
-              {/* Generate at top */}
-              <MenuItem key="img-generate" disabled={props.imgPending} onClick={() => { props.onGenerateImage(); setSubMenu(null); setSubMenuAnchor(null); }}>{props.imgPending ? 'Generating…' : 'Generate Image'}</MenuItem>
+              <MenuItem key="img-generate" disabled={props.imgPending} onClick={() => { props.onGenerateImage(props.imgModel, props.imgMsgCount); }}>
+                <ListItemIcon><AutoAwesomeIcon /></ListItemIcon>
+                <ListItemText>{props.imgPending ? 'Generating…' : 'Generate Image'}</ListItemText>
+              </MenuItem>
               <Divider />
+              <MenuItem onClick={e => { setSubMenu('images-style'); setSubMenuAnchor(e.currentTarget); }}>
+                <ListItemIcon><PaletteIcon /></ListItemIcon>
+                <ListItemText>Style ▶</ListItemText>
+              </MenuItem>
+              <MenuItem onClick={e => { setSubMenu('images-samples'); setSubMenuAnchor(e.currentTarget); }}>
+                <ListItemIcon><ViewModuleIcon /></ListItemIcon>
+                <ListItemText>Samples ▶</ListItemText>
+              </MenuItem>
+            </React.Fragment>
+          )}
+          {subMenu === 'images-style' && (
+            <React.Fragment>
               {props.imgStyles.map(s => (
-                <MenuItem key={s.id} selected={props.imgStyleId === s.id} onClick={() => { props.onImgStyleChange(s.id); setSubMenu(null); setSubMenuAnchor(null); }}>{s.name}</MenuItem>
-              ))}
-              <Divider />
-              {[6, 12, 24].map((n) => (
-                <MenuItem key={n} selected={props.imgMsgCount === n} onClick={() => { props.onImgMsgCountChange(n); setSubMenu(null); setSubMenuAnchor(null); }}>{n} images</MenuItem>
+                <MenuItem key={s.id} selected={props.imgStyleId === s.id} onClick={() => { props.onImgStyleChange(s.id); }}>
+                  <ListItemIcon><PaletteIcon /></ListItemIcon>
+                  <ListItemText>{s.name}</ListItemText>
+                </MenuItem>
               ))}
             </React.Fragment>
           )}
-          {subMenu === 'conversation' && (
+          {subMenu === 'images-samples' && (
+            <React.Fragment>
+              {[6, 12, 24].map((n) => (
+                <MenuItem key={n} selected={props.imgMsgCount === n} onClick={() => { props.onImgMsgCountChange(n); }}>
+                  <ListItemIcon><ViewModuleIcon /></ListItemIcon>
+                  <ListItemText>{n} images</ListItemText>
+                </MenuItem>
+              ))}
+            </React.Fragment>
+          )}
+          {subMenu === 'conversation-list' && (
             <React.Fragment>
               {props.conversations.map(c => (
-                <MenuItem key={c.id} selected={props.conversationId === c.id} onClick={() => { props.onConversationChange(c.id); setSubMenu(null); setSubMenuAnchor(null); }}>{c.title || `Conversation ${c.id}`}</MenuItem>
+                <MenuItem key={c.id} selected={props.conversationId === c.id} onClick={() => { props.onConversationChange(c.id); setSubMenu(null); setSubMenuAnchor(null); }}>
+                  <ListItemIcon><ChatBubbleOutlineIcon /></ListItemIcon>
+                  <ListItemText>{c.title || `Conversation ${c.id}`}</ListItemText>
+                </MenuItem>
               ))}
-              <Divider />
-              <MenuItem key="new" onClick={() => { props.onNewConversation(); setSubMenu(null); setSubMenuAnchor(null); }}>+ New Conversation</MenuItem>
             </React.Fragment>
           )}
           {/* Removed invalid spread/mapping for image count and conversation menus. Use only valid fragments and mapping above. */}

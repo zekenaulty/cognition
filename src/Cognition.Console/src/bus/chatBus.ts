@@ -6,6 +6,12 @@ export type ChatBusEvents = {
   'tool-requested': { conversationId: string; personaId: string; toolId: string; args: Record<string, any>; timestamp: string };
   'tool-completed': { conversationId: string; personaId: string; toolId: string; result: any; success: boolean; error?: string; timestamp: string };
   'connection-state': { state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' };
+  'assistant-delta': { conversationId: string; personaId: string; text: string; timestamp?: string };
+  'assistant-version-appended': { conversationId: string; messageId: string; content: string; versionIndex: number };
+  'assistant-version-activated': { conversationId: string; messageId: string; versionIndex: number };
+  'conversation-created': { conversationId: string; personaId: string; title?: string | null; timestamp?: string };
+  'conversation-joined': { conversationId: string; personaId: string; timestamp?: string };
+  'conversation-left': { conversationId: string; personaId: string; timestamp?: string };
 };
 
 class ChatBus {
@@ -31,4 +37,3 @@ class ChatBus {
 }
 
 export const chatBus = new ChatBus();
-

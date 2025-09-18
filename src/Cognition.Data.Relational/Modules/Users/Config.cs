@@ -32,9 +32,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
     }
 }
 
-public class UserPersonaConfiguration : IEntityTypeConfiguration<UserPersona>
+public class UserPersonaConfiguration : IEntityTypeConfiguration<UserPersonas>
 {
-    public void Configure(EntityTypeBuilder<UserPersona> b)
+    public void Configure(EntityTypeBuilder<UserPersonas> b)
     {
         b.ToTable("user_personas");
         b.HasKey(x => x.Id).HasName("pk_user_personas");
@@ -43,6 +43,7 @@ public class UserPersonaConfiguration : IEntityTypeConfiguration<UserPersona>
         b.Property(x => x.PersonaId).HasColumnName("persona_id");
         b.Property(x => x.IsDefault).HasColumnName("is_default");
         b.Property(x => x.Label).HasColumnName("label");
+        b.Property(x => x.IsOwner).HasColumnName("is_owner").HasDefaultValue(false);
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.HasOne(x => x.User).WithMany(u => u.UserPersonas).HasForeignKey(x => x.UserId).HasConstraintName("fk_user_personas_users");

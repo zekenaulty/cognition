@@ -54,10 +54,27 @@ public class ConversationMessageConfiguration : IEntityTypeConfiguration<Convers
         b.Property(x => x.Role).HasColumnName("role").HasConversion<string>();
         b.Property(x => x.Metatype).HasColumnName("metatype");
         b.Property(x => x.Content).HasColumnName("content");
+        b.Property(x => x.ActiveVersionIndex).HasColumnName("active_version_index");
         b.Property(x => x.Timestamp).HasColumnName("timestamp");
         b.HasIndex(x => new { x.ConversationId, x.Timestamp }).HasDatabaseName("ix_conversation_messages_conversation_ts");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+    }
+}
+
+public class ConversationMessageVersionConfiguration : IEntityTypeConfiguration<ConversationMessageVersion>
+{
+    public void Configure(EntityTypeBuilder<ConversationMessageVersion> b)
+    {
+        b.ToTable("conversation_message_versions");
+        b.HasKey(x => x.Id).HasName("pk_conversation_message_versions");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.ConversationMessageId).HasColumnName("conversation_message_id");
+        b.HasOne(x => x.ConversationMessage).WithMany().HasForeignKey(x => x.ConversationMessageId).HasConstraintName("fk_conversation_message_versions_message");
+        b.Property(x => x.VersionIndex).HasColumnName("version_index");
+        b.Property(x => x.Content).HasColumnName("content");
+        b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+        b.HasIndex(x => new { x.ConversationMessageId, x.VersionIndex }).IsUnique().HasDatabaseName("ux_conversation_message_versions_message_index");
     }
 }
 
