@@ -49,6 +49,7 @@ export default function ChatPage() {
     setConversationId,
     messages,
     setMessages,
+    setConversations,
   } = useConversationsMessages(accessToken || '', personaId);
 
   // Ensure all messages are normalized on initial load
@@ -109,6 +110,38 @@ export default function ChatPage() {
       clearTimeout(pendingAssistantTimerRef.current);
       pendingAssistantTimerRef.current = null;
     }
+    // Refresh conversation title after first reply (server may have auto-titled)
+    try {
+      const convId = conversationId ?? '';
+      if (convId && accessToken) {
+        const cur = conversations.find(c => c.id === convId);
+        if (!cur || !cur.title) {
+          // slight delay to allow server to persist title
+          setTimeout(async () => {
+            try {
+              const res = await fetch(`/api/conversations/${convId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+              if (res.ok) {
+                const data = await res.json();
+                if (data?.title || data?.Title) {
+                  const title = data.title ?? data.Title;
+                  setConversations(prev => prev.map(c => c.id === convId ? { ...c, title } : c));
+                }
+              }
+            } catch {}
+          }, 300);
+        }
+      }
+    } catch {}
+  });
+
+  // Update local title when server broadcasts ConversationUpdated
+  useChatBus('conversation-updated', (evt: any) => {
+    try {
+      const cid = String(evt.conversationId || '');
+      if (!cid) return;
+      const title = (evt.title ?? '').toString();
+      setConversations(prev => prev.map(c => c.id === cid ? { ...c, title } : c));
+    } catch {}
   });
 
   // Bus: plan/tool events
@@ -229,6 +262,15 @@ export default function ChatPage() {
     setToolActions([]);
   }, [personaId, conversationId]);
 
+  // When persona changes without an explicit conversation in the route, clear current conversation
+  useEffect(() => {
+    if (!route.conversationId) {
+      setMessages([]);
+      setConversationId(null);
+      try { settings.remove('chat.conversationId'); } catch {}
+    }
+  }, [personaId]);
+
   // Load personas
   useEffect(() => {
     const loadPersonas = async () => {
@@ -256,7 +298,7 @@ export default function ChatPage() {
         } catch {}
         setPersonas(items);
         if (!personaId) {
-          const saved = getLS(LS.persona);
+          const saved = settings.get<string>('chat.personaId') || '';
           const pick = (saved && items.find(x => x.id === saved)) ? saved : (items[0]?.id || auth?.primaryPersonaId || '');
           if (pick) setPersonaId(pick);
         }
@@ -356,6 +398,8 @@ export default function ChatPage() {
         const body = await res.json();
         convId = body.id || body.Id;
         setConversationId(convId);
+        // Ensure the new conversation appears in the list immediately
+        setConversations(prev => (prev.some(c => c.id === convId) ? prev : [{ id: convId, title: null }, ...prev]));
         try { if (convId) settings.set('chat.conversationId', convId); } catch {}
         // Make sure hub has joined this conversation
         try { await chatHub.connectionRef.current?.invoke('JoinConversation', convId); } catch {}
@@ -391,6 +435,7 @@ export default function ChatPage() {
               setMessages(prev => prev.map(m => ((m as any).localId === placeholderId && m.pending)
                 ? ({ ...m, pending: false, content: reply } as any)
                 : m));
+              // Title will arrive via hub ConversationUpdated; fallback fetch is no longer required
             }
           }
         } catch {}

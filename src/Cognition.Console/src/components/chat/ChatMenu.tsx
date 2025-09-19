@@ -62,10 +62,7 @@ export function ChatMenu(props: ChatMenuProps) {
             <ListItemIcon><AddIcon /></ListItemIcon>
             <ListItemText>New Conversation</ListItemText>
           </MenuItem>
-          <MenuItem onClick={e => { setSubMenu('persona'); setSubMenuAnchor(e.currentTarget); }}>
-            <ListItemIcon><PersonIcon /></ListItemIcon>
-            <ListItemText>Persona</ListItemText>
-          </MenuItem>
+          {/* Persona selection removed from chat menu */}
           <MenuItem onClick={e => { setSubMenu('provider'); setSubMenuAnchor(e.currentTarget); }}>
             <ListItemIcon><DnsIcon /></ListItemIcon>
             <ListItemText>Provider & Model</ListItemText>
@@ -88,12 +85,7 @@ export function ChatMenu(props: ChatMenuProps) {
         transformOrigin={{ vertical: 'top', horizontal: 'left' }}
       >
         <MenuList>
-          {subMenu === 'persona' && props.personas.map(p => (
-            <MenuItem key={p.id} selected={props.personaId === p.id} onClick={() => { props.onPersonaChange(p.id); setSubMenu(null); setSubMenuAnchor(null); }}>
-              <ListItemIcon><PersonIcon /></ListItemIcon>
-              <ListItemText>{p.name}</ListItemText>
-            </MenuItem>
-          ))}
+          {/* Persona submenu removed */}
           {subMenu === 'provider' && (
             <React.Fragment>
               {props.providers.map(pr => (
@@ -153,7 +145,7 @@ export function ChatMenu(props: ChatMenuProps) {
               {props.conversations.map(c => (
                 <MenuItem key={c.id} selected={props.conversationId === c.id} onClick={() => { props.onConversationChange(c.id); setSubMenu(null); setSubMenuAnchor(null); }}>
                   <ListItemIcon><ChatBubbleOutlineIcon /></ListItemIcon>
-                  <ListItemText>{c.title || `Conversation ${c.id}`}</ListItemText>
+                  <ListItemText>{(c.title && c.title.trim()) ? c.title : 'New Chat'}</ListItemText>
                 </MenuItem>
               ))}
             </React.Fragment>

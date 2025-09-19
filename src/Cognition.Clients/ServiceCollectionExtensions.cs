@@ -18,6 +18,7 @@ public static class ServiceCollectionExtensions
         // Named client for LLM calls to allow separate tuning if needed
         services.AddHttpClient("llm");
         services.AddScoped<ILLMClientFactory, LLMClientFactory>();
+        services.AddScoped<ILLMProviderResolver, LLMProviderResolver>();
         services.AddHttpClient<IImageClient, OpenAIImageClient>(c =>
         {
             // Allow long-running image generation (up to 10 minutes)

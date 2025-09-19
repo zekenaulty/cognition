@@ -152,7 +152,7 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                 }>
                   <ListItemButton onClick={() => openRecentConversation(r.id)} sx={{ pl: 2 }}>
                     <ListItemIcon sx={{ minWidth: 0, mr: 1 }}><ChatIcon fontSize="small" /></ListItemIcon>
-                    <ListItemText primary={r.title || `Conversation ${r.id.slice(0,8)}`} />
+                    <ListItemText primary={(r.title && r.title.trim()) ? r.title : 'New Chat'} />
                   </ListItemButton>
                 </ListItem>
               ))}
@@ -192,7 +192,7 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                       }>
                         <ListItemButton onClick={() => { navigate(`/chat/${p.id}/${c.id}`); onClose(); }} sx={{ pl: 2 }}>
                           <ListItemIcon sx={{ minWidth: 0, mr: 1 }}><ChatIcon fontSize="small" /></ListItemIcon>
-                          <ListItemText primary={c.title || `Conversation ${c.id.slice(0,8)}`} />
+                          <ListItemText primary={(c.title && c.title.trim()) ? c.title : 'New Chat'} />
                         </ListItemButton>
                       </ListItem>
                     ))}

@@ -21,7 +21,7 @@ public class ClientProfilesController : ControllerBase
 
     public record UpdateRequest(Guid? ModelId, Guid? ApiCredentialId,
         string? UserName, string? BaseUrlOverride, int? MaxTokens, double? Temperature, double? TopP,
-        double? PresencePenalty, double? FrequencyPenalty, bool? Stream, bool? LoggingEnabled);
+        double? PresencePenalty, double? FrequencyPenalty, bool? Stream, bool? LoggingEnabled, bool? IsActive);
 
     [HttpGet]
     public async Task<IActionResult> List()
@@ -46,6 +46,9 @@ public class ClientProfilesController : ControllerBase
     }
 
     [HttpPost]
+    [Swashbuckle.AspNetCore.Annotations.SwaggerOperation(
+        Summary = "Create a ClientProfile",
+        Description = "Creates a new client profile. Example body: {\n  'name':'OpenAI 4o default', 'providerId':'<GUID>', 'modelId':'<GUID>',\n  'maxTokens':8192, 'temperature':0.7, 'topP':0.95, 'stream':true\n}")]
     public async Task<IActionResult> Create([FromBody] CreateRequest req)
     {
         if (!await _db.Providers.AnyAsync(p => p.Id == req.ProviderId)) return BadRequest("Provider not found");
@@ -74,7 +77,11 @@ public class ClientProfilesController : ControllerBase
     }
 
     [HttpPatch("{id:guid}")]
-    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateRequest req)
+    [HttpPatch("{id:guid}")]
+    [Swashbuckle.AspNetCore.Annotations.SwaggerOperation(
+        Summary = "Update ClientProfile",
+        Description = "Update model/parameters. To disable a profile set isActive=false. Use force=true to reassign in-use tools/agents to default profile before disabling.")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateRequest req, [FromQuery] bool force = false)
     {
         var cp = await _db.ClientProfiles.FirstOrDefaultAsync(x => x.Id == id);
         if (cp == null) return NotFound();
@@ -97,8 +104,55 @@ public class ClientProfilesController : ControllerBase
         if (req.FrequencyPenalty.HasValue) cp.FrequencyPenalty = req.FrequencyPenalty.Value;
         if (req.Stream.HasValue) cp.Stream = req.Stream.Value;
         if (req.LoggingEnabled.HasValue) cp.LoggingEnabled = req.LoggingEnabled.Value;
+        if (req.IsActive.HasValue && req.IsActive.Value == false)
+        {
+            var inUse = await _db.Tools.AnyAsync(t => t.ClientProfileId == id) || await _db.Agents.AnyAsync(a => a.ClientProfileId == id);
+            if (inUse && !force) return BadRequest(new { message = "ClientProfile is in use; set force=true to reassign to default before disabling." });
+            if (inUse && force)
+            {
+                var def = await ResolveDefaultProfileAsync();
+                if (def == null) return BadRequest(new { message = "Default profile (OpenAI gpt-4o) not available for reassignment." });
+                await _db.Tools.Where(t => t.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(t => t.ClientProfileId, def.Value));
+                await _db.Agents.Where(a => a.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(a => a.ClientProfileId, def.Value));
+            }
+            cp.IsActive = false;
+        }
         cp.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [HttpDelete("{id:guid}")]
+    [HttpDelete("{id:guid}")]
+    [Swashbuckle.AspNetCore.Annotations.SwaggerOperation(
+        Summary = "Delete ClientProfile",
+        Description = "Deletes the profile. Use force=true to reassign in-use tools/agents to default profile before delete.")]
+    public async Task<IActionResult> Delete(Guid id, [FromQuery] bool force = false)
+    {
+        var cp = await _db.ClientProfiles.FirstOrDefaultAsync(x => x.Id == id);
+        if (cp == null) return NotFound();
+        bool inUse = await _db.Tools.AnyAsync(t => t.ClientProfileId == id)
+                      || await _db.Agents.AnyAsync(a => a.ClientProfileId == id);
+        if (inUse && !force) return BadRequest(new { message = "ClientProfile is in use; set force=true to reassign to default profile before delete." });
+        if (inUse && force)
+        {
+            var def = await ResolveDefaultProfileAsync();
+            if (def == null) return BadRequest(new { message = "Default profile (OpenAI gpt-4o) not available for reassignment." });
+            await _db.Tools.Where(t => t.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(t => t.ClientProfileId, def.Value));
+            await _db.Agents.Where(a => a.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(a => a.ClientProfileId, def.Value));
+        }
+        _db.ClientProfiles.Remove(cp);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    private async Task<Guid?> ResolveDefaultProfileAsync()
+    {
+        var openai = await _db.Providers.AsNoTracking().FirstOrDefaultAsync(p => p.Name.ToLower() == "openai");
+        if (openai == null) return null;
+        var gpt4o = await _db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ProviderId == openai.Id && m.Name.ToLower() == "gpt-4o");
+        if (gpt4o == null) return null;
+        var def = await _db.ClientProfiles.AsNoTracking().FirstOrDefaultAsync(cp => cp.ProviderId == openai.Id && cp.ModelId == gpt4o.Id);
+        return def?.Id;
     }
 }

@@ -18,8 +18,8 @@ public class ToolsController : ControllerBase
     private readonly IToolRegistry _registry;
     public ToolsController(CognitionDbContext db, IToolRegistry registry) { _db = db; _registry = registry; }
 
-    public record CreateToolRequest(string Name, string ClassPath, string? Description, string[]? Tags, object? Metadata, string? Example, bool IsActive = true);
-    public record PatchToolRequest(string? Name, string? ClassPath, string? Description, string[]? Tags, object? Metadata, string? Example, bool? IsActive);
+    public record CreateToolRequest(string Name, string ClassPath, string? Description, string[]? Tags, object? Metadata, string? Example, bool IsActive = true, Guid? ClientProfileId = null);
+    public record PatchToolRequest(string? Name, string? ClassPath, string? Description, string[]? Tags, object? Metadata, string? Example, bool? IsActive, Guid? ClientProfileId = null);
 
     [HttpGet]
     public async Task<IActionResult> ListTools()
@@ -34,7 +34,7 @@ public class ToolsController : ControllerBase
         // Validate ClassPath is a resolvable ITool type
         if (!IsValidToolClassPath(req.ClassPath, out var validationError))
             return BadRequest(validationError);
-        var t = new Tool { Name = req.Name, ClassPath = req.ClassPath, Description = req.Description, Tags = req.Tags, Metadata = req.Metadata as System.Collections.Generic.Dictionary<string, object?>, Example = req.Example, IsActive = req.IsActive };
+        var t = new Tool { Name = req.Name, ClassPath = req.ClassPath, Description = req.Description, Tags = req.Tags, Metadata = req.Metadata as System.Collections.Generic.Dictionary<string, object?>, Example = req.Example, IsActive = req.IsActive, ClientProfileId = req.ClientProfileId };
         _db.Tools.Add(t);
         await _db.SaveChangesAsync();
         return Ok(new { t.Id });
@@ -57,6 +57,7 @@ public class ToolsController : ControllerBase
         if (req.Metadata != null) t.Metadata = req.Metadata as System.Collections.Generic.Dictionary<string, object?>;
         t.Example = req.Example ?? t.Example;
         if (req.IsActive.HasValue) t.IsActive = req.IsActive.Value;
+        if (req.ClientProfileId.HasValue) t.ClientProfileId = req.ClientProfileId.Value;
         await _db.SaveChangesAsync();
         return NoContent();
     }

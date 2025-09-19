@@ -22,7 +22,7 @@ export function MessageList({ messages, onImageClick, ttsVoiceName, assistantGen
       {messages.map((msg, idx) => {
         const normRole = normalizeRole(msg.role);
         return (
-          <React.Fragment key={idx}>
+          <React.Fragment key={(msg as any).localId || (msg as any).id || idx}>
             {/* Image message rendering: always display, show style/prompt as title, click-to-zoom */}
             {msg.imageId ? (
               <Box sx={{ mt: 0.5, mb: 2, display: 'flex', flexDirection: 'column', alignItems: normRole === 'user' ? 'flex-end' : 'flex-start' }}>

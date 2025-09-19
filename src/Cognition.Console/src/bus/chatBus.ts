@@ -12,6 +12,7 @@ export type ChatBusEvents = {
   'conversation-created': { conversationId: string; personaId: string; title?: string | null; timestamp?: string };
   'conversation-joined': { conversationId: string; personaId: string; timestamp?: string };
   'conversation-left': { conversationId: string; personaId: string; timestamp?: string };
+  'conversation-updated': { conversationId: string; title?: string | null; timestamp?: string };
 };
 
 class ChatBus {

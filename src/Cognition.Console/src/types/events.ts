@@ -63,6 +63,12 @@ export interface ConversationLeft {
   timestamp?: string;
 }
 
+export interface ConversationUpdated {
+  conversationId: string;
+  title?: string | null;
+  timestamp?: string;
+}
+
 export type ChatBusEvent =
   | AssistantMessageAppended
   | PlanReady
@@ -71,4 +77,5 @@ export type ChatBusEvent =
   | AssistantTokenDelta
   | ConversationCreated
   | ConversationJoined
-  | ConversationLeft;
+  | ConversationLeft
+  | ConversationUpdated;

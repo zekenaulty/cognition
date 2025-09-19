@@ -19,6 +19,8 @@ public class ToolConfiguration : IEntityTypeConfiguration<Tool>
         b.Property(x => x.Tags).HasColumnName("tags");
         b.Property(x => x.Metadata).HasColumnName("metadata").HasColumnType("jsonb");
         b.Property(x => x.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+        b.Property(x => x.ClientProfileId).HasColumnName("client_profile_id");
+        b.HasOne(x => x.ClientProfile).WithMany().HasForeignKey(x => x.ClientProfileId).HasConstraintName("fk_tools_client_profiles");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
     }

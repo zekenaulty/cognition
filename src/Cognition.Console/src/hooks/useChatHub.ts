@@ -30,6 +30,7 @@ export function useChatHub(options: UseChatHubOptions) {
     } = options;
 
     const connectionRef = useRef<signalR.HubConnection | null>(null);
+    const conversationIdRef = useRef<string>(conversationId);
 
     // --- Client→Server Hub Methods ---
     // AppendUserMessage(text: string, personaId?: string, providerId?: string, modelId?: string)
@@ -46,8 +47,9 @@ export function useChatHub(options: UseChatHubOptions) {
       const conn = connectionRef.current;
       if (!conn || conn.state !== signalR.HubConnectionState.Connected) return false;
       try {
-        //await conn.invoke('AppendUserMessage', text, personaId, providerId, modelId);
-        await conn.invoke('AppendUserMessage', conversationId, text, personaId, providerId, modelId);
+        const convId = conversationIdRef.current;
+        if (!convId) return false;
+        await conn.invoke('AppendUserMessage', convId, text, personaId, providerId, modelId);
         return true;
       } catch (err) {
         console.error('Hub sendUserMessage error:', err);
@@ -100,8 +102,12 @@ export function useChatHub(options: UseChatHubOptions) {
       }
     };
 
+    // Keep latest conversation id in a ref
+    useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
+
+    // Establish and keep a single hub connection per accessToken
     useEffect(() => {
-      if (!conversationId) return;
+      if (!accessToken) return;
       let isMounted = true;
       const optionsObj = accessToken ? { accessTokenFactory: () => accessToken } : {};
       const connection = new signalR.HubConnectionBuilder()
@@ -133,6 +139,11 @@ export function useChatHub(options: UseChatHubOptions) {
         } catch {}
       });
 
+      // Conversation updates (e.g., title set by server)
+      connection.on('ConversationUpdated', (evt: any) => {
+        try { chatBus.emit('conversation-updated', { conversationId: evt.conversationId ?? evt.ConversationId, title: evt.title ?? evt.Title, timestamp: evt.timestamp ?? evt.Timestamp }); } catch {}
+      });
+
       // Conversation lifecycle
       connection.on('ConversationCreated', (evt: any) => {
         try { chatBus.emit('conversation-created', evt); } catch {}
@@ -156,7 +167,10 @@ export function useChatHub(options: UseChatHubOptions) {
       connection.start().then(() => {
         if (!isMounted) return;
         chatBus.emit('connection-state', { state: 'connected' });
-        connection.invoke('JoinConversation', conversationId);
+        const currentConv = conversationIdRef.current;
+        if (currentConv) {
+          connection.invoke('JoinConversation', currentConv).catch(err => console.warn('Join failed', err));
+        }
       }).catch(err => console.warn('Hub start error', err));
 
       connection.onreconnecting(() => {
@@ -164,7 +178,10 @@ export function useChatHub(options: UseChatHubOptions) {
       });
       connection.onreconnected(() => {
         // Rejoin the conversation after reconnect
-        try { connection.invoke('JoinConversation', conversationId); } catch (e) { console.warn('Rejoin failed', e); }
+        const currentConv = conversationIdRef.current;
+        if (currentConv) {
+          try { connection.invoke('JoinConversation', currentConv); } catch (e) { console.warn('Rejoin failed', e); }
+        }
         chatBus.emit('connection-state', { state: 'connected' });
       });
 
@@ -174,7 +191,15 @@ export function useChatHub(options: UseChatHubOptions) {
         connectionRef.current = null;
         chatBus.emit('connection-state', { state: 'disconnected' });
       };
-    }, [conversationId, accessToken, onAssistantMessage, onPlanReady, onToolExecutionRequested, onToolExecutionCompleted]);
+    }, [accessToken, onAssistantMessage, onPlanReady, onToolExecutionRequested, onToolExecutionCompleted]);
+
+    // Join conversation group when conversationId changes and we are connected
+    useEffect(() => {
+      const conn = connectionRef.current;
+      if (!conn || conn.state !== signalR.HubConnectionState.Connected) return;
+      if (!conversationId) return;
+      try { conn.invoke('JoinConversation', conversationId); } catch (e) { console.warn('Join failed', e); }
+    }, [conversationId]);
 
     return {
       sendUserMessage,

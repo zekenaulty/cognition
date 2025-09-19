@@ -26,4 +26,6 @@ public class ClientProfile : BaseEntity
     public bool Stream { get; set; } = true;
     public bool LoggingEnabled { get; set; }
 
+    public bool IsActive { get; set; } = true;
+
 }

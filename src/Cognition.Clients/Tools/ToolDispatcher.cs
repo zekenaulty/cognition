@@ -22,7 +22,10 @@ public class ToolDispatcher : IToolDispatcher
     public async Task<(bool ok, object? result, string? error)> ExecuteAsync(
         Guid toolId, ToolContext ctx, IDictionary<string, object?> args, bool log = true)
     {
-        var tool = await _db.Tools.Include(t => t.Parameters).FirstAsync(t => t.Id == toolId);
+        var tool = await _db.Tools
+            .Include(t => t.Parameters)
+            .Include(t => t.ClientProfile)
+            .FirstAsync(t => t.Id == toolId);
         var sw = Stopwatch.StartNew();
         object? result = null; string? error = null; var ok = true;
 
@@ -36,7 +39,14 @@ public class ToolDispatcher : IToolDispatcher
                 throw new InvalidOperationException($"Tool impl not registered in DI: {tool.ClassPath}");
 
             // Validate/prepare args from DB parameter schema
-            foreach (var p in tool.Parameters.Where(p => p.Direction == ToolParamDirection.Input))
+            var inputParams = tool.Parameters.Where(p => p.Direction == ToolParamDirection.Input).ToList();
+            // Reject unknown args early
+            var allowed = new HashSet<string>(inputParams.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var extras = args.Keys.Where(k => !allowed.Contains(k)).ToList();
+            if (extras.Count > 0)
+                throw new ArgumentException($"Unknown parameter(s): {string.Join(", ", extras)}");
+
+            foreach (var p in inputParams)
             {
                 if (!args.ContainsKey(p.Name) || args[p.Name] is null)
                 {
@@ -53,8 +63,21 @@ public class ToolDispatcher : IToolDispatcher
                 if (args.ContainsKey(p.Name))
                 {
                     args[p.Name] = CoerceToType(JsonToDotNet(args[p.Name]), p.Type);
+                    // Enforce enum/options if provided
+                    if (p.Options is not null && p.Options.TryGetValue("values", out var optsObj) && optsObj is not null)
+                    {
+                        var allowedValues = FlattenValues(optsObj);
+                        var vStr = args[p.Name]?.ToString();
+                        if (allowedValues.Count > 0 && vStr is not null && !allowedValues.Contains(vStr, StringComparer.OrdinalIgnoreCase))
+                        {
+                            throw new ArgumentException($"Parameter '{p.Name}' must be one of: {string.Join(", ", allowedValues)}");
+                        }
+                    }
                 }
             }
+
+            // Default provider/model selection: prefer Tool.ClientProfile, then Agent.ClientProfile, then OpenAI gpt-4o
+            EnsureProviderModelArgs(tool, ctx, args);
 
             _logger.LogInformation("Executing tool {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId} persona {PersonaId}", tool.Name, tool.Id, tool.ClassPath, ctx.ConversationId, ctx.PersonaId);
             result = await impl.ExecuteAsync(ctx, args);
@@ -87,6 +110,71 @@ public class ToolDispatcher : IToolDispatcher
         _logger.LogInformation("Tool {ToolName} ({ToolId}) completed success={Success} durationMs={Duration}", tool.Name, tool.Id, ok, (int)sw.ElapsedMilliseconds);
 
         return (ok, result, error);
+    }
+
+    private void EnsureProviderModelArgs(Tool tool, ToolContext ctx, IDictionary<string, object?> args)
+    {
+        bool hasProvider = args.ContainsKey("providerId") && args["providerId"] != null;
+        bool hasModel = args.ContainsKey("modelId") && args["modelId"] != null;
+        if (hasProvider && hasModel) return;
+
+        Guid? providerId = null; Guid? modelId = null;
+        // Tool-level profile
+        if (tool.ClientProfileId.HasValue && tool.ClientProfile is not null)
+        {
+            providerId = tool.ClientProfile.ProviderId;
+            modelId = tool.ClientProfile.ModelId;
+        }
+        // Agent-level profile
+        if ((!providerId.HasValue || !modelId.HasValue) && ctx.AgentId.HasValue)
+        {
+            var agent = _db.Agents.Include(a => a.ClientProfile).FirstOrDefault(a => a.Id == ctx.AgentId.Value);
+            if (agent?.ClientProfileId != null && agent.ClientProfile is not null)
+            {
+                providerId ??= agent.ClientProfile.ProviderId;
+                modelId ??= agent.ClientProfile.ModelId;
+            }
+        }
+        // Global default: OpenAI gpt-4o
+        if (!providerId.HasValue || !modelId.HasValue)
+        {
+            var openai = _db.Providers.AsNoTracking().FirstOrDefault(p => p.Name.ToLower() == "openai");
+            if (openai != null)
+            {
+                providerId ??= openai.Id;
+                var gpt4o = _db.Models.AsNoTracking().FirstOrDefault(m => m.ProviderId == openai.Id && m.Name.ToLower() == "gpt-4o");
+                if (gpt4o != null) modelId ??= gpt4o.Id;
+            }
+        }
+
+        if (providerId.HasValue && !args.ContainsKey("providerId")) args["providerId"] = providerId.Value;
+        if (modelId.HasValue && !args.ContainsKey("modelId")) args["modelId"] = modelId.Value;
+    }
+
+    private static List<string> FlattenValues(object opts)
+    {
+        // Normalize various shapes (array, list, JsonElement) into strings for comparison
+        var list = new List<string>();
+        switch (opts)
+        {
+            case string s:
+                list.Add(s);
+                break;
+            case IEnumerable<object?> en:
+                foreach (var o in en) if (o != null) list.Add(o.ToString()!);
+                break;
+            case System.Text.Json.JsonElement je:
+                if (je.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var el in je.EnumerateArray()) list.Add(el.ToString());
+                }
+                else if (je.ValueKind != System.Text.Json.JsonValueKind.Null)
+                {
+                    list.Add(je.ToString());
+                }
+                break;
+        }
+        return list;
     }
 
     private static Dictionary<string, object?>? RedactArgs(IDictionary<string, object?>? src)

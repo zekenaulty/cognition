@@ -63,6 +63,31 @@ public class AgentService : IAgentService
                $"Return ONLY: {{\"toolId\":\"{respondToolId}\",\"args\":{{\"text\":\"{finalAnswer}\"}}}}";
     }
 
+    private static JSchema BuildPlanStepSchema()
+    {
+        // { "step":1, "goal":"...", "rationale":"...", "action": {"toolId":"GUID or Name", "args":{}}, "finish": false, "final_answer": null }
+        var schemaJson = @"{
+  'type':'object',
+  'properties':{
+    'step': {'type':['integer','null']},
+    'goal': {'type':['string','null']},
+    'rationale': {'type':['string','null']},
+    'action': {
+      'type':'object',
+      'properties':{
+        'toolId': {'type':'string'},
+        'args': {'type':'object'}
+      },
+      'required':['toolId','args']
+    },
+    'finish': {'type':['boolean','null']},
+    'final_answer': {'type':['string','null']}
+  },
+  'required':['action']
+}".Replace("'", "\"");
+        return JSchema.Parse(schemaJson);
+    }
+
     private readonly CognitionDbContext _db;
     private readonly ILLMClientFactory _factory;
     private readonly Cognition.Clients.Tools.IToolDispatcher _dispatcher;
@@ -82,7 +107,8 @@ public class AgentService : IAgentService
     {
         var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
         var sys = persona is null ? "" : BuildSystemMessage(persona);
-        var client = await _factory.CreateAsync(providerId, modelId);
+        var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
+        var client = await _factory.CreateAsync(prov, modl);
         var prompt = string.IsNullOrWhiteSpace(sys) ? input : $"{sys}\n\nUser: {input}";
         try
         {
@@ -113,18 +139,19 @@ public class AgentService : IAgentService
 
         // 2. Create ConversationPlan and discover tools
         var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
+        var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
         var tools = await _db.Tools
             .Include(t => t.Parameters)
             .Where(t => t.IsActive)
             .Where(t => _db.ToolProviderSupports.Any(s => s.ToolId == t.Id
-                                                        && s.ProviderId == providerId
-                                                        && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
+                                                        && s.ProviderId == prov
+                                                        && (s.ModelId == null || (modl != null && s.ModelId == modl))
                                                         && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
             .AsNoTracking()
             .ToListAsync(ct);
         var toolIndex = BuildToolIndexSection(tools);
         var sys = persona is null ? "" : BuildSystemMessage(persona);
-        var client = await _factory.CreateAsync(providerId, modelId);
+        var client = await _factory.CreateAsync(prov, modl);
 
         // 3. Generate OUTLINE_PLAN
         var compactHistory = ""; // TODO: build compact history from recent messages
@@ -168,22 +195,30 @@ public class AgentService : IAgentService
             var completedJson = System.Text.Json.JsonSerializer.Serialize(completedSteps);
             var planPrompt = BuildStepPlanPrompt(goalCompact, maxSteps, outlineState, completedJson, toolIndex);
             var planStepJson = await client.GenerateAsync(planPrompt, track: false);
-            // TODO: Parse/repair planStepJson, fallback to error if invalid
-
-            // Save ConversationThought (step, rationale, plan snapshot, prompt)
-            var thoughtEntity = new ConversationThought
+            // Validate PLAN step JSON against a strict schema
+            string? validatedJson = null;
+            try
             {
-                ConversationId = conversationId,
-                PersonaId = personaId,
-                Thought = planStepJson,
-                StepNumber = step,
-                Rationale = null, // TODO: extract from parsed JSON
-                PlanSnapshotJson = outlineJson,
-                Prompt = planPrompt,
-                Timestamp = DateTime.UtcNow
-            };
-            _db.ConversationThoughts.Add(thoughtEntity);
-            await _db.SaveChangesAsync(ct);
+                if (TryGetJsonObjectText(planStepJson, out var jsonText) && !string.IsNullOrWhiteSpace(jsonText))
+                {
+                    var stepSchema = BuildPlanStepSchema();
+                    var jtok = Newtonsoft.Json.Linq.JToken.Parse(jsonText);
+                    IList<Newtonsoft.Json.Schema.ValidationError> schemaErrors;
+                    if (jtok.IsValid(stepSchema, out schemaErrors))
+                    {
+                        validatedJson = jsonText;
+                    }
+                    else
+                    {
+                        var errs = schemaErrors.Select(e => e.Message).ToList();
+                        _logger.LogWarning("PLAN step schema validation failed: {Errors}", string.Join("; ", errs));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "PLAN step JSON parse failed");
+            }
 
             // Parse planStepJson to get toolId, args, finish, final_answer
             Guid? toolId = null;
@@ -198,7 +233,7 @@ public class AgentService : IAgentService
             string status = "Pending";
             try
             {
-                using var doc = JsonDocument.Parse(planStepJson);
+                using var doc = JsonDocument.Parse(validatedJson ?? planStepJson);
                 var root = doc.RootElement;
                 if (root.TryGetProperty("action", out var action))
                 {
@@ -223,6 +258,21 @@ public class AgentService : IAgentService
                 error = $"Invalid PLAN JSON: {ex.Message}";
                 status = "Failure";
             }
+
+            // Save ConversationThought (step, rationale, plan snapshot, prompt)
+            var thoughtEntity = new ConversationThought
+            {
+                ConversationId = conversationId,
+                PersonaId = personaId,
+                Thought = validatedJson ?? planStepJson,
+                StepNumber = step,
+                Rationale = rationale,
+                PlanSnapshotJson = outlineJson,
+                Prompt = planPrompt,
+                Timestamp = DateTime.UtcNow
+            };
+            _db.ConversationThoughts.Add(thoughtEntity);
+            await _db.SaveChangesAsync(ct);
 
             // If finish, call Respond.Answer tool
             string result = "";
@@ -375,7 +425,8 @@ public class AgentService : IAgentService
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var draft = await AskWithToolIndexAsync(personaId, providerId, modelId, input, tools);
+        var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
+        var draft = await AskWithToolIndexAsync(personaId, prov, modl, input, tools);
 
         // Try to parse a tool plan (by id or name)
         try
@@ -652,6 +703,28 @@ public class AgentService : IAgentService
             .ToList();
 
         return filtered;
+    }
+
+    private async Task<(Guid ProviderId, Guid? ModelId)> ResolveProviderModelForPersonaAsync(Guid personaId, Guid providerId, Guid? modelId, CancellationToken ct)
+    {
+        if (providerId != Guid.Empty) return (providerId, modelId);
+        // Try agent profile by persona
+        var agent = await _db.Agents.Include(a => a.ClientProfile).AsNoTracking().FirstOrDefaultAsync(a => a.PersonaId == personaId, ct);
+        if (agent?.ClientProfile != null)
+        {
+            var prov = agent.ClientProfile.ProviderId;
+            var mod = modelId ?? agent.ClientProfile.ModelId;
+            return (prov, mod);
+        }
+        // Fall back to OpenAI gpt-4o
+        var openai = await _db.Providers.AsNoTracking().FirstOrDefaultAsync(p => p.Name.ToLower() == "openai", ct);
+        if (openai != null)
+        {
+            var gpt4o = await _db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ProviderId == openai.Id && m.Name.ToLower() == "gpt-4o", ct);
+            return (openai.Id, modelId ?? gpt4o?.Id);
+        }
+        // If even OpenAI missing, just return the input (likely will throw upstream)
+        return (providerId, modelId);
     }
 
     private static bool TryGetJsonObjectText(string text, out string? json)

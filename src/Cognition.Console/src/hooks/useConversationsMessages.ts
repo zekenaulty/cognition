@@ -27,6 +27,7 @@ export function useConversationsMessages(accessToken: string, personaId: string)
   setConversationId: (id: string | null) => void;
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  setConversations: React.Dispatch<React.SetStateAction<Conv[]>>;
 } {
   const [conversations, setConversations] = useState<Conv[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -39,11 +40,7 @@ export function useConversationsMessages(accessToken: string, personaId: string)
       const list = await fetchConversations(accessToken, personaId);
       const items: Conv[] = (list as any[]).map((c: any) => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }));
       setConversations(items);
-      // Auto-select saved if valid, else first
-      let saved: string | null = (settings.get<string>('chat.conversationId') || null) as any;
-      const pick = (saved && items.find(x => x.id === saved)) ? saved : (items[0]?.id || null);
-      setConversationId(pick);
-      if (pick) settings.set('chat.conversationId', pick);
+      // Do NOT auto-select a conversation. Routing/new-convo flow controls selection now.
     };
     loadConvs();
   }, [accessToken, personaId]);
@@ -110,5 +107,6 @@ export function useConversationsMessages(accessToken: string, personaId: string)
     setConversationId,
     messages,
     setMessages,
+    setConversations,
   };
 }

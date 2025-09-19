@@ -13,4 +13,8 @@ public class Tool : BaseEntity
     public bool IsActive { get; set; } = true;
 
     public List<ToolParameter> Parameters { get; set; } = [];
+
+    // Optional LLM client profile binding for this tool (provider/model/params as data)
+    public Guid? ClientProfileId { get; set; }
+    public Modules.LLM.ClientProfile? ClientProfile { get; set; }
 }

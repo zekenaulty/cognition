@@ -9,6 +9,7 @@ using Rebus.Bus;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cognition.Api.Controllers;
 
@@ -136,6 +137,17 @@ public class ChatController : ControllerBase
         await _db.SaveChangesAsync();
         var assistantEvt = new AssistantMessageAppended(req.ConversationId, req.PersonaId, assistantContent.Reply);
         await _bus.Publish(assistantEvt);
+
+        // If conversation has a title now (AgentService may have set it), broadcast update via hub
+        try
+        {
+            var convo = await _db.Conversations.AsNoTracking().FirstOrDefaultAsync(c => c.Id == req.ConversationId);
+            if (convo != null && !string.IsNullOrWhiteSpace(convo.Title))
+            {
+                await _hubContext.Clients.Group(req.ConversationId.ToString()).SendAsync("ConversationUpdated", new { ConversationId = req.ConversationId, Title = convo.Title });
+            }
+        }
+        catch { }
 
         // Return 202 Accepted
         return Accepted(new { 

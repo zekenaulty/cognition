@@ -86,7 +86,11 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
               {/* Conversation title next to gear/settings */}
               <Box sx={{ ml: 2 }}>
                 <span className={"conversation-title"}>
-                  {conversations.find(c => c.id === (conversationId ?? ''))?.title || (conversationId ? conversationId.slice(0,8) + '...' : 'New Conversation')}
+                  {(() => {
+                    const t = conversations.find(c => c.id === (conversationId ?? ''))?.title;
+                    if (t && t.trim().length > 0) return t;
+                    return 'New Chat';
+                  })()}
                 </span>
               </Box>
               {/* Connection status sticky right */}
