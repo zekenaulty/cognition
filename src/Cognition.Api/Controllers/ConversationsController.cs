@@ -23,7 +23,7 @@ public class ConversationsController : ControllerBase
 
     public record CreateConversationRequest(string? Title, Guid[] ParticipantIds);
     public record AddMessageRequest(Guid FromPersonaId, Guid? ToPersonaId, ChatRole Role, string Content, string? Metatype = null);
-    public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc);
+    public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc, DateTime? UpdatedAtUtc);
     public record AddVersionRequest(string Content);
     public record SetActiveVersionRequest(int Index);
 
@@ -80,8 +80,8 @@ public class ConversationsController : ControllerBase
         }
 
         var items = await q
-            .OrderByDescending(c => c.CreatedAtUtc)
-            .Select(c => new ConversationListItem(c.Id, c.Title, c.CreatedAtUtc))
+            .OrderByDescending(c => c.UpdatedAtUtc ?? c.CreatedAtUtc)
+            .Select(c => new ConversationListItem(c.Id, c.Title, c.CreatedAtUtc, c.UpdatedAtUtc))
             .ToListAsync();
         return Ok(items);
     }
@@ -287,6 +287,17 @@ public class ConversationsController : ControllerBase
         msg.ActiveVersionIndex = 0;
         await _db.SaveChangesAsync();
         await _hub.Clients.Group(id.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = id, MessageId = msg.Id, Content = versionEntity.Content, VersionIndex = versionEntity.VersionIndex });
+        // Mark conversation as updated
+        try
+        {
+            var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id);
+            if (conv != null)
+            {
+                conv.UpdatedAtUtc = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+            }
+        }
+        catch { }
         return Ok(new { msg.Id });
     }
 

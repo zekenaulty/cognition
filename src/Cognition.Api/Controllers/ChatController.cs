@@ -138,6 +138,18 @@ public class ChatController : ControllerBase
         var assistantEvt = new AssistantMessageAppended(req.ConversationId, req.PersonaId, assistantContent.Reply);
         await _bus.Publish(assistantEvt);
 
+        // Touch conversation updated timestamp
+        try
+        {
+            var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == req.ConversationId);
+            if (conv != null)
+            {
+                conv.UpdatedAtUtc = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+            }
+        }
+        catch { }
+
         // If conversation has a title now (AgentService may have set it), broadcast update via hub
         try
         {

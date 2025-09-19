@@ -21,7 +21,7 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
   const [personas, setPersonas] = React.useState<Array<{ id: string; name: string; isSystem?: boolean }>>([]);
   const [expandedId, setExpandedId] = React.useState<string | false>(false);
   const [convsByPersona, setConvsByPersona] = React.useState<Record<string, Array<{ id: string; title?: string | null }>>>({});
-  const [recent, setRecent] = React.useState<Array<{ id: string; title?: string | null; createdAtUtc?: string }>>([]);
+  const [recent, setRecent] = React.useState<Array<{ id: string; title?: string | null; createdAtUtc?: string; updatedAtUtc?: string | null }>>([]);
 
   async function loadPersonas() {
     try {
@@ -61,7 +61,20 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
     } catch {}
   }
   async function loadConversations(pid: string) { try { const list = await request<Array<{ id: string; title?: string | null }>>(`/api/conversations?participantId=${pid}`, {}, auth?.accessToken); setConvsByPersona(prev => ({ ...prev, [pid]: list })); } catch {} }
-  async function loadRecent() { try { const list = await request<Array<{ id: string; title?: string | null; createdAtUtc?: string }>>(`/api/conversations`, {}, auth?.accessToken); setRecent((list || []).slice(0, 5)); } catch {} }
+  async function loadRecent() {
+    try {
+      const list = await request<Array<{ id: string; title?: string | null; createdAtUtc?: string; updatedAtUtc?: string | null }>>(`/api/conversations`, {}, auth?.accessToken);
+      const sorted = (list || []).slice().sort((a, b) => {
+        const aNew = !(a.title && a.title.trim());
+        const bNew = !(b.title && b.title.trim());
+        if (aNew !== bNew) return aNew ? -1 : 1; // new chats first
+        const ta = Date.parse((a.updatedAtUtc || a.createdAtUtc || '')) || 0;
+        const tb = Date.parse((b.updatedAtUtc || b.createdAtUtc || '')) || 0;
+        return tb - ta; // newest first
+      });
+      setRecent(sorted.slice(0, 5));
+    } catch {}
+  }
   const handleAccordion = (pid: string) => (_: any, expanded: boolean) => { setExpandedId(expanded ? pid : false); if (expanded && !convsByPersona[pid]) loadConversations(pid); };
   React.useEffect(() => { if (isAuthenticated) { loadPersonas(); loadRecent(); } }, [isAuthenticated]);
   // Refresh personas if another view updates persona types

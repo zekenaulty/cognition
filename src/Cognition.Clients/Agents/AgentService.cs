@@ -579,6 +579,18 @@ public class AgentService : IAgentService
         _db.ConversationMessages.Add(assistantMsg);
         await _db.SaveChangesAsync(ct);
 
+        // Touch conversation updated timestamp
+        try
+        {
+            var convoToTouch = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, ct);
+            if (convoToTouch != null)
+            {
+                convoToTouch.UpdatedAtUtc = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+        catch { }
+
         try
         {
             _db.ConversationMessageVersions.Add(new ConversationMessageVersion
@@ -612,6 +624,7 @@ public class AgentService : IAgentService
                     // Truncate overly long titles
                     if (title.Length > 80) title = title.Substring(0, 80);
                     convo.Title = title;
+                    convo.UpdatedAtUtc = DateTime.UtcNow;
                     await _db.SaveChangesAsync(ct);
                 }
             }
