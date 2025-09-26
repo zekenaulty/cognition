@@ -6,6 +6,7 @@ type ImageStyle = { id: string; name: string; description?: string; promptPrefix
 export function useImageGenerator(params: {
   accessToken?: string;
   conversationId?: string | null;
+  agentId?: string;
   personaId?: string;
   providerId?: string;
   modelId?: string | null;
@@ -18,6 +19,7 @@ export function useImageGenerator(params: {
   const {
     accessToken,
     conversationId,
+    agentId,
     personaId,
     providerId,
     modelId,
@@ -31,7 +33,7 @@ export function useImageGenerator(params: {
   const [pending, setPending] = useState(false);
 
   async function generateFromChat(imgModel: string = 'dall-e-3', msgCount: number = 6) {
-    if (!accessToken || !conversationId || !personaId || !providerId) return;
+    if (!accessToken || !conversationId || !agentId || !personaId || !providerId) return;
     const style = imgStyles.find(s => s.id === imgStyleId);
     const recent = messages.slice(-msgCount);
     const lines = recent.map(m => `${m.fromName || m.role}: ${m.content}`).join('\n');
@@ -52,7 +54,7 @@ export function useImageGenerator(params: {
         const resp = await fetch('/api/chat/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({ PersonaId: personaId, ProviderId: providerId, ModelId: modelId || null, Input: promptBuildInput, RolePlay: false })
+          body: JSON.stringify({ AgentId: agentId, PersonaId: personaId, ProviderId: providerId, ModelId: modelId || null, Input: promptBuildInput, RolePlay: false })
         });
         if (resp.ok) {
           const rj = await resp.json();
@@ -65,7 +67,7 @@ export function useImageGenerator(params: {
       setMessages(prev => prev.map(m => (m as any).localId === placeholderId ? { ...m, imgPrompt: finalPrompt, metatype: 'Image' } : m));
 
       // Step 2: request image generation
-      const payload = { ConversationId: conversationId, PersonaId: personaId, Prompt: finalPrompt, Width: 1024, Height: 1024, StyleId: imgStyleId || undefined, NegativePrompt: style?.negativePrompt || undefined, Provider: 'OpenAI', Model: imgModel };
+      const payload = { ConversationId: conversationId, AgentId: agentId, PersonaId: personaId, Prompt: finalPrompt, Width: 1024, Height: 1024, StyleId: imgStyleId || undefined, NegativePrompt: style?.negativePrompt || undefined, Provider: 'OpenAI', Model: imgModel };
       const res = await fetch('/api/images/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(payload) });
       if (!res.ok) {
         const txt = await res.text();

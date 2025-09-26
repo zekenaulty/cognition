@@ -7,6 +7,9 @@ public class Conversation : BaseEntity
     public string? Title { get; set; }
     public Dictionary<string, object?>? Metadata { get; set; }
 
+    public Guid AgentId { get; set; }
+    public Cognition.Data.Relational.Modules.Agents.Agent Agent { get; set; } = null!;
+
     public List<ConversationParticipant> Participants { get; set; } = [];
     public List<ConversationMessage> Messages { get; set; } = [];
     public List<ConversationSummary> Summaries { get; set; } = [];

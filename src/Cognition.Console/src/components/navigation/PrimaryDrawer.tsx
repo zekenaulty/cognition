@@ -13,94 +13,111 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { useSecurity } from '../../hooks/useSecurity';
 import { request } from '../../api/client';
+import { useAgentPersonaIndex } from '../../hooks/useAgentPersonaIndex';
+
+type ConversationSummary = { id: string; title?: string | null };
+type ConversationCache = Record<string, ConversationSummary[]>;
 
 export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
   const { isAuthenticated, auth } = useAuth();
   const security = useSecurity();
-  const [personas, setPersonas] = React.useState<Array<{ id: string; name: string; isSystem?: boolean }>>([]);
-  const [expandedId, setExpandedId] = React.useState<string | false>(false);
-  const [convsByPersona, setConvsByPersona] = React.useState<Record<string, Array<{ id: string; title?: string | null }>>>({});
+  const token = auth?.accessToken;
+  const { agents } = useAgentPersonaIndex(token);
+  const [expandedAgentId, setExpandedAgentId] = React.useState<string | false>(false);
+  const [convsByAgent, setConvsByAgent] = React.useState<ConversationCache>({});
   const [recent, setRecent] = React.useState<Array<{ id: string; title?: string | null; createdAtUtc?: string; updatedAtUtc?: string | null }>>([]);
 
-  async function loadPersonas() {
+  const loadConversationsForAgent = React.useCallback(async (agentId: string) => {
     try {
-      const list = await request<Array<{ id: string; name: string; type?: number | string }>>('/api/personas', {}, auth?.accessToken);
-      // Fetch default assistant persona (available to all authenticated users)
-      let defaultSystem: { id: string; name: string } | null = null;
-      try { defaultSystem = await request('/api/personas/default-assistant', {}, auth?.accessToken) as any } catch {}
-      let filtered = (list || []).filter(p => {
-        const t: any = (p as any).type;
-        return t === 1 || t === 'Assistant' || t === 3 || t === 'RolePlayCharacter';
-      }).map(p => ({ id: (p as any).id, name: (p as any).name }));
-      // Ensure default system assistant is present for starting chats
-      const pinnedId = defaultSystem ? (defaultSystem as any).id as string : '';
-      if (pinnedId && !filtered.some(x => x.id === pinnedId)) {
-        filtered = [{ id: pinnedId, name: (defaultSystem as any).name as string }, ...filtered];
-      }
-      const ordered = filtered;
-      // Drop personas that have no conversations (except the pinned system persona)
-      const toCheck = ordered.filter(p => p.id !== pinnedId);
-      const results = await Promise.all(toCheck.map(async (p) => {
-        try {
-          const convs = await request<Array<{ id: string }>>(`/api/conversations?participantId=${p.id}`, {}, auth?.accessToken);
-          return { p, convs };
-        } catch { return { p, convs: [] as Array<{ id: string }> } }
-      }));
-      const kept = [
-        ...(pinnedId ? ordered.filter(x => x.id === pinnedId) : []),
-        ...results.filter(r => (r.convs || []).length > 0).map(r => r.p)
-      ].map(x => ({ ...x, isSystem: x.id === pinnedId }));
-      setPersonas(kept);
-      // Prune conversations for personas no longer visible
-      const preloads = Object.fromEntries(results.map(r => [r.p.id, r.convs || []]));
-      setConvsByPersona(prev => {
-        const merged = { ...prev, ...preloads };
-        return Object.fromEntries(Object.entries(merged).filter(([pid]) => kept.some(f => f.id === pid)));
-      });
+      const list = await request<ConversationSummary[]>(`/api/conversations?agentId=${agentId}`, {}, token);
+      setConvsByAgent(prev => ({ ...prev, [agentId]: list }));
     } catch {}
-  }
-  async function loadConversations(pid: string) { try { const list = await request<Array<{ id: string; title?: string | null }>>(`/api/conversations?participantId=${pid}`, {}, auth?.accessToken); setConvsByPersona(prev => ({ ...prev, [pid]: list })); } catch {} }
-  async function loadRecent() {
+  }, [token]);
+
+  const loadRecent = React.useCallback(async () => {
     try {
-      const list = await request<Array<{ id: string; title?: string | null; createdAtUtc?: string; updatedAtUtc?: string | null }>>(`/api/conversations`, {}, auth?.accessToken);
+      const list = await request<Array<{ id: string; title?: string | null; createdAtUtc?: string; updatedAtUtc?: string | null }>>('/api/conversations', {}, token);
       const sorted = (list || []).slice().sort((a, b) => {
         const aNew = !(a.title && a.title.trim());
         const bNew = !(b.title && b.title.trim());
-        if (aNew !== bNew) return aNew ? -1 : 1; // new chats first
+        if (aNew !== bNew) return aNew ? -1 : 1;
         const ta = Date.parse((a.updatedAtUtc || a.createdAtUtc || '')) || 0;
         const tb = Date.parse((b.updatedAtUtc || b.createdAtUtc || '')) || 0;
-        return tb - ta; // newest first
+        return tb - ta;
       });
       setRecent(sorted.slice(0, 5));
     } catch {}
-  }
-  const handleAccordion = (pid: string) => (_: any, expanded: boolean) => { setExpandedId(expanded ? pid : false); if (expanded && !convsByPersona[pid]) loadConversations(pid); };
-  React.useEffect(() => { if (isAuthenticated) { loadPersonas(); loadRecent(); } }, [isAuthenticated]);
-  // Refresh personas if another view updates persona types
+  }, [token]);
+
   React.useEffect(() => {
-    const handler = () => { if (isAuthenticated) loadPersonas(); };
-    window.addEventListener('cognition-personas-changed', handler as any);
-    return () => { window.removeEventListener('cognition-personas-changed', handler as any); };
-  }, [isAuthenticated]);
+    if (isAuthenticated) {
+      loadRecent();
+    } else {
+      setRecent([]);
+      setConvsByAgent({});
+      setExpandedAgentId(false);
+    }
+  }, [isAuthenticated, loadRecent]);
 
-  async function openRecentConversation(convId: string) {
+  React.useEffect(() => {
+    if (expandedAgentId && !agents.some(a => a.id === expandedAgentId)) {
+      setExpandedAgentId(false);
+    }
+    setConvsByAgent(prev => {
+      const next: ConversationCache = {};
+      agents.forEach(agent => {
+        if (prev[agent.id]) {
+          next[agent.id] = prev[agent.id];
+        }
+      });
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length !== nextKeys.length) {
+        return next;
+      }
+      for (const key of nextKeys) {
+        if (prev[key] !== next[key]) {
+          return next;
+        }
+      }
+      return prev;
+    });
+  }, [agents, expandedAgentId]);
+
+  const handleAccordion = React.useCallback((agentId: string) => (_: unknown, expanded: boolean) => {
+    setExpandedAgentId(expanded ? agentId : false);
+    if (expanded && !convsByAgent[agentId]) {
+      loadConversationsForAgent(agentId);
+    }
+  }, [convsByAgent, loadConversationsForAgent]);
+
+  const openRecentConversation = React.useCallback(async (convId: string) => {
     try {
-      const msgs = await request<Array<{ fromPersonaId?: string; FromPersonaId?: string; role: any }>>(`/api/conversations/${convId}/messages`, {}, auth?.accessToken);
-      let pid = '';
-      const normalizeRole = (r: any) => { if (r === 1 || r === '1' || r === 'user' || r === 'User') return 'user'; if (r === 2 || r === '2' || r === 'assistant' || r === 'Assistant') return 'assistant'; if (r === 0 || r === '0' || r === 'system' || r === 'System') return 'system'; const n = Number(r); if (!Number.isNaN(n)) return n === 2 ? 'assistant' : (n === 0 ? 'system' : 'user'); return 'user'; };
-      const assistant = (msgs || []).find(m => normalizeRole((m as any).role) === 'assistant');
-      if (assistant) pid = String((assistant as any).fromPersonaId ?? (assistant as any).FromPersonaId ?? '');
-      if (!pid) { try { pid = localStorage.getItem('cognition.chat.personaId') || '' } catch {} }
-      if (!pid && personas.length > 0) pid = personas[0].id;
-      if (pid) { navigate(`/chat/${pid}/${convId}`); onClose(); }
+      const convo = await request<{ id: string; agentId?: string; AgentId?: string }>(`/api/conversations/${convId}`, {}, token);
+      const agentId = String(convo?.agentId ?? convo?.AgentId ?? '');
+      if (agentId) {
+        navigate(`/chat/${agentId}/${convId}`);
+        onClose();
+      }
     } catch {}
-  }
+  }, [navigate, onClose, token]);
 
-  async function deleteConversation(convId: string) {
+  const deleteConversation = React.useCallback(async (convId: string) => {
     if (!confirm('Delete this conversation?')) return;
-    try { await request<void>(`/api/conversations/${convId}`, { method: 'DELETE' }, auth?.accessToken); setRecent(prev => prev.filter(r => r.id !== convId)); setConvsByPersona(prev => Object.fromEntries(Object.entries(prev).map(([pid, list]) => [pid, (list || []).filter(c => c.id !== convId)]))); } catch {}
-  }
+    try {
+      await request<void>(`/api/conversations/${convId}`, { method: 'DELETE' }, token);
+      setRecent(prev => prev.filter(r => r.id !== convId));
+      setConvsByAgent(prev => {
+        const next: ConversationCache = {};
+        Object.entries(prev).forEach(([aid, list]) => {
+          const filtered = (list || []).filter(c => c.id !== convId);
+          if (filtered.length > 0) next[aid] = filtered;
+        });
+        return next;
+      });
+    } catch {}
+  }, [token]);
 
   return (
     <Drawer anchor="left" open={open} onClose={onClose} PaperProps={{ sx: { bgcolor: '#0b0c10', color: '#e0e0e0' } }}>
@@ -127,6 +144,14 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
               </ListItemButton>
             </ListItem>
           )}
+          {isAuthenticated && (
+            <ListItem disablePadding>
+              <ListItemButton component={Link} to="/agents" onClick={onClose} sx={{ pl: 0 }}>
+                <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><WorkIcon /></ListItemIcon>
+                <ListItemText primary="Agents" />
+              </ListItemButton>
+            </ListItem>
+          )}
           {security.isAdmin && (
             <>
               <ListItem disablePadding>
@@ -150,8 +175,7 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
             </>
           )}
         </List>
-        <Divider />
-        {isAuthenticated && (
+        {recent.length > 0 && (
           <Box sx={{ pr: 1, pb: 1 }}>
             <Typography variant="subtitle2" sx={{ pl: 1, pr: 1, pt: 1, pb: 1, opacity: 0.9 }}>Recent</Typography>
             <List dense disablePadding>
@@ -177,17 +201,17 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
         )}
         {isAuthenticated && (
           <Box sx={{ pr: 1, pb: 2 }}>
-            <Typography variant="subtitle2" sx={{ pl: 1, pr: 1, pt: 1, pb: 1, opacity: 0.9 }}>Personas</Typography>
-            {personas.map(p => (
-              <Accordion key={p.id} expanded={expandedId === p.id} onChange={handleAccordion(p.id)} sx={{ bgcolor: '#0f1115', color: '#e0e0e0' }}>
+            <Typography variant="subtitle2" sx={{ pl: 1, pr: 1, pt: 1, pb: 1, opacity: 0.9 }}>Agents</Typography>
+            {agents.map(agent => (
+              <Accordion key={agent.id} expanded={expandedAgentId === agent.id} onChange={handleAccordion(agent.id)} sx={{ bgcolor: '#0f1115', color: '#e0e0e0' }}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon htmlColor="#bbb" />} sx={{ pl: 2, pr: 0 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', justifyContent: 'space-between' }} onClick={(e) => e.stopPropagation()}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
-                      {p.isSystem && <Chip size="small" label="System" variant="outlined" sx={{ height: 18 }} />}
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>{agent.label || agent.id.slice(0, 8)}</Typography>
+                      <Chip size="small" label={agent.id.slice(0, 8)} variant="outlined" sx={{ height: 18, ml: 1 }} />
                     </Box>
                     <Tooltip title="New chat">
-                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); navigate(`/chat/${p.id}`); onClose(); }} sx={{ color: '#9ad' }}>
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); navigate(`/chat/${agent.id}`); onClose(); }} sx={{ color: '#9ad' }}>
                         <ChatIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -195,7 +219,7 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                 </AccordionSummary>
                 <AccordionDetails sx={{ pl: 2, pr: 0 }}>
                   <List dense disablePadding>
-                    {(convsByPersona[p.id] || []).map(c => (
+                    {(convsByAgent[agent.id] || []).map(c => (
                       <ListItem key={c.id} disablePadding secondaryAction={
                         <Tooltip title="Delete">
                           <IconButton edge="end" size="small" onClick={() => deleteConversation(c.id)}>
@@ -203,19 +227,23 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                           </IconButton>
                         </Tooltip>
                       }>
-                        <ListItemButton onClick={() => { navigate(`/chat/${p.id}/${c.id}`); onClose(); }} sx={{ pl: 2 }}>
+                        <ListItemButton onClick={() => { navigate(`/chat/${agent.id}/${c.id}`); onClose(); }} sx={{ pl: 2 }}>
                           <ListItemIcon sx={{ minWidth: 0, mr: 1 }}><ChatIcon fontSize="small" /></ListItemIcon>
                           <ListItemText primary={(c.title && c.title.trim()) ? c.title : 'New Chat'} />
+                          <Chip size="small" label={c.id.slice(0, 8)} variant="outlined" sx={{ height: 18, ml: 1 }} />
                         </ListItemButton>
                       </ListItem>
                     ))}
-                    {(!convsByPersona[p.id] || convsByPersona[p.id].length === 0) && (
+                    {(!convsByAgent[agent.id] || convsByAgent[agent.id].length === 0) && (
                       <Typography variant="caption" color="text.secondary">No conversations</Typography>
                     )}
                   </List>
                 </AccordionDetails>
               </Accordion>
             ))}
+            {agents.length === 0 && (
+              <Typography variant="caption" color="text.secondary">No agents available.</Typography>
+            )}
           </Box>
         )}
       </Box>

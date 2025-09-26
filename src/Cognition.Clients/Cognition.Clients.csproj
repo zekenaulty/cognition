@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Cognition.Data.Relational\Cognition.Data.Relational.csproj" />
     <ProjectReference Include="..\Cognition.Contracts\Cognition.Contracts.csproj" />
+    <ProjectReference Include="..\Cognition.Data.Vectors\Cognition.Data.Vectors.csproj" />
   </ItemGroup>
 
 </Project>

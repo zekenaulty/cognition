@@ -13,9 +13,9 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 
 export type ChatMenuProps = {
-  personas: { id: string; name: string }[];
-  personaId: string;
-  onPersonaChange: (id: string) => void;
+  agents?: { id: string; label?: string }[];
+  agentId?: string;
+  onAgentChange?: (id: string) => void;
   providers: { id: string; name: string; displayName?: string }[];
   models: { id: string; name: string; displayName?: string }[];
   providerId: string;
@@ -62,7 +62,10 @@ export function ChatMenu(props: ChatMenuProps) {
             <ListItemIcon><AddIcon /></ListItemIcon>
             <ListItemText>New Conversation</ListItemText>
           </MenuItem>
-          {/* Persona selection removed from chat menu */}
+          <MenuItem onClick={e => { setSubMenu('agent'); setSubMenuAnchor(e.currentTarget); }}>
+            <ListItemIcon><PersonIcon /></ListItemIcon>
+            <ListItemText>Agent</ListItemText>
+          </MenuItem>
           <MenuItem onClick={e => { setSubMenu('provider'); setSubMenuAnchor(e.currentTarget); }}>
             <ListItemIcon><DnsIcon /></ListItemIcon>
             <ListItemText>Provider & Model</ListItemText>
@@ -85,7 +88,16 @@ export function ChatMenu(props: ChatMenuProps) {
         transformOrigin={{ vertical: 'top', horizontal: 'left' }}
       >
         <MenuList>
-          {/* Persona submenu removed */}
+          {subMenu === 'agent' && (
+            <React.Fragment>
+              {(props.agents || []).map(a => (
+                <MenuItem key={a.id} selected={props.agentId === a.id} onClick={() => { props.onAgentChange && props.onAgentChange(a.id); setSubMenu(null); setSubMenuAnchor(null); }}>
+                  <ListItemIcon><PersonIcon /></ListItemIcon>
+                  <ListItemText>{a.label || a.id.slice(0,8)}</ListItemText>
+                </MenuItem>
+              ))}
+            </React.Fragment>
+          )}
           {subMenu === 'provider' && (
             <React.Fragment>
               {props.providers.map(pr => (

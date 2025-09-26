@@ -16,77 +16,259 @@ namespace Cognition.Clients.Agents;
 
 public interface IAgentService
 {
-    Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
-    Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
-    Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
-    Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default);
+    Task<string> AskAsync(Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
+    Task<string> AskWithToolsAsync(Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
+    Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default);
+    Task<string> AskWithPlanAsync(Guid conversationId, Guid agentId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default);
 }
 
 
 public class AgentService : IAgentService
 {
-    // P5: Helpers for CoT v2 loop
-    private static string CompactObservation(string? s, int max = 200)
+    // Agent-centric ChatAsync matching interface and migration plan
+    public async Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(s)) return "<no output>";
-        var t = s.Trim().Replace("\r", " ").Replace("\n", " ");
-        return t.Length <= max ? t : t[..max] + "…";
+        // Ensure the conversation exists without loading heavy navigations
+        var exists = await _db.Conversations.AsNoTracking().AnyAsync(c => c.Id == conversationId, ct);
+        if (!exists) throw new InvalidOperationException("Conversation not found");
+
+        var agent = await _db.Agents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent == null) throw new InvalidOperationException("Agent not found");
+        var personaId = agent.PersonaId;
+        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId, ct);
+        var system = BuildSystemMessage(persona);
+
+        // Determine the caller's user persona participating in this conversation (if any)
+        Guid? userPersonaId = await (from cp in _db.ConversationParticipants.AsNoTracking()
+                                     join p in _db.Personas.AsNoTracking() on cp.PersonaId equals p.Id
+                                     where cp.ConversationId == conversationId && cp.PersonaId != personaId && p.OwnedBy == OwnedBy.User
+                                     select (Guid?)cp.PersonaId).FirstOrDefaultAsync(ct);
+        Guid? createdByUserId = null;
+        if (userPersonaId.HasValue)
+        {
+            createdByUserId = await _db.UserPersonas.AsNoTracking()
+                .Where(up => up.PersonaId == userPersonaId.Value && up.IsOwner)
+                .Select(up => (Guid?)up.UserId)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        // Persist user message first (from the user's persona when available)
+        var userMsg = new ConversationMessage
+        {
+            ConversationId = conversationId,
+            FromPersonaId = userPersonaId ?? personaId,
+            FromAgentId = userPersonaId.HasValue ? (await _db.Agents.AsNoTracking().Where(a => a.PersonaId == userPersonaId.Value).Select(a => a.Id).FirstOrDefaultAsync(ct)) : agentId,
+            Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
+            Content = input,
+            Timestamp = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow,
+            CreatedByUserId = createdByUserId,
+            Metatype = "TextResponse"
+        };
+        _db.ConversationMessages.Add(userMsg);
+        await _db.SaveChangesAsync(ct);
+
+        // Determine a rough turn window from model context (fallback to 20)
+        var maxTurns = 20;
+        if (modelId.HasValue)
+        {
+            var m = await _db.Models.AsNoTracking().FirstOrDefaultAsync(mm => mm.Id == modelId.Value);
+            if (m?.ContextWindow is int cw && cw > 0)
+            {
+                maxTurns = Math.Clamp(cw / 256, 6, 40);
+            }
+        }
+        // Fetch just the most recent N messages from DB, then order ascending in-memory
+        var window = await _db.ConversationMessages.AsNoTracking()
+            .Where(m => m.ConversationId == conversationId)
+            .OrderByDescending(m => m.Timestamp)
+            .Take(maxTurns)
+            .ToListAsync(ct);
+        window.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
+
+        var chat = new List<ChatMessage>();
+        // 1) Instruction sets as distinct system messages (scoped: global/provider/model/persona)
+        var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, ct);
+        chat.AddRange(instructionMsgs);
+        // 2) Persona baseline system message
+        if (!string.IsNullOrWhiteSpace(system)) chat.Add(new ChatMessage("system", system));
+        // Optional: include latest summary as system supplement (DB limited)
+        var summary = await _db.ConversationSummaries.AsNoTracking()
+            .Where(s => s.ConversationId == conversationId)
+            .OrderByDescending(s => s.Timestamp)
+            .FirstOrDefaultAsync(ct);
+        if (summary != null)
+            chat.Add(new ChatMessage("system", "Conversation Summary: " + summary.Content));
+        foreach (var m in window)
+        {
+            var role = m.Role switch
+            {
+                Cognition.Data.Relational.Modules.Common.ChatRole.Assistant => "assistant",
+                Cognition.Data.Relational.Modules.Common.ChatRole.System => "system",
+                _ => "user"
+            };
+            chat.Add(new ChatMessage(role, m.Content));
+        }
+        // Append the new input (also in window now via persisted user message)
+        chat.Add(new ChatMessage("user", input));
+
+        var client = await _factory.CreateAsync(providerId, modelId);
+        string reply;
+        try
+        {
+            reply = await client.ChatAsync(chat);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "LLM ChatAsync failed for provider {ProviderId} model {ModelId} conversation {ConversationId}", providerId, modelId, conversationId);
+            reply = "Sorry, I couldn’t complete that request.";
+        }
+
+        // Persist assistant reply
+        var assistantMsg = new ConversationMessage
+        {
+            ConversationId = conversationId,
+            FromPersonaId = personaId,
+            FromAgentId = agentId,
+            Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
+            Content = reply,
+            Timestamp = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow,
+            Metatype = "TextResponse"
+        };
+        _db.ConversationMessages.Add(assistantMsg);
+        await _db.SaveChangesAsync(ct);
+
+        // Touch conversation updated timestamp
+        try
+        {
+            var convoToTouch = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, ct);
+            if (convoToTouch != null)
+            {
+                convoToTouch.UpdatedAtUtc = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+        catch { }
+
+        try
+        {
+            _db.ConversationMessageVersions.Add(new ConversationMessageVersion
+            {
+                ConversationMessageId = assistantMsg.Id,
+                VersionIndex = 0,
+                Content = reply,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            assistantMsg.ActiveVersionIndex = 0;
+            await _db.SaveChangesAsync(ct);
+        }
+        catch { }
+
+        // If conversation has no title yet, ask the LLM to propose a concise title and save it
+        try
+        {
+            var convo = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, ct);
+            if (convo != null && string.IsNullOrWhiteSpace(convo.Title))
+            {
+                var recent = window.TakeLast(8).Select(m => $"{m.Role}: {m.Content}");
+                var titlePrompt = new List<ChatMessage>
+                {
+                    new ChatMessage("system", "You generate concise, descriptive conversation titles (3–6 words). No quotes, no punctuation at the end."),
+                    new ChatMessage("user", string.Join("\n", recent))
+                };
+                var title = await client.ChatAsync(titlePrompt);
+                title = (title ?? string.Empty).Trim();
+                if (!string.IsNullOrEmpty(title))
+                {
+                    // Truncate overly long titles
+                    if (title.Length > 80) title = title.Substring(0, 80);
+                    convo.Title = title;
+                    convo.UpdatedAtUtc = DateTime.UtcNow;
+                    await _db.SaveChangesAsync(ct);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to auto-title conversation {ConversationId}", conversationId);
+        }
+
+        // Optional summarization trigger when window is dense
+        try
+        {
+            if (window.Count >= maxTurns)
+            {
+                var toSummarize = string.Join("\n", window.Select(m => $"{m.Role}: {m.Content}"));
+                var sumPrompt = new List<ChatMessage>
+                {
+                    new ChatMessage("system", "Summarize the conversation succinctly in 5-7 bullet points, focusing on decisions, facts, and tasks. Be concise."),
+                    new ChatMessage("user", toSummarize)
+                };
+                var summaryText = await client.ChatAsync(sumPrompt, track: false);
+                if (!string.IsNullOrWhiteSpace(summaryText))
+                {
+                    _db.ConversationSummaries.Add(new ConversationSummary
+                    {
+                        ConversationId = conversationId,
+                        ByPersonaId = personaId,
+                        Content = summaryText,
+                        Timestamp = DateTime.UtcNow,
+                        CreatedAtUtc = DateTime.UtcNow
+                    });
+                    await _db.SaveChangesAsync(ct);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Conversation summarization failed for conversation {ConversationId}", conversationId);
+        }
+
+        return (reply, assistantMsg.Id);
     }
-    // P1: Prompt layer helpers for strict JSON contracts and tool-first cognition
-    private static string BuildOutlinePlanPrompt(string input, string compactHistory, string toolIndex)
+    // Legacy ChatAsync for personaId-based flows (backward compatibility during migration)
+    public async Task<string> ChatAsync(Guid conversationId, Guid personaId, string input, Guid providerId, Guid? modelId = null, string? userName = null, string? userId = null, CancellationToken ct = default)
     {
-        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
-               "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
-               "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
-               "MODE: OUTLINE_PLAN\n" +
-               $"UserRequest: \"{input}\"\n" +
-               $"History: {compactHistory}\n" +
-               $"Tools: {toolIndex}\n" +
-               "Return ONLY a JSON array of tasks: [ {\"goal\":\"...\",\"suggestedTool\":\"nameOrId\",\"notes\":\"...\"} ]";
+        // 1. Resolve provider/model for persona
+        var (provId, modId) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
+        var persona = await _db.Personas.AsNoTracking().FirstOrDefaultAsync(p => p.Id == personaId, ct);
+        if (persona == null) throw new Exception($"Persona not found: {personaId}");
+        var systemMsg = BuildSystemMessage(persona);
+        // 2. Pull conversation history
+        var history = await _db.ConversationMessages.AsNoTracking()
+            .Where(m => m.ConversationId == conversationId)
+            .OrderBy(m => m.Timestamp)
+            .Select(m => $"{m.Role.ToString().ToLower()}: {m.Content}")
+            .ToListAsync(ct);
+        // Build prompt string
+        var promptBuilder = new StringBuilder();
+        promptBuilder.AppendLine(systemMsg);
+        foreach (var line in history)
+            promptBuilder.AppendLine(line);
+        promptBuilder.AppendLine($"user: {input}");
+        var prompt = promptBuilder.ToString();
+        // 3. Get client and generate response
+        var client = await _factory.CreateAsync(provId, modId);
+        var response = await client.GenerateAsync(prompt, track: true);
+        // 4. Persist assistant message
+        var agentId = await _db.Agents.AsNoTracking().Where(a => a.PersonaId == personaId).Select(a => a.Id).FirstOrDefaultAsync(ct);
+        var assistantMsg = new ConversationMessage
+        {
+            ConversationId = conversationId,
+            FromPersonaId = personaId,
+            FromAgentId = agentId,
+            Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
+            Content = response,
+            Timestamp = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow,
+            Metatype = "TextResponse"
+        };
+        _db.ConversationMessages.Add(assistantMsg);
+        await _db.SaveChangesAsync(ct);
+        return response;
     }
 
-    private static string BuildStepPlanPrompt(string goalCompact, int maxSteps, string outlineJson, string completedJson, string toolIndex)
-    {
-        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
-                     "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
-                     "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
-                     "MODE: PLAN\n" +
-                     $"STATE: Goal: \"{goalCompact}\"; Constraints: [\"Tools only\", \"Max {maxSteps}\", \"One tool per step\"]; OutlinePlan: {outlineJson}; Completed: {completedJson}\n" +
-                     "RESPONSE_SCHEMA: { \"step\": 1, \"goal\": \"this step goal\", \"rationale\": \"<=2 sentences\", \"action\": {\"toolId\":\"GUID\",\"args\":{}}, \"finish\": false, \"final_answer\": null }\n" +
-                     "Return ONLY JSON matching schema.";
-    }
-
-    private static string BuildFinalizePrompt(string finalAnswer, string respondToolId)
-    {
-        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
-               "MODE: FINALIZE\n" +
-               $"Return ONLY: {{\"toolId\":\"{respondToolId}\",\"args\":{{\"text\":\"{finalAnswer}\"}}}}";
-    }
-
-    private static JSchema BuildPlanStepSchema()
-    {
-        // { "step":1, "goal":"...", "rationale":"...", "action": {"toolId":"GUID or Name", "args":{}}, "finish": false, "final_answer": null }
-        var schemaJson = @"{
-  'type':'object',
-  'properties':{
-    'step': {'type':['integer','null']},
-    'goal': {'type':['string','null']},
-    'rationale': {'type':['string','null']},
-    'action': {
-      'type':'object',
-      'properties':{
-        'toolId': {'type':'string'},
-        'args': {'type':'object'}
-      },
-      'required':['toolId','args']
-    },
-    'finish': {'type':['boolean','null']},
-    'final_answer': {'type':['string','null']}
-  },
-  'required':['action']
-}".Replace("'", "\"");
-        return JSchema.Parse(schemaJson);
-    }
 
     private readonly CognitionDbContext _db;
     private readonly ILLMClientFactory _factory;
@@ -94,14 +276,7 @@ public class AgentService : IAgentService
     private readonly IServiceProvider _sp;
     private readonly ILogger<AgentService> _logger;
 
-    public AgentService(CognitionDbContext db, ILLMClientFactory factory, Cognition.Clients.Tools.IToolDispatcher dispatcher, IServiceProvider sp, ILogger<AgentService> logger)
-    {
-        _db = db;
-        _factory = factory;
-        _dispatcher = dispatcher;
-        _sp = sp;
-        _logger = logger;
-    }
+
 
     public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
     {
@@ -121,13 +296,103 @@ public class AgentService : IAgentService
         }
     }
 
+    public async Task<string> AskWithToolsAsync(Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
+    {
+        var agent = await _db.Agents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent == null) throw new ArgumentException("Agent not found", nameof(agentId));
+        var personaId = agent.PersonaId;
+        // Feature-flag: if ToolsEnabled exists and is disabled, fall back to AskAsync
+        var flag = await _db.FeatureFlags.AsNoTracking().FirstOrDefaultAsync(f => f.Key == "ToolsEnabled", ct);
+        if (flag != null && !flag.IsEnabled)
+        {
+            return await AskAsync(agentId, providerId, modelId, input, ct);
+        }
+        // Discover available tools for this provider/model and expose a compact schema
+        var tools = await _db.Tools
+            .Include(t => t.Parameters)
+            .Where(t => t.IsActive)
+            .Where(t => _db.ToolProviderSupports.Any(s => s.ToolId == t.Id
+                                                        && s.ProviderId == providerId
+                                                        && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
+                                                        && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
+        var draft = await AskWithToolIndexAsync(personaId, prov, modl, input, tools);
+
+        // Try to parse a tool plan (by id or name)
+        try
+        {
+            if (!TryGetJsonObjectText(draft, out var jsonText))
+            {
+                return draft; // not JSON -> direct answer
+            }
+            if (string.IsNullOrWhiteSpace(jsonText))
+            {
+                return draft;
+            }
+            using var doc = JsonDocument.Parse(jsonText);
+            var root = doc.RootElement;
+            Guid? toolId = null;
+            if (root.TryGetProperty("toolId", out var t))
+            {
+                var ts = t.GetString();
+                if (Guid.TryParse(ts, out var tmp)) toolId = tmp;
+            }
+
+            if (toolId.HasValue)
+            {
+                var args = root.TryGetProperty("args", out var a)
+                    ? JsonSerializer.Deserialize<Dictionary<string, object?>>(a.GetRawText()) ?? new()
+                    : new Dictionary<string, object?>();
+
+                var ctx = new Cognition.Clients.Tools.ToolContext(agentId, null, personaId, _sp, ct);
+                _logger.LogInformation("Agent invoking tool {ToolId} for agent {AgentId}", toolId, agentId);
+                var exec = await _dispatcher.ExecuteAsync(toolId.Value, ctx, args, log: true);
+                if (!exec.ok) return $"Tool error: {exec.error}";
+                return exec.result is string s ? s : JsonSerializer.Serialize(exec.result);
+            }
+        }
+        catch
+        {
+            // not JSON => direct answer
+        }
+
+        return draft;
+    }
+    
+    public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools)
+    {
+        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId);
+        var sys = persona is null ? "" : BuildSystemMessage(persona);
+        var toolIndex = BuildToolIndexSection(tools);
+        var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
+        var client = await _factory.CreateAsync(providerId, modelId);
+        var prompt = string.IsNullOrWhiteSpace(fullSys) ? input : $"{fullSys}\n\nUser: {input}";
+        try
+        {
+            return await client.GenerateAsync(prompt, track: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "LLM GenerateAsync (ToolIndex) failed for provider {ProviderId} model {ModelId}", providerId, modelId);
+            return "Sorry, I couldn’t complete that request.";
+        }
+    }
+    
     public async Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default)
     {
         // 1. Save original message
+        var planUserFromAgentId = await _db.Agents.AsNoTracking()
+            .Where(a => a.PersonaId == personaId)
+            .Select(a => a.Id)
+            .FirstOrDefaultAsync(ct);
         var userMsg = new ConversationMessage
         {
             ConversationId = conversationId,
             FromPersonaId = personaId,
+            FromAgentId = planUserFromAgentId,
             Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
             Content = input,
             Timestamp = DateTime.UtcNow,
@@ -289,7 +554,8 @@ public class AgentService : IAgentService
                 // Dispatch tool
                 try
                 {
-                    var ctx = new Cognition.Clients.Tools.ToolContext(null, null, personaId, _sp, ct);
+                    var convoAgentId = await _db.Conversations.AsNoTracking().Where(c => c.Id == conversationId).Select(c => (Guid?)c.AgentId).FirstOrDefaultAsync(ct);
+                    var ctx = new Cognition.Clients.Tools.ToolContext(convoAgentId, conversationId, personaId, _sp, ct);
                     var execId = toolId ?? tools.FirstOrDefault(t => t.Name == toolName)?.Id ?? Guid.Empty;
                     var argsDict = !string.IsNullOrWhiteSpace(argsJson)
                         ? JsonSerializer.Deserialize<Dictionary<string, object?>>(argsJson) ?? new()
@@ -357,10 +623,15 @@ public class AgentService : IAgentService
             });
 
             // Optionally, add a 'thought' message to ConversationMessage
+            var thoughtFromAgentId2 = await _db.Agents.AsNoTracking()
+                .Where(a => a.PersonaId == personaId)
+                .Select(a => a.Id)
+                .FirstOrDefaultAsync(ct);
             var thoughtMsg = new ConversationMessage
             {
                 ConversationId = conversationId,
                 FromPersonaId = personaId,
+                FromAgentId = thoughtFromAgentId2,
                 Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
                 Content = result,
                 Timestamp = DateTime.UtcNow,
@@ -376,10 +647,15 @@ public class AgentService : IAgentService
 
         // 5. Aggregate and return final response
         var finalResponse = string.Join("\n", results);
+        var finalFromAgentId2 = await _db.Agents.AsNoTracking()
+            .Where(a => a.PersonaId == personaId)
+            .Select(a => a.Id)
+            .FirstOrDefaultAsync(ct);
         var assistantMsg = new ConversationMessage
         {
             ConversationId = conversationId,
             FromPersonaId = personaId,
+            FromAgentId = finalFromAgentId2,
             Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
             Content = finalResponse,
             Timestamp = DateTime.UtcNow,
@@ -406,267 +682,80 @@ public class AgentService : IAgentService
         return finalResponse;
     }
 
-    public async Task<string> AskWithToolsAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
+    private static string CompactObservation(string? s, int max = 200)
     {
-        // Feature-flag: if ToolsEnabled exists and is disabled, fall back to AskAsync
-        var flag = await _db.FeatureFlags.AsNoTracking().FirstOrDefaultAsync(f => f.Key == "ToolsEnabled", ct);
-        if (flag != null && !flag.IsEnabled)
-        {
-            return await AskAsync(personaId, providerId, modelId, input, ct);
-        }
-        // Discover available tools for this provider/model and expose a compact schema
-        var tools = await _db.Tools
-            .Include(t => t.Parameters)
-            .Where(t => t.IsActive)
-            .Where(t => _db.ToolProviderSupports.Any(s => s.ToolId == t.Id
-                                                        && s.ProviderId == providerId
-                                                        && (s.ModelId == null || (modelId != null && s.ModelId == modelId))
-                                                        && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
-            .AsNoTracking()
-            .ToListAsync(ct);
-
-        var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
-        var draft = await AskWithToolIndexAsync(personaId, prov, modl, input, tools);
-
-        // Try to parse a tool plan (by id or name)
-        try
-        {
-            if (!TryGetJsonObjectText(draft, out var jsonText))
-            {
-                return draft; // not JSON -> direct answer
-            }
-            if (string.IsNullOrWhiteSpace(jsonText))
-            {
-                return draft;
-            }
-            using var doc = JsonDocument.Parse(jsonText);
-            var root = doc.RootElement;
-            Guid? toolId = null;
-            if (root.TryGetProperty("toolId", out var t))
-            {
-                var ts = t.GetString();
-                if (Guid.TryParse(ts, out var tmp)) toolId = tmp;
-            }
-
-            if (toolId.HasValue)
-            {
-                var args = root.TryGetProperty("args", out var a)
-                    ? JsonSerializer.Deserialize<Dictionary<string, object?>>(a.GetRawText()) ?? new()
-                    : new Dictionary<string, object?>();
-
-                var ctx = new Cognition.Clients.Tools.ToolContext(null, null, personaId, _sp, ct);
-                _logger.LogInformation("Agent invoking tool {ToolId} for persona {PersonaId}", toolId, personaId);
-                var exec = await _dispatcher.ExecuteAsync(toolId.Value, ctx, args, log: true);
-                if (!exec.ok) return $"Tool error: {exec.error}";
-                return exec.result is string s ? s : JsonSerializer.Serialize(exec.result);
-            }
-        }
-        catch
-        {
-            // not JSON => direct answer
-        }
-
-        return draft;
+        if (string.IsNullOrWhiteSpace(s)) return "<no output>";
+        var t = s.Trim().Replace("\r", " ").Replace("\n", " ");
+        return t.Length <= max ? t : t[..max] + "…";
     }
+    
+    private static string BuildOutlinePlanPrompt(string input, string compactHistory, string toolIndex)
+    {
+        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
+               "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
+               "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
+               "MODE: OUTLINE_PLAN\n" +
+               $"UserRequest: \"{input}\"\n" +
+               $"History: {compactHistory}\n" +
+               $"Tools: {toolIndex}\n" +
+               "Return ONLY a JSON array of tasks: [ {\"goal\":\"...\",\"suggestedTool\":\"nameOrId\",\"notes\":\"...\"} ]";
+    }
+
+    private static string BuildStepPlanPrompt(string goalCompact, int maxSteps, string outlineJson, string completedJson, string toolIndex)
+    {
+        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
+                     "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
+                     "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
+                     "MODE: PLAN\n" +
+                     $"STATE: Goal: \"{goalCompact}\"; Constraints: [\"Tools only\", \"Max {maxSteps}\", \"One tool per step\"]; OutlinePlan: {outlineJson}; Completed: {completedJson}\n" +
+                     "RESPONSE_SCHEMA: { \"step\": 1, \"goal\": \"this step goal\", \"rationale\": \"<=2 sentences\", \"action\": {\"toolId\":\"GUID\",\"args\":{}}, \"finish\": false, \"final_answer\": null }\n" +
+                     "Return ONLY JSON matching schema.";
+    }
+
+    private static string BuildFinalizePrompt(string finalAnswer, string respondToolId)
+    {
+        return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
+               "MODE: FINALIZE\n" +
+               $"Return ONLY: {{\"toolId\":\"{respondToolId}\",\"args\":{{\"text\":\"{finalAnswer}\"}}}}";
+    }
+
+    private static JSchema BuildPlanStepSchema()
+    {
+        // { "step":1, "goal":"...", "rationale":"...", "action": {"toolId":"GUID or Name", "args":{}}, "finish": false, "final_answer": null }
+        var schemaJson = @"{
+  'type':'object',
+  'properties':{
+    'step': {'type':['integer','null']},
+    'goal': {'type':['string','null']},
+    'rationale': {'type':['string','null']},
+    'action': {
+      'type':'object',
+      'properties':{
+        'toolId': {'type':'string'},
+        'args': {'type':'object'}
+      },
+      'required':['toolId','args']
+    },
+    'finish': {'type':['boolean','null']},
+    'final_answer': {'type':['string','null']}
+  },
+  'required':['action']
+}".Replace("'", "\"");
+        return JSchema.Parse(schemaJson);
+    }
+    public AgentService(CognitionDbContext db, ILLMClientFactory factory, Cognition.Clients.Tools.IToolDispatcher dispatcher, IServiceProvider sp, ILogger<AgentService> logger)
+    {
+        _db = db;
+        _factory = factory;
+        _dispatcher = dispatcher;
+        _sp = sp;
+        _logger = logger;
+    }
+
+
+
 
     // Chat with conversation history and summaries; persists user/assistant messages
-    public async Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
-    {
-        // Ensure the conversation exists without loading heavy navigations
-        var exists = await _db.Conversations.AsNoTracking().AnyAsync(c => c.Id == conversationId, ct);
-        if (!exists) throw new InvalidOperationException("Conversation not found");
-
-        var persona = await _db.Personas.FirstAsync(p => p.Id == personaId, ct);
-        var system = BuildSystemMessage(persona);
-
-        // Determine the caller's user persona participating in this conversation (if any)
-        Guid? userPersonaId = await (from cp in _db.ConversationParticipants.AsNoTracking()
-                                     join p in _db.Personas.AsNoTracking() on cp.PersonaId equals p.Id
-                                     where cp.ConversationId == conversationId && cp.PersonaId != personaId && p.OwnedBy == OwnedBy.User
-                                     select (Guid?)cp.PersonaId).FirstOrDefaultAsync(ct);
-        Guid? createdByUserId = null;
-        if (userPersonaId.HasValue)
-        {
-            createdByUserId = await _db.UserPersonas.AsNoTracking()
-                .Where(up => up.PersonaId == userPersonaId.Value && up.IsOwner)
-                .Select(up => (Guid?)up.UserId)
-                .FirstOrDefaultAsync(ct);
-        }
-
-        // Persist user message first (from the user's persona when available)
-        var userMsg = new ConversationMessage
-        {
-            ConversationId = conversationId,
-            FromPersonaId = userPersonaId ?? personaId,
-            Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
-            Content = input,
-            Timestamp = DateTime.UtcNow,
-            CreatedAtUtc = DateTime.UtcNow,
-            CreatedByUserId = createdByUserId,
-            Metatype = "TextResponse"
-        };
-        _db.ConversationMessages.Add(userMsg);
-        await _db.SaveChangesAsync(ct);
-
-        // Determine a rough turn window from model context (fallback to 20)
-        var maxTurns = 20;
-        if (modelId.HasValue)
-        {
-            var m = await _db.Models.AsNoTracking().FirstOrDefaultAsync(mm => mm.Id == modelId.Value);
-            if (m?.ContextWindow is int cw && cw > 0)
-            {
-                maxTurns = Math.Clamp(cw / 256, 6, 40);
-            }
-        }
-        // Fetch just the most recent N messages from DB, then order ascending in-memory
-        var window = await _db.ConversationMessages.AsNoTracking()
-            .Where(m => m.ConversationId == conversationId)
-            .OrderByDescending(m => m.Timestamp)
-            .Take(maxTurns)
-            .ToListAsync(ct);
-        window.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
-
-        var chat = new List<ChatMessage>();
-        // 1) Instruction sets as distinct system messages (scoped: global/provider/model/persona)
-        var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, ct);
-        chat.AddRange(instructionMsgs);
-        // 2) Persona baseline system message
-        if (!string.IsNullOrWhiteSpace(system)) chat.Add(new ChatMessage("system", system));
-        // Optional: include latest summary as system supplement (DB limited)
-        var summary = await _db.ConversationSummaries.AsNoTracking()
-            .Where(s => s.ConversationId == conversationId)
-            .OrderByDescending(s => s.Timestamp)
-            .FirstOrDefaultAsync(ct);
-        if (summary != null)
-            chat.Add(new ChatMessage("system", "Conversation Summary: " + summary.Content));
-        foreach (var m in window)
-        {
-            var role = m.Role switch
-            {
-                Cognition.Data.Relational.Modules.Common.ChatRole.Assistant => "assistant",
-                Cognition.Data.Relational.Modules.Common.ChatRole.System => "system",
-                _ => "user"
-            };
-            chat.Add(new ChatMessage(role, m.Content));
-        }
-        // Append the new input (also in window now via persisted user message)
-        chat.Add(new ChatMessage("user", input));
-
-        var client = await _factory.CreateAsync(providerId, modelId);
-        string reply;
-        try
-        {
-            reply = await client.ChatAsync(chat);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "LLM ChatAsync failed for provider {ProviderId} model {ModelId} conversation {ConversationId}", providerId, modelId, conversationId);
-            reply = "Sorry, I couldn’t complete that request.";
-        }
-
-        // Persist assistant reply
-        var assistantMsg = new ConversationMessage
-        {
-            ConversationId = conversationId,
-            FromPersonaId = personaId,
-            Role = Cognition.Data.Relational.Modules.Common.ChatRole.Assistant,
-            Content = reply,
-            Timestamp = DateTime.UtcNow,
-            CreatedAtUtc = DateTime.UtcNow
-                ,
-            Metatype = "TextResponse"
-        };
-        _db.ConversationMessages.Add(assistantMsg);
-        await _db.SaveChangesAsync(ct);
-
-        // Touch conversation updated timestamp
-        try
-        {
-            var convoToTouch = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, ct);
-            if (convoToTouch != null)
-            {
-                convoToTouch.UpdatedAtUtc = DateTime.UtcNow;
-                await _db.SaveChangesAsync(ct);
-            }
-        }
-        catch { }
-
-        try
-        {
-            _db.ConversationMessageVersions.Add(new ConversationMessageVersion
-            {
-                ConversationMessageId = assistantMsg.Id,
-                VersionIndex = 0,
-                Content = reply,
-                CreatedAtUtc = DateTime.UtcNow
-            });
-            assistantMsg.ActiveVersionIndex = 0;
-            await _db.SaveChangesAsync(ct);
-        }
-        catch { }
-
-        // If conversation has no title yet, ask the LLM to propose a concise title and save it
-        try
-        {
-            var convo = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, ct);
-            if (convo != null && string.IsNullOrWhiteSpace(convo.Title))
-            {
-                var recent = window.TakeLast(8).Select(m => $"{m.Role}: {m.Content}");
-                var titlePrompt = new List<ChatMessage>
-                {
-                    new ChatMessage("system", "You generate concise, descriptive conversation titles (3–6 words). No quotes, no punctuation at the end."),
-                    new ChatMessage("user", string.Join("\n", recent))
-                };
-                var title = await client.ChatAsync(titlePrompt);
-                title = (title ?? string.Empty).Trim();
-                if (!string.IsNullOrEmpty(title))
-                {
-                    // Truncate overly long titles
-                    if (title.Length > 80) title = title.Substring(0, 80);
-                    convo.Title = title;
-                    convo.UpdatedAtUtc = DateTime.UtcNow;
-                    await _db.SaveChangesAsync(ct);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to auto-title conversation {ConversationId}", conversationId);
-        }
-
-        // Optional summarization trigger when window is dense
-        try
-        {
-            if (window.Count >= maxTurns)
-            {
-                var toSummarize = string.Join("\n", window.Select(m => $"{m.Role}: {m.Content}"));
-                var sumPrompt = new List<ChatMessage>
-                {
-                    new ChatMessage("system", "Summarize the conversation succinctly in 5-7 bullet points, focusing on decisions, facts, and tasks. Be concise."),
-                    new ChatMessage("user", toSummarize)
-                };
-                var summaryText = await client.ChatAsync(sumPrompt, track: false);
-                if (!string.IsNullOrWhiteSpace(summaryText))
-                {
-                    _db.ConversationSummaries.Add(new ConversationSummary
-                    {
-                        ConversationId = conversationId,
-                        ByPersonaId = personaId,
-                        Content = summaryText,
-                        Timestamp = DateTime.UtcNow,
-                        CreatedAtUtc = DateTime.UtcNow
-                    });
-                    await _db.SaveChangesAsync(ct);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Conversation summarization failed for conversation {ConversationId}", conversationId);
-        }
-
-        return (reply, assistantMsg.Id);
-    }
 
     private async Task<IEnumerable<ChatMessage>> BuildInstructionMessages(Guid personaId, Guid providerId, Guid? modelId, CancellationToken ct = default)
     {
@@ -796,25 +885,6 @@ public class AgentService : IAgentService
         return false;
     }
 
-    // Non-interface helper: include a Tool Index in the system message
-    public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools)
-    {
-        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId);
-        var sys = persona is null ? "" : BuildSystemMessage(persona);
-        var toolIndex = BuildToolIndexSection(tools);
-        var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
-        var client = await _factory.CreateAsync(providerId, modelId);
-        var prompt = string.IsNullOrWhiteSpace(fullSys) ? input : $"{fullSys}\n\nUser: {input}";
-        try
-        {
-            return await client.GenerateAsync(prompt, track: false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "LLM GenerateAsync (ToolIndex) failed for provider {ProviderId} model {ModelId}", providerId, modelId);
-            return "Sorry, I couldn’t complete that request.";
-        }
-    }
 
     private static string BuildSystemMessage(Persona p)
     {

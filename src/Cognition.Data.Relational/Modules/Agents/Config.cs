@@ -12,6 +12,7 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.PersonaId).HasColumnName("persona_id");
         b.HasOne(x => x.Persona).WithMany().HasForeignKey(x => x.PersonaId).HasConstraintName("fk_agents_personas");
+        b.HasIndex(x => x.PersonaId).IsUnique();
         b.Property(x => x.Version).HasColumnName("version");
         b.Property(x => x.RolePlay).HasColumnName("role_play");
         b.Property(x => x.Prefix).HasColumnName("prefix");

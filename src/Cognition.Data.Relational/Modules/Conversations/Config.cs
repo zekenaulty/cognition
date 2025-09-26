@@ -15,6 +15,9 @@ public class ConversationConfiguration : IEntityTypeConfiguration<Conversation>
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.Property(x => x.Metadata).HasColumnName("metadata").HasColumnType("jsonb");
+        b.Property(x => x.AgentId).HasColumnName("agent_id");
+        b.HasOne(x => x.Agent).WithMany().HasForeignKey(x => x.AgentId).HasConstraintName("fk_conversations_agents");
+        b.HasIndex(x => x.AgentId);
     }
 }
 
@@ -50,6 +53,9 @@ public class ConversationMessageConfiguration : IEntityTypeConfiguration<Convers
         b.HasOne(x => x.FromPersona).WithMany().HasForeignKey(x => x.FromPersonaId).HasConstraintName("fk_conversation_messages_from_persona");
         b.Property(x => x.ToPersonaId).HasColumnName("to_persona_id");
         b.HasOne(x => x.ToPersona).WithMany().HasForeignKey(x => x.ToPersonaId).HasConstraintName("fk_conversation_messages_to_persona");
+        b.Property(x => x.FromAgentId).HasColumnName("from_agent_id");
+        b.HasOne(x => x.FromAgent).WithMany().HasForeignKey(x => x.FromAgentId).HasConstraintName("fk_conversation_messages_from_agent");
+        b.HasIndex(x => x.FromAgentId);
         b.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
         b.Property(x => x.Role).HasColumnName("role").HasConversion<string>();
         b.Property(x => x.Metatype).HasColumnName("metatype");

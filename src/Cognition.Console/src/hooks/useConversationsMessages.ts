@@ -21,7 +21,7 @@ type Message = {
   versionIndex?: number;
 };
 
-export function useConversationsMessages(accessToken: string, personaId: string): {
+export function useConversationsMessages(accessToken: string, agentId: string | undefined): {
   conversations: Conv[];
   conversationId: string | null;
   setConversationId: (id: string | null) => void;
@@ -36,14 +36,14 @@ export function useConversationsMessages(accessToken: string, personaId: string)
 
   useEffect(() => {
     const loadConvs = async () => {
-      if (!accessToken || !personaId) return;
-      const list = await fetchConversations(accessToken, personaId);
+      if (!accessToken || !agentId) return;
+      const list = await fetchConversations(accessToken, { agentId });
       const items: Conv[] = (list as any[]).map((c: any) => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }));
       setConversations(items);
       // Do NOT auto-select a conversation. Routing/new-convo flow controls selection now.
     };
     loadConvs();
-  }, [accessToken, personaId]);
+  }, [accessToken, agentId]);
 
   useEffect(() => {
     const loadMsgs = async () => {
@@ -60,7 +60,7 @@ export function useConversationsMessages(accessToken: string, personaId: string)
         id: m.id ?? m.Id,
         role: normalizeRole(m.role ?? m.Role),
         content: m.content ?? m.Content,
-        fromId: m.fromPersonaId ?? m.FromPersonaId,
+        fromId: m.fromAgentId ?? m.FromAgentId ?? m.fromPersonaId ?? m.FromPersonaId,
         fromName: m.fromName ?? m.FromName,
         timestamp: m.timestamp ?? m.Timestamp,
         pending: m.pending,
@@ -96,10 +96,10 @@ export function useConversationsMessages(accessToken: string, personaId: string)
     loadMsgs();
   }, [accessToken, conversationId]);
 
-  // Clear messages when persona changes (new convo context)
+  // Clear messages when agent context changes (new convo scope)
   useEffect(() => {
     setMessages([]);
-  }, [personaId]);
+  }, [agentId]);
 
   return {
     conversations,

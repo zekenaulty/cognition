@@ -30,7 +30,7 @@ public class ChatController : ControllerBase
     }
 
     public record AskRequest(
-        Guid PersonaId,
+        Guid AgentId,
         Guid ProviderId,
         Guid? ModelId,
         string Input);
@@ -40,7 +40,12 @@ public class ChatController : ControllerBase
     {
         try
         {
-            var reply = await _agents.AskAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
+            var personaId = await _db.Agents.AsNoTracking()
+                .Where(a => a.Id == req.AgentId)
+                .Select(a => (Guid?)a.PersonaId)
+                .FirstOrDefaultAsync();
+            if (!personaId.HasValue) return NotFound(new { code = "agent_not_found", message = "Agent not found" });
+            var reply = await _agents.AskAsync(personaId.Value, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
             return Ok(new { reply });
         }
         catch (Exception ex)
@@ -54,7 +59,12 @@ public class ChatController : ControllerBase
     {
         try
         {
-            var reply = await _agents.AskWithToolsAsync(req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
+            var personaId = await _db.Agents.AsNoTracking()
+                .Where(a => a.Id == req.AgentId)
+                .Select(a => (Guid?)a.PersonaId)
+                .FirstOrDefaultAsync();
+            if (!personaId.HasValue) return NotFound(new { code = "agent_not_found", message = "Agent not found" });
+            var reply = await _agents.AskWithToolsAsync(personaId.Value, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
             return Ok(new { reply });
         }
         catch (Exception ex)
@@ -65,7 +75,6 @@ public class ChatController : ControllerBase
 
     public record ChatRequest(
         Guid ConversationId,
-        Guid PersonaId,
         Guid ProviderId,
         Guid? ModelId,
         string Input);
@@ -96,15 +105,52 @@ public class ChatController : ControllerBase
             return StatusCode(500, new { code = "chat_failed", message = ex.Message });
         }
     }
+
+    [HttpPost("ask-chat-v2")]
+    public async Task<IActionResult> AskChatV2([FromBody] ChatV2Request req)
+    {
+        try
+        {
+            var personaId = await _db.Conversations.AsNoTracking()
+                .Where(c => c.Id == req.ConversationId)
+                .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => a.PersonaId)
+                .FirstOrDefaultAsync();
+            if (personaId == Guid.Empty)
+                return NotFound(new { code = "conversation_or_agent_not_found", message = "Conversation/Agent not found" });
+
+            var assistantContent = await _agents.ChatAsync(req.ConversationId, personaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
+            if (string.IsNullOrWhiteSpace(assistantContent.Reply))
+            {
+                assistantContent.Reply = "(No reply...)";
+            }
+            return Accepted(new { ok = true, content = assistantContent });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { code = "conversation_not_found", message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { code = "ask_chat_v2_failed", message = ex.Message });
+        }
+    }
 */
     [HttpPost("ask-chat")]
     public async Task<IActionResult> AskChat([FromBody] ChatRequest req)
     {
-        // Persist user message
+        // Resolve personaId/agentId for this conversation
+        var agentPersona = await _db.Conversations.AsNoTracking()
+            .Where(c => c.Id == req.ConversationId)
+            .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => new { a.Id, a.PersonaId })
+            .FirstOrDefaultAsync();
+        if (agentPersona == null) return NotFound(new { code = "conversation_or_agent_not_found", message = "Conversation/Agent not found" });
+        var fromAgentId = agentPersona.Id;
+        var fromPersonaId = agentPersona.PersonaId;
         var message = new ConversationMessage
         {
             ConversationId = req.ConversationId,
-            FromPersonaId = req.PersonaId,
+            FromPersonaId = fromPersonaId,
+            FromAgentId = fromAgentId,
             Content = req.Input,
             Role = Data.Relational.Modules.Common.ChatRole.User,
             CreatedAtUtc = DateTime.UtcNow,
@@ -114,18 +160,20 @@ public class ChatController : ControllerBase
         await _db.SaveChangesAsync();
 
         // Emit UserMessageAppended
-        var userMsgEvt = new UserMessageAppended(req.ConversationId, req.PersonaId, req.Input);
+        var userMsgEvt = new UserMessageAppended(req.ConversationId, fromPersonaId, req.Input);
         await _bus.Publish(userMsgEvt);
 
-        var assistantContent = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
+        var assistantContent = await _agents.ChatAsync(req.ConversationId, fromPersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
         if (string.IsNullOrWhiteSpace(assistantContent.Reply))
         {
             assistantContent.Reply = "(No reply...)";
         }
+        var assistantAgentId = fromAgentId;
         var assistantMessage = new ConversationMessage
         {
             ConversationId = req.ConversationId,
-            FromPersonaId = req.PersonaId,
+            FromPersonaId = fromPersonaId,
+            FromAgentId = assistantAgentId,
             Content = assistantContent.Reply,
             Role = Data.Relational.Modules.Common.ChatRole.Assistant,
             CreatedAtUtc = DateTime.UtcNow,
@@ -135,7 +183,7 @@ public class ChatController : ControllerBase
 
         _db.ConversationMessages.Add(assistantMessage);
         await _db.SaveChangesAsync();
-        var assistantEvt = new AssistantMessageAppended(req.ConversationId, req.PersonaId, assistantContent.Reply);
+        var assistantEvt = new AssistantMessageAppended(req.ConversationId, fromPersonaId, assistantContent.Reply);
         await _bus.Publish(assistantEvt);
 
         // Touch conversation updated timestamp
@@ -171,21 +219,34 @@ public class ChatController : ControllerBase
 
     public record AskWithPlanRequest(
         Guid ConversationId,
-        Guid PersonaId,
         Guid ProviderId,
         Guid? ModelId,
         string Input,
         int MinSteps,
         int MaxSteps);
 
+    public record RememberRequest(
+        Guid? ConversationId,
+        Guid? AgentId,
+        string Content,
+        Dictionary<string, object?>? Metadata);
+
     [HttpPost("ask-with-plan")]
     public async Task<IActionResult> AskWithPlan([FromBody] AskWithPlanRequest req)
     {
         // Persist user message
+        var agentPersona = await _db.Conversations.AsNoTracking()
+            .Where(c => c.Id == req.ConversationId)
+            .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => new { a.Id, a.PersonaId })
+            .FirstOrDefaultAsync();
+        if (agentPersona == null) return NotFound(new { code = "conversation_or_agent_not_found", message = "Conversation/Agent not found" });
+        var planFromAgentId = agentPersona.Id;
+        var planFromPersonaId = agentPersona.PersonaId;
         var message = new ConversationMessage
         {
             ConversationId = req.ConversationId,
-            FromPersonaId = req.PersonaId,
+            FromPersonaId = planFromPersonaId,
+            FromAgentId = planFromAgentId,
             Content = req.Input,
             Role = Data.Relational.Modules.Common.ChatRole.User,
             CreatedAtUtc = DateTime.UtcNow,
@@ -195,10 +256,28 @@ public class ChatController : ControllerBase
         await _db.SaveChangesAsync();
 
         // Publish UserMessageAppended and PlanRequested events
-        await _bus.Publish(new UserMessageAppended(req.ConversationId, req.PersonaId, req.Input));
-        await _bus.Publish(new PlanRequested(req.ConversationId, req.PersonaId, req.Input));
+        await _bus.Publish(new UserMessageAppended(req.ConversationId, planFromPersonaId, req.Input));
+        await _bus.Publish(new PlanRequested(req.ConversationId, planFromPersonaId, req.Input));
 
         // Return 202 Accepted
         return Accepted(new { ok = true, correlationId = message.Id });
+    }
+
+    [HttpPost("remember")]
+    public async Task<IActionResult> Remember([FromServices] Cognition.Clients.Retrieval.IRetrievalService retrieval, [FromBody] RememberRequest req)
+    {
+        Guid? agentId = req.AgentId;
+        if (!agentId.HasValue && req.ConversationId.HasValue)
+        {
+            agentId = await _db.Conversations.AsNoTracking()
+                .Where(c => c.Id == req.ConversationId.Value)
+                .Select(c => (Guid?)c.AgentId)
+                .FirstOrDefaultAsync();
+        }
+        if (!agentId.HasValue) return BadRequest(new { code = "agent_missing", message = "Provide AgentId or a ConversationId bound to an Agent" });
+
+        var scope = new Cognition.Contracts.ScopeToken(null, null, null, agentId.Value, null, null, null);
+        var ok = await retrieval.WriteAsync(scope, req.Content, req.Metadata ?? new(), HttpContext.RequestAborted);
+        return Ok(new { ok });
     }
 }

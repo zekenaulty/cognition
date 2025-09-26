@@ -21,7 +21,7 @@ public class ConversationsController : ControllerBase
     private readonly IHubContext<ChatHub> _hub;
     public ConversationsController(CognitionDbContext db, IHubContext<ChatHub> hub) { _db = db; _hub = hub; }
 
-    public record CreateConversationRequest(string? Title, Guid[] ParticipantIds);
+    public record CreateConversationRequest(Guid AgentId, string? Title, Guid[] ParticipantIds);
     public record AddMessageRequest(Guid FromPersonaId, Guid? ToPersonaId, ChatRole Role, string Content, string? Metatype = null);
     public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc, DateTime? UpdatedAtUtc);
     public record AddVersionRequest(string Content);
@@ -29,7 +29,7 @@ public class ConversationsController : ControllerBase
 
     [HttpGet]
     [Authorize]
-    public async Task<IActionResult> List([FromQuery] Guid? participantId)
+    public async Task<IActionResult> List([FromQuery] Guid? participantId, [FromQuery] Guid? agentId)
     {
         var q = _db.Conversations.AsNoTracking().AsQueryable();
 
@@ -54,7 +54,11 @@ public class ConversationsController : ControllerBase
             .Select(p => (Guid?)p.Id)
             .FirstOrDefaultAsync();
 
-        if (participantId.HasValue)
+        if (agentId.HasValue)
+        {
+            q = q.Where(c => c.AgentId == agentId.Value);
+        }
+        else if (participantId.HasValue)
         {
             var pid = participantId.Value;
             var pidIsAllowed = allowedPersonaIds.Contains(pid) || (defaultSystemId.HasValue && pid == defaultSystemId.Value);
@@ -90,10 +94,10 @@ public class ConversationsController : ControllerBase
     [Authorize]
     public async Task<IActionResult> Create([FromBody] CreateConversationRequest req)
     {
-        var conv = new Conversation { Title = req.Title, CreatedAtUtc = DateTime.UtcNow };
+        var conv = new Conversation { Title = req.Title, CreatedAtUtc = DateTime.UtcNow, AgentId = req.AgentId };
         _db.Conversations.Add(conv);
         await _db.SaveChangesAsync();
-        // participants (use default system assistant persona when none provided)
+        // participants (optional)
         var participants = (req.ParticipantIds ?? Array.Empty<Guid>()).Distinct().ToList();
         // Always include the caller's primary persona as a participant if available
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -123,6 +127,8 @@ public class ConversationsController : ControllerBase
         await _db.SaveChangesAsync();
         return CreatedAtAction(nameof(Get), new { id = conv.Id }, new { conv.Id });
     }
+
+    // Removed legacy v2 create endpoint; POST /api/conversations accepts AgentId
 
     [HttpGet("{id:guid}")]
     [Authorize]
@@ -262,10 +268,15 @@ public class ConversationsController : ControllerBase
                 return BadRequest("User-authored messages must use the user's primary persona.");
             }
         }
+        var fromAgentId = await _db.Agents.AsNoTracking()
+            .Where(a => a.PersonaId == req.FromPersonaId)
+            .Select(a => a.Id)
+            .FirstOrDefaultAsync();
         var msg = new ConversationMessage
         {
             ConversationId = id,
             FromPersonaId = req.FromPersonaId,
+            FromAgentId = fromAgentId,
             ToPersonaId = req.ToPersonaId,
             Role = req.Role,
             Content = req.Content,

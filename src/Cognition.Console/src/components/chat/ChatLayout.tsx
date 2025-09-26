@@ -8,9 +8,9 @@ import ImageViewer from '../ImageViewer';
 import { ChatMenu } from './ChatMenu';
 
 export type ChatLayoutProps = {
-  personas: any[];
-  personaId: string;
-  onPersonaChange: (id: string) => void;
+  agents: { id: string; personaId?: string; label?: string }[];
+  agentId?: string;
+  onAgentChange?: (id: string) => void;
   providers: any[];
   models: any[];
   providerId: string;
@@ -39,9 +39,10 @@ export type ChatLayoutProps = {
   onRegenerate?: (index: number) => void;
   onPrevVersion?: (index: number) => void;
   onNextVersion?: (index: number) => void;
+  onRememberLast?: () => void;
 };
 
-export function ChatLayout({ personas, personaId, onPersonaChange, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, error, loading, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange, imgPending, onGenerateImage, onNewConversation, connectionState, assistantVoiceName, assistantGender, onRegenerate, onPrevVersion, onNextVersion }: ChatLayoutProps) {
+export function ChatLayout({ agents = [], agentId, onAgentChange, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, error, loading, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange, imgPending, onGenerateImage, onNewConversation, connectionState, assistantVoiceName, assistantGender, onRegenerate, onPrevVersion, onNextVersion, onRememberLast }: ChatLayoutProps) {
   // Placeholder state for image menu, image model, image count, viewer, and input only.
   const [imgModel, setImgModel] = React.useState('dall-e-3');
   const [imgMsgCount, setImgMsgCount] = React.useState(6);
@@ -60,9 +61,9 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
             {/* Menu bar (gear/settings, etc.) */}
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper' }}>
               <ChatMenu
-                personas={personas}
-                personaId={personaId}
-                onPersonaChange={onPersonaChange}
+                agents={agents}
+                agentId={agentId}
+                onAgentChange={onAgentChange}
                 providers={providers}
                 models={models}
                 providerId={providerId}
@@ -75,7 +76,7 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                 imgModel={imgModel}
                 onImgModelChange={setImgModel}
                 imgMsgCount={imgMsgCount}
-              onImgMsgCountChange={setImgMsgCount}
+                 onImgMsgCountChange={setImgMsgCount}
                 imgPending={!!imgPending}
                 onGenerateImage={() => { onGenerateImage && onGenerateImage(imgModel, imgMsgCount); }}
                 conversations={conversations}
@@ -84,7 +85,7 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                 onNewConversation={() => { onNewConversation && onNewConversation(); }}
               />
               {/* Conversation title next to gear/settings */}
-              <Box sx={{ ml: 2 }}>
+              <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                 <span className={"conversation-title"}>
                   {(() => {
                     const t = conversations.find(c => c.id === (conversationId ?? ''))?.title;
@@ -92,9 +93,18 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                     return 'New Chat';
                   })()}
                 </span>
+                {conversationId && (
+                  <>
+                    <Typography variant="caption" sx={{ opacity: 0.7, border: '1px solid #333', borderRadius: 1, px: 0.75, py: 0.25 }}>Agent</Typography>
+                    <Typography variant="caption" sx={{ opacity: 0.7, border: '1px solid #333', borderRadius: 1, px: 0.75, py: 0.25 }}>Conv: {String(conversationId).slice(0,8)}</Typography>
+                  </>
+                )}
               </Box>
               {/* Connection status sticky right */}
               <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
+                {conversationId && (
+                  <Typography role="button" onClick={() => onRememberLast && onRememberLast()} variant="caption" sx={{ cursor: 'pointer', color: '#9ad', border: '1px solid #234', borderRadius: 1, px: 0.75, py: 0.25 }}>Remember this</Typography>
+                )}
                 {connectionState && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                     <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: (
@@ -102,9 +112,17 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
                       connectionState === 'connecting' ? 'warning.main' :
                       connectionState === 'reconnecting' ? 'warning.main' : 'error.main'
                     ) }} />
-                    <Typography variant="caption" color="text.secondary">
-                      {connectionState === 'connected' ? 'Connected' : (connectionState === 'connecting' ? 'Connecting…' : (connectionState === 'reconnecting' ? 'Reconnecting…' : 'Offline'))}
-                    </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {`Chatting as ${(() => {
+                if (agentId) {
+                  const agent = agents.find(a => a.id === agentId);
+                  if (agent) {
+                    return agent.label || (agent.id ? agent.id.slice(0, 8) : 'Assistant');
+                  }
+                }
+                return 'Assistant';
+              })()} via ${providers.find((p: any) => p.id === providerId)?.displayName || providers.find((p: any) => p.id === providerId)?.name || 'Provider'}${modelId ? ` - ${models.find((m: any) => m.id === modelId)?.displayName || models.find((m: any) => m.id === modelId)?.name || modelId}` : ''}${conversationId ? '' : ' - New conversation on first send'}`}
+            </Typography>
                   </Box>
                 )}
               </Box>
@@ -130,7 +148,7 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
             />
             {/* Error/loading states */}
             {error && (
-              <Alert severity="error">{error}</Alert>
+              <Alert severity="error">{String(error)}</Alert>
             )}
             {loading && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -140,7 +158,15 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
             )}
             {/* Context caption */}
             <Typography variant="caption" color="text.secondary">
-              {`Chatting as ${personas.find((p: any) => p.id === personaId)?.name || 'Assistant'} via ${providers.find((p: any) => p.id === providerId)?.displayName || providers.find((p: any) => p.id === providerId)?.name || 'Provider'}${modelId ? ` · ${models.find((m: any) => m.id === modelId)?.displayName || models.find((m: any) => m.id === modelId)?.name || modelId}` : ''}${conversationId ? '' : ' · New conversation on first send'}`}
+              {`Chatting as ${(() => {
+                if (agentId) {
+                  const agent = agents.find(a => a.id === agentId);
+                  if (agent) {
+                    return agent.label || (agent.id ? agent.id.slice(0, 8) : 'Assistant');
+                  }
+                }
+                return 'Assistant';
+              })()} via ${providers.find((p: any) => p.id === providerId)?.displayName || providers.find((p: any) => p.id === providerId)?.name || 'Provider'}${modelId ? ` - ${models.find((m: any) => m.id === modelId)?.displayName || models.find((m: any) => m.id === modelId)?.name || modelId}` : ''}${conversationId ? '' : ' - New conversation on first send'}`}
             </Typography>
           </CardContent>
         </Card>
@@ -149,6 +175,7 @@ export function ChatLayout({ personas, personaId, onPersonaChange, providers, mo
     </Box>
   );
 }
+
 
 
 

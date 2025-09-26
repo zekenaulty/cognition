@@ -34,6 +34,8 @@ builder.Services.AddCognitionTools();
 // Background knowledge indexer is disabled for now; use the API endpoint to trigger indexing on-demand.
 // Wire AgentService DI for API controllers
 builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Clients.Agents.AgentService>();
+// Retrieval service (scope-enforcing RAG entrypoint)
+builder.Services.AddScoped<Cognition.Clients.Retrieval.IRetrievalService, Cognition.Clients.Retrieval.RetrievalService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>

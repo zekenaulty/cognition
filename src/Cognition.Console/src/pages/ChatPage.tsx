@@ -1,7 +1,5 @@
-
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { fetchPersonas } from '../api/client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ChatLayout } from '../components/chat/ChatLayout';
 import { useAuth } from '../auth/AuthContext';
 import { useChatHub } from '../hooks/useChatHub';
@@ -13,27 +11,28 @@ import { useProvidersModels } from '../hooks/useProvidersModels';
 import { MessageItemProps } from '../components/chat/MessageItem';
 import { normalizeRole } from '../utils/chat';
 import { useUserSettings } from '../hooks/useUserSettings';
+import { useAgentPersonaIndex } from '../hooks/useAgentPersonaIndex';
 
-// Types
-type Provider = { id: string; name: string; displayName?: string };
-type Model = { id: string; name: string; displayName?: string };
-type Persona = { id: string; name: string; gender?: string };
-type Message = MessageItemProps;
 
 export default function ChatPage() {
-  // Auth
   const { auth } = useAuth();
-  const accessToken = auth?.accessToken;
-  const userId = auth?.userId;
-
-  // LocalStorage keys
-  const settings = useUserSettings();
-
-  // State
-  const [personas, setPersonas] = useState<Persona[]>([]);
-  const route = useParams<{ personaId?: string; conversationId?: string }>();
+  const accessToken = auth?.accessToken || '';
   const navigate = useNavigate();
-  const [personaId, setPersonaId] = useState<string>(route.personaId || (settings.get<string>('chat.personaId') || ''));
+  const settings = useUserSettings();
+  const { agentId: routeAgentId, conversationId: routeConversationId } = useParams<{ agentId?: string; conversationId?: string }>();
+
+  const { agents, loading: loadingAgents, resolvePersonaId } = useAgentPersonaIndex(auth?.accessToken);
+  const [agentId, setAgentId] = useState<string>('');
+  const [assistantGender, setAssistantGender] = useState<string | undefined>();
+  const [assistantVoiceName, setAssistantVoiceName] = useState<string | undefined>();
+  const [planSteps, setPlanSteps] = useState<string[]>([]);
+  const [toolActions, setToolActions] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hubState, setHubState] = useState<'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('disconnected');
+
+  const activePersonaId = agentId ? resolvePersonaId(agentId) : undefined;
+
   const {
     providers,
     providerId,
@@ -41,8 +40,8 @@ export default function ChatPage() {
     models,
     modelId,
     setModelId,
-  } = useProvidersModels(accessToken || '', settings.get<string>('chat.providerId') || '', settings.get<string>('chat.modelId') || '');
-  // Conversations/messages hook
+  } = useProvidersModels(accessToken, settings.get<string>('chat.providerId') || '', settings.get<string>('chat.modelId') || '');
+
   const {
     conversations,
     conversationId,
@@ -50,26 +49,27 @@ export default function ChatPage() {
     messages,
     setMessages,
     setConversations,
-  } = useConversationsMessages(accessToken || '', personaId);
+  } = useConversationsMessages(accessToken, agentId);
 
-  // Ensure all messages are normalized on initial load
-  useEffect(() => {
-    setMessages(prev => prev.map(m => ({ ...m, role: normalizeRole(m.role) })));
-  }, []);
-
-  // Image styles and generator hook
   const {
     imgStyles,
     imgStyleId,
     setImgStyleId,
-  } = useImageStyles(accessToken || '');
-  const assistantName = personas.find(p => p.id === personaId)?.name || 'Assistant';
-  const [assistantGender, setAssistantGender] = useState<string | undefined>(undefined);
-  const [assistantVoiceName, setAssistantVoiceName] = useState<string | undefined>(undefined);
+  } = useImageStyles(accessToken);
+
+  const assistantName = useMemo(() => {
+    if (agentId) {
+      const agent = agents.find(a => a.id === agentId);
+      if (agent) return agent.label;
+    }
+    return 'Assistant';
+  }, [agents, agentId]);
+
   const { generateFromChat, pending: imgPending } = useImageGenerator({
     accessToken,
     conversationId,
-    personaId,
+    agentId,
+    personaId: activePersonaId,
     providerId,
     modelId,
     imgStyleId,
@@ -79,113 +79,164 @@ export default function ChatPage() {
     assistantName,
   });
 
-  // ChatHub connection (events handled via bus)
   const chatHub = useChatHub({ conversationId: conversationId ?? '', accessToken });
 
-  // Bus subscriptions: final assistant message
-  useChatBus('assistant-message', (msg) => {
-    if (!msg || msg.conversationId !== (conversationId ?? '')) return;
-    setMessages(prev => {
-      const updated = prev.map(m => ({ ...m, role: normalizeRole(m.role) }));
-      const idx = updated.findIndex(m => m.role === 'assistant' && m.pending);
-      if (idx !== -1) {
-        const copy = [...updated];
-        const cur = copy[idx] as any;
-        const baseVersions: string[] = Array.isArray(cur.versions) && cur.versions.length ? cur.versions : (cur.content ? [cur.content] : []);
-        const nextVersions = baseVersions.length ? [...baseVersions.slice(0, baseVersions.length - 1), msg.content] : [msg.content];
-        copy[idx] = { ...cur, id: (msg as any).messageId, pending: false, content: msg.content, timestamp: msg.timestamp, versions: nextVersions, versionIndex: Math.max(0, nextVersions.length - 1) } as MessageItemProps;
-        return copy;
-      }
-      const assistantMsg: MessageItemProps = {
-        role: 'assistant', id: (msg as any).messageId,
-        content: msg.content,
-        fromName: personas.find(p => p.id === personaId)?.name || 'Assistant',
-        timestamp: msg.timestamp,
-        versions: [msg.content],
-        versionIndex: 0,
-      };
-      return [...updated, assistantMsg];
-    });
-    if (pendingAssistantTimerRef.current) {
-      clearTimeout(pendingAssistantTimerRef.current);
-      pendingAssistantTimerRef.current = null;
+  // Normalize any existing messages once on mount
+  useEffect(() => {
+    setMessages(prev => prev.map(m => ({ ...m, role: normalizeRole(m.role) })));
+  }, [setMessages]);
+// Ensure an agent is selected when list or route changes
+  useEffect(() => {
+    if (!agents.length) {
+      setAgentId('');
+      return;
     }
-    // Refresh conversation title after first reply (server may have auto-titled)
-    try {
-      const convId = conversationId ?? '';
-      if (convId && accessToken) {
-        const cur = conversations.find(c => c.id === convId);
-        if (!cur || !cur.title) {
-          // slight delay to allow server to persist title
-          setTimeout(async () => {
-            try {
-              const res = await fetch(`/api/conversations/${convId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-              if (res.ok) {
-                const data = await res.json();
-                if (data?.title || data?.Title) {
-                  const title = data.title ?? data.Title;
-                  setConversations(prev => prev.map(c => c.id === convId ? { ...c, title } : c));
-                }
-              }
-            } catch {}
-          }, 300);
+    const routeCandidate = routeAgentId && agents.some(a => a.id === routeAgentId) ? routeAgentId : undefined;
+    const savedCandidate = (() => {
+      const saved = settings.get<string>('chat.agentId');
+      if (saved && agents.some(a => a.id === saved)) return saved;
+      return undefined;
+    })();
+    const next = routeCandidate ?? savedCandidate ?? agents[0].id;
+    if (next && next !== agentId) {
+      setAgentId(next);
+    }
+  }, [agents, routeAgentId]);
+
+  // Persist agent selection and synchronize route
+  useEffect(() => {
+    if (!agentId) return;
+    settings.set('chat.agentId', agentId);
+    if (conversationId) {
+      if (routeAgentId !== agentId || routeConversationId !== conversationId) {
+        navigate(`/chat/${agentId}/${conversationId}`, { replace: true });
+      }
+    } else {
+      if (routeAgentId !== agentId || routeConversationId) {
+        navigate(`/chat/${agentId}`, { replace: true });
+      }
+    }
+  }, [agentId, conversationId, navigate, routeAgentId, routeConversationId, settings]);
+
+  // When conversation id is provided in the route, load it
+  useEffect(() => {
+    if (routeConversationId && routeConversationId !== conversationId) {
+      setMessages([]);
+      setConversationId(routeConversationId);
+    }
+  }, [routeConversationId, conversationId, setConversationId, setMessages]);
+
+  // Clear conversation state when agent changes without explicit conversation in route
+  const previousAgentRef = useRef<string | undefined>();
+  useEffect(() => {
+    if (!agentId) return;
+    const previous = previousAgentRef.current;
+    previousAgentRef.current = agentId;
+    if (previous && previous !== agentId && !routeConversationId) {
+      setMessages([]);
+      setConversationId(null);
+      try { settings.remove('chat.conversationId'); } catch {}
+    }
+  }, [agentId, routeConversationId, setConversationId, setMessages, settings]);
+
+  // Reset plan/tool state when agent or conversation changes
+  useEffect(() => {
+    setPlanSteps([]);
+    setToolActions([]);
+  }, [agentId, conversationId]);
+
+  // Persist conversation id locally for quick resume
+  useEffect(() => {
+    if (!agentId) return;
+    if (conversationId) {
+      settings.set('chat.conversationId', conversationId);
+    } else {
+      try { settings.remove('chat.conversationId'); } catch {}
+    }
+  }, [agentId, conversationId, settings]);
+
+  // Guard against invalid conversation access
+  useEffect(() => {
+    if (!accessToken || !conversationId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!res.ok && !cancelled) {
+          navigate('/', { replace: true });
+        }
+      } catch {
+        if (!cancelled) navigate('/', { replace: true });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [accessToken, conversationId, navigate]);
+
+  // Load persona details (voice/gender) for the active agent persona
+  useEffect(() => {
+    if (!accessToken || !activePersonaId) {
+      setAssistantGender(undefined);
+      setAssistantVoiceName(undefined);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/personas/${activePersonaId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!res.ok || cancelled) {
+          setAssistantGender(undefined);
+          setAssistantVoiceName(undefined);
+          return;
+        }
+        const data = await res.json();
+        const genderRaw = data?.gender ?? data?.Gender;
+        const voiceRaw = data?.voice ?? data?.Voice;
+        const gender = typeof genderRaw === 'string' ? genderRaw.toLowerCase() : '';
+        const normalizedGender = gender.startsWith('f') ? 'female' : (gender.startsWith('m') ? 'male' : undefined);
+        setAssistantGender(normalizedGender);
+        setAssistantVoiceName(typeof voiceRaw === 'string' ? voiceRaw : undefined);
+      } catch {
+        if (!cancelled) {
+          setAssistantGender(undefined);
+          setAssistantVoiceName(undefined);
         }
       }
-    } catch {}
-  });
+    })();
+    return () => { cancelled = true; };
+  }, [accessToken, activePersonaId]);
 
-  // Update local title when server broadcasts ConversationUpdated
-  useChatBus('conversation-updated', (evt: any) => {
-    try {
-      const cid = String(evt.conversationId || '');
-      if (!cid) return;
-      const title = (evt.title ?? '').toString();
-      setConversations(prev => prev.map(c => c.id === cid ? { ...c, title } : c));
-    } catch {}
-  });
+  // Hub connection state forwarding
+  useChatBus('connection-state', evt => setHubState(evt.state));
 
-  // Bus: plan/tool events
-  useChatBus('plan-ready', (evt) => {
-    if (!evt || evt.conversationId !== (conversationId ?? '')) return;
-    const steps = Array.isArray(evt.plan) ? evt.plan : [evt.plan];
-    setPlanSteps(steps);
-  });
-  useChatBus('tool-requested', (evt) => {
-    if (!evt || evt.conversationId !== (conversationId ?? '')) return;
-    setToolActions(prev => [...prev, `Tool requested: ${evt.toolId}`]);
-  });
-  useChatBus('tool-completed', (evt) => {
-    if (!evt || evt.conversationId !== (conversationId ?? '')) return;
-    setToolActions(prev => [...prev, `Tool completed: ${evt.toolId} (${evt.success ? 'success' : 'error'})`]);
-  });
-
-  // Streaming deltas with rAF coalescing
+  const pendingAssistantTimerRef = useRef<number | null>(null);
   const deltaBufferRef = useRef<string>('');
   const deltaRafRef = useRef<number | null>(null);
+
   const flushDelta = () => {
     const delta = deltaBufferRef.current;
     if (!delta) return;
     deltaBufferRef.current = '';
     setMessages(prev => {
       const updated = prev.map(m => ({ ...m, role: normalizeRole(m.role) }));
-      const idx = updated.findIndex(m => m.role === 'assistant' && m.pending);
+      const idx = updated.findIndex(m => m.role === 'assistant' && (m as any).pending);
       if (idx !== -1) {
         const copy = [...updated];
-        const cur = copy[idx];
-        copy[idx] = { ...cur, content: (cur.content || '') + delta } as MessageItemProps;
+        const current = copy[idx];
+        copy[idx] = { ...current, content: (current.content || '') + delta } as MessageItemProps;
         return copy;
       }
       const assistantMsg: MessageItemProps = {
         role: 'assistant',
         content: delta,
-        fromName: personas.find(p => p.id === personaId)?.name || 'Assistant',
+        fromName: assistantName,
         timestamp: new Date().toISOString(),
         pending: true,
       } as any;
       return [...updated, assistantMsg];
     });
   };
-  useChatBus('assistant-delta', (evt) => {
+
+  useChatBus('assistant-delta', evt => {
     if (!evt || evt.conversationId !== (conversationId ?? '')) return;
     deltaBufferRef.current += evt.text || '';
     if (deltaRafRef.current == null) {
@@ -196,51 +247,127 @@ export default function ChatPage() {
     }
   });
 
-  // Hub broadcasts for versions (multi-client sync)
-  useChatBus('assistant-version-appended', (evt: any) => {
+  useChatBus('assistant-message', msg => {
+    if (!msg || msg.conversationId !== (conversationId ?? '')) return;
+    setMessages(prev => {
+      const updated = prev.map(m => ({ ...m, role: normalizeRole(m.role) }));
+      const pendingIdx = updated.findIndex(m => m.role === 'assistant' && (m as any).pending);
+      if (pendingIdx !== -1) {
+        const copy = [...updated];
+        const current = copy[pendingIdx] as MessageItemProps;
+        const baseVersions: string[] = Array.isArray(current.versions) && current.versions.length ? current.versions : (current.content ? [current.content] : []);
+        const nextVersions = baseVersions.length ? [...baseVersions.slice(0, baseVersions.length - 1), msg.content] : [msg.content];
+        copy[pendingIdx] = {
+          ...current,
+          id: (msg as any).messageId,
+          pending: false,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          versions: nextVersions,
+          versionIndex: Math.max(0, nextVersions.length - 1),
+        };
+        return copy;
+      }
+      const assistantMsg: MessageItemProps = {
+        role: 'assistant',
+        id: (msg as any).messageId,
+        content: msg.content,
+        fromName: assistantName,
+        timestamp: msg.timestamp,
+        versions: [msg.content],
+        versionIndex: 0,
+      };
+      return [...updated, assistantMsg];
+    });
+    if (pendingAssistantTimerRef.current) {
+      clearTimeout(pendingAssistantTimerRef.current);
+      pendingAssistantTimerRef.current = null;
+    }
+    // Refresh title if server auto-titled
+    const convId = conversationId ?? '';
+    if (!convId || !accessToken) return;
+    const existing = conversations.find(c => c.id === convId);
+    if (existing && existing.title) return;
+    setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/conversations/${convId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (res.ok) {
+          const data = await res.json();
+          const title = data?.title ?? data?.Title;
+          if (title) {
+            setConversations(prev => prev.map(c => (c.id === convId ? { ...c, title } : c)));
+          }
+        }
+      } catch {}
+    }, 300);
+  });
+
+  useChatBus('conversation-updated', evt => {
+    if (!evt) return;
+    const cid = String(evt.conversationId || '');
+    if (!cid) return;
+    const title = (evt.title ?? '').toString();
+    setConversations(prev => prev.map(c => (c.id === cid ? { ...c, title } : c)));
+  });
+
+  useChatBus('plan-ready', evt => {
+    if (!evt || evt.conversationId !== (conversationId ?? '')) return;
+    const steps = Array.isArray(evt.plan) ? evt.plan : [evt.plan];
+    setPlanSteps(steps.filter(Boolean));
+  });
+
+  useChatBus('tool-requested', evt => {
+    if (!evt || evt.conversationId !== (conversationId ?? '')) return;
+    setToolActions(prev => [...prev, `Tool requested: ${evt.toolId}`]);
+  });
+
+  useChatBus('tool-completed', evt => {
+    if (!evt || evt.conversationId !== (conversationId ?? '')) return;
+    setToolActions(prev => [...prev, `Tool completed: ${evt.toolId} (${evt.success ? 'success' : 'error'})`]);
+  });
+
+  useChatBus('assistant-version-appended', evt => {
     if (!evt || evt.conversationId !== (conversationId ?? '')) return;
     setMessages(prev => {
       const copy = [...prev];
       const idx = copy.findIndex(m => (m as any).id === evt.messageId);
       if (idx === -1) return prev;
-      const m: any = copy[idx];
-      const base = Array.isArray(m.versions) ? m.versions : (m.content ? [m.content] : []);
+      const current: any = copy[idx];
+      const base = Array.isArray(current.versions) ? current.versions : (current.content ? [current.content] : []);
       const next = [...base];
-      const vi = typeof evt.versionIndex === 'number' ? evt.versionIndex : next.length;
-      next[vi] = evt.content;
-      copy[idx] = { ...m, versions: next, versionIndex: vi, content: evt.content };
+      const targetIndex = typeof evt.versionIndex === 'number' ? evt.versionIndex : next.length;
+      next[targetIndex] = evt.content;
+      copy[idx] = { ...current, versions: next, versionIndex: targetIndex, content: evt.content };
       return copy;
     });
   });
-  useChatBus('assistant-version-activated', (evt: any) => {
+
+  useChatBus('assistant-version-activated', evt => {
     if (!evt || evt.conversationId !== (conversationId ?? '')) return;
     setMessages(prev => {
       const copy = [...prev];
       const idx = copy.findIndex(m => (m as any).id === evt.messageId);
       if (idx === -1) return prev;
-      const m: any = copy[idx];
-      const versions: string[] = Array.isArray(m.versions) ? m.versions : (m.content ? [m.content] : []);
-      const vi = Math.max(0, Math.min(versions.length - 1, evt.versionIndex ?? 0));
-      copy[idx] = { ...m, versionIndex: vi, content: versions[vi] };
+      const current: any = copy[idx];
+      const versions: string[] = Array.isArray(current.versions) ? current.versions : (current.content ? [current.content] : []);
+      const targetIndex = Math.max(0, Math.min(versions.length - 1, evt.versionIndex ?? 0));
+      copy[idx] = { ...current, versionIndex: targetIndex, content: versions[targetIndex] };
       return copy;
     });
   });
 
-  // Connection status indicator
-  const [hubState, setHubState] = useState<'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('disconnected');
-  useChatBus('connection-state', s => setHubState(s.state));
-
-  // Conversation lifecycle
   useChatBus('conversation-created', evt => {
     if (!evt) return;
     setConversationId(evt.conversationId);
     try { settings.set('chat.conversationId', evt.conversationId); } catch {}
   });
+
   useChatBus('conversation-joined', evt => {
     if (!evt) return;
     setConversationId(evt.conversationId);
     try { settings.set('chat.conversationId', evt.conversationId); } catch {}
   });
+
   useChatBus('conversation-left', evt => {
     if (!evt) return;
     if (evt.conversationId === (conversationId ?? '')) {
@@ -249,229 +376,114 @@ export default function ChatPage() {
     }
   });
 
-  // Image styles hook initialized above with generator
-  const [busy, setBusy] = useState(false);
-  const [planSteps, setPlanSteps] = useState<string[]>([]);
-  const [toolActions, setToolActions] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-
-  // Clear plan/tool state on persona or conversation change to avoid stale info
-  useEffect(() => {
-    setPlanSteps([]);
-    setToolActions([]);
-  }, [personaId, conversationId]);
-
-  // When persona changes without an explicit conversation in the route, clear current conversation
-  useEffect(() => {
-    if (!route.conversationId) {
-      setMessages([]);
-      setConversationId(null);
-      try { settings.remove('chat.conversationId'); } catch {}
-    }
-  }, [personaId]);
-
-  // Load personas
-  useEffect(() => {
-    const loadPersonas = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        if (!accessToken || !userId) return;
-        const list = await fetchPersonas(accessToken, userId);
-        const assistants = (list as any[]).filter((p: any) => {
-          const t = (p.type ?? p.Type ?? p.persona_type ?? p.PersonaType);
-          if (typeof t === 'number') return t === 1;
-          if (typeof t === 'string') return t.toLowerCase() === 'assistant';
-          return false;
-        });
-        let items: Persona[] = assistants.map((p: any) => ({ id: p.id ?? p.Id, name: p.name ?? p.Name }));
-        // Ensure default assistant is available for new chats
-        try {
-          const res = await fetch('/api/personas/default-assistant', { headers: { Authorization: `Bearer ${accessToken}` } });
-          if (res.ok) {
-            const def = await res.json();
-            const defId = String(def.id ?? def.Id);
-            const defName = String(def.name ?? def.Name);
-            if (!items.some(x => x.id === defId)) items = [{ id: defId, name: defName }, ...items];
-          }
-        } catch {}
-        setPersonas(items);
-        if (!personaId) {
-          const saved = settings.get<string>('chat.personaId') || '';
-          const pick = (saved && items.find(x => x.id === saved)) ? saved : (items[0]?.id || auth?.primaryPersonaId || '');
-          if (pick) setPersonaId(pick);
-        }
-      } catch (e: any) {
-        setError('Failed to load personas');
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadPersonas();
-  }, [accessToken, userId, personaId, auth?.primaryPersonaId]);
-
-  // Sync personaId from route if present
-  useEffect(() => {
-    if (route.personaId && route.personaId !== personaId) {
-      setPersonaId(route.personaId);
-    }
-  }, [route.personaId]);
-
-  // Sync conversationId from route if present
-  useEffect(() => {
-    if (route.conversationId && route.conversationId !== (conversationId ?? '')) {
-      setMessages([]);
-      setConversationId(route.conversationId);
-    }
-  }, [route.conversationId]);
-
-  // Guard: if user navigates to a conversation they cannot access, redirect home
-  useEffect(() => {
-    (async () => {
-      try {
-        if (!accessToken || !conversationId) return;
-        const res = await fetch(`/api/conversations/${conversationId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-        if (!res.ok) {
-          navigate('/', { replace: true });
-          return;
-        }
-      } catch {
-        navigate('/', { replace: true });
-      }
-    })();
-  }, [conversationId, accessToken]);
-
-  // Load selected persona details (for gender/voice)
-  useEffect(() => {
-    (async () => {
-      try {
-        if (!personaId || !accessToken) { setAssistantGender(undefined); setAssistantVoiceName(undefined); return; }
-        const res = await fetch(`/api/personas/${personaId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-        if (!res.ok) { setAssistantGender(undefined); setAssistantVoiceName(undefined); return; }
-        const p = await res.json();
-        const g = p.gender ?? p.Gender;
-        const v = p.voice ?? p.Voice;
-        const gl = typeof g === 'string' ? g.toLowerCase() : '';
-        const gnorm = gl.startsWith('f') ? 'female' : (gl.startsWith('m') ? 'male' : undefined);
-        setAssistantGender(gnorm);
-        setAssistantVoiceName(typeof v === 'string' ? v : undefined);
-      } catch {
-        setAssistantGender(undefined);
-        setAssistantVoiceName(undefined);
-      }
-    })();
-  }, [personaId, accessToken]);
-
-  // Providers/models handled by useProvidersModels
-
-  // Persist selections to localStorage on change
-  useEffect(() => { if (personaId) settings.set('chat.personaId', personaId); }, [personaId]);
-  useEffect(() => { if (providerId) settings.set('chat.providerId', providerId); }, [providerId]);
-  useEffect(() => { if (modelId) settings.set('chat.modelId', modelId); }, [modelId]);
-  useEffect(() => {
-    if (conversationId) {
-      settings.set('chat.conversationId', conversationId);
-      if (personaId && (route.personaId !== personaId || route.conversationId !== conversationId)) {
-        navigate(`/chat/${personaId}/${conversationId}`, { replace: true });
-      }
-    }
-  }, [conversationId, personaId]);
-
-  // Message sending logic
   const handleSendMessage = async (text: string) => {
-    if (!accessToken || !text.trim()) return;
+    if (!accessToken || !text.trim() || !agentId) return;
+    const personaForAgent = activePersonaId;
+    if (!personaForAgent) {
+      setError('Selected agent is missing a persona mapping.');
+      return;
+    }
     setBusy(true);
+    setError(null);
     try {
-      // Ensure a conversation exists
       let convId = conversationId;
       if (!convId) {
         const res = await fetch('/api/conversations', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
-          body: JSON.stringify({ Title: null, ParticipantIds: personaId ? [personaId] : [] })
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ AgentId: agentId, Title: null, ParticipantIds: personaForAgent ? [personaForAgent] : [] }),
         });
         if (!res.ok) {
           const err = await res.text();
           throw new Error(err || 'Failed to create conversation');
         }
         const body = await res.json();
-        convId = body.id || body.Id;
+        const createdId = String(body?.id ?? body?.Id ?? '').trim();
+        if (!createdId) throw new Error('Conversation id missing from response');
+        convId = createdId;
         setConversationId(convId);
-        // Ensure the new conversation appears in the list immediately
-        setConversations(prev => (prev.some(c => c.id === convId) ? prev : [{ id: convId, title: null }, ...prev]));
-        try { if (convId) settings.set('chat.conversationId', convId); } catch {}
-        // Make sure hub has joined this conversation
+        setConversations(prev => (convId && prev.every(c => c.id !== convId) ? [{ id: convId, title: null }, ...prev] : prev));
+        try { settings.set('chat.conversationId', convId); } catch {}
         try { await chatHub.connectionRef.current?.invoke('JoinConversation', convId); } catch {}
       }
 
-      // Append user message immediately (no pending)
       const placeholderId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       setMessages(prev => ([
         ...prev,
-        { role: 'user', content: text, fromId: userId, fromName: 'You', timestamp: new Date().toISOString() } as MessageItemProps,
-        // Add a pending assistant placeholder with localId
-        { role: 'assistant', content: '', fromName: personas.find(p => p.id === personaId)?.name || 'Assistant', pending: true, localId: placeholderId } as any,
+        { role: 'user', content: text, fromId: auth?.userId, fromName: 'You', timestamp: new Date().toISOString() } as MessageItemProps,
+        { role: 'assistant', content: '', fromName: assistantName, pending: true, localId: placeholderId } as any,
       ]));
 
-      // Send via hub; if not connected, fall back to REST that persists both sides
-      const ok = await (async () => {
+      const sendSucceeded = await (async () => {
         if (convId) {
-          try { await chatHub.connectionRef.current?.invoke('AppendUserMessage', convId, text, personaId, providerId, modelId); return true; } catch {}
+          try {
+            await chatHub.connectionRef.current?.invoke('AppendUserMessage', convId, text, personaForAgent, providerId, modelId);
+            return true;
+          } catch {}
         }
-        return await chatHub.sendUserMessage(text, personaId, providerId, modelId);
+        return await chatHub.sendUserMessage(text, personaForAgent, providerId, modelId);
       })();
-      if (!ok && convId) {
+
+      if (!sendSucceeded && convId) {
         try {
           const resp = await fetch('/api/chat/ask-chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-            body: JSON.stringify({ ConversationId: convId, PersonaId: personaId, ProviderId: providerId, ModelId: modelId || null, Input: text, RolePlay: false })
+            body: JSON.stringify({ ConversationId: convId, ProviderId: providerId, ModelId: modelId || null, Input: text }),
           });
           if (resp.ok) {
             const data = await resp.json();
-            const reply = String((data?.content?.Reply) ?? (data?.content?.reply) ?? '').trim();
+            const reply = String(data?.content?.Reply ?? data?.content?.reply ?? '').trim();
             if (reply) {
-              setMessages(prev => prev.map(m => ((m as any).localId === placeholderId && m.pending)
+              setMessages(prev => prev.map(m => ((m as any).localId === placeholderId && (m as any).pending)
                 ? ({ ...m, pending: false, content: reply } as any)
                 : m));
-              // Title will arrive via hub ConversationUpdated; fallback fetch is no longer required
             }
           }
         } catch {}
       }
-      // Start a timeout to convert pending assistant to error only if no reply arrives
-      if (!ok) {
-        // Let the timeout handle marking error to avoid false negatives
-      }
+
       if (pendingAssistantTimerRef.current) clearTimeout(pendingAssistantTimerRef.current);
       pendingAssistantTimerRef.current = window.setTimeout(() => {
-        setMessages(prev => prev.map(m => (m.role === 'assistant' && (m as any).localId === placeholderId && m.pending)
+        setMessages(prev => prev.map(m => (m.role === 'assistant' && (m as any).localId === placeholderId && (m as any).pending)
           ? { ...m, pending: false, content: 'Error sending message.' }
-          : m
-        ));
+          : m));
         pendingAssistantTimerRef.current = null;
       }, 8000) as any;
     } catch (e: any) {
-      setError(e.message || 'Failed to send message');
-      // Do not immediately mark pending assistant as error; allow timeout to handle to avoid dupes
+      setError(e?.message || 'Failed to send message');
     } finally {
       setBusy(false);
     }
   };
 
-  // Track pending assistant timeout
-  const pendingAssistantTimerRef = useRef<number | null>(null);
+  const handleGenerateImage = async () => {
+    await generateFromChat();
+  };
 
-  // Generate image using reusable hook
-  const handleGenerateImage = async () => { await generateFromChat(); };
+  const handleRememberLast = async () => {
+    try {
+      if (!accessToken || !conversationId) return;
+      const lastAssistant = [...messages].reverse().find(m => normalizeRole(m.role) === 'assistant');
+      const content = lastAssistant?.content?.trim();
+      if (!content) return;
+      await fetch('/api/chat/remember', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ ConversationId: conversationId, AgentId: agentId, Content: content, Metadata: { Source: 'ui_remember' } }),
+      });
+    } catch {}
+  };
 
-  // Wire up modular layout with real state and handlers
   return (
     <ChatLayout
-      personas={personas}
-      personaId={personaId}
-      onPersonaChange={setPersonaId}
+      agents={agents}
+      agentId={agentId}
+      onAgentChange={nextId => {
+        if (nextId && nextId !== agentId) {
+          setAgentId(nextId);
+        }
+      }}
       providers={providers}
       models={models}
       providerId={providerId}
@@ -482,67 +494,84 @@ export default function ChatPage() {
       onSend={handleSendMessage}
       busy={busy}
       error={error || undefined}
-      loading={loading}
+      loading={loadingAgents}
       planSteps={planSteps}
       toolActions={toolActions}
       conversations={conversations}
-      conversationId={conversationId ?? ''}
-      onConversationChange={(id) => { setMessages([]); setConversationId(id); }}
+      conversationId={conversationId ?? null}
+      onConversationChange={id => {
+        setMessages([]);
+        setConversationId(id);
+      }}
       imgStyles={imgStyles}
       imgStyleId={imgStyleId}
       onImgStyleChange={setImgStyleId}
       imgPending={imgPending}
       onGenerateImage={(model, count) => { generateFromChat(model, count); }}
-      onNewConversation={() => { setMessages([]); setConversationId(null); try { settings.remove('chat.conversationId'); } catch {} }}
+      onRememberLast={handleRememberLast}
+      onNewConversation={() => {
+        setMessages([]);
+        setConversationId(null);
+        try { settings.remove('chat.conversationId'); } catch {}
+      }}
       connectionState={hubState}
       assistantVoiceName={assistantVoiceName}
       assistantGender={assistantGender}
-      onRegenerate={(idx) => {
-        // Find previous user message
-        const prevUserIdx = (() => { for (let i = idx - 1; i >= 0; i--) { if (normalizeRole(messages[i].role) === 'user') return i; } return -1; })();
-        const prevContent = prevUserIdx >= 0 ? messages[prevUserIdx].content : '';
+      onRegenerate={idx => {
+        const personaForAgent = activePersonaId;
+        if (!accessToken || !agentId || !personaForAgent) return;
+        const previousUserIdx = (() => {
+          for (let i = idx - 1; i >= 0; i -= 1) {
+            if (normalizeRole(messages[i].role) === 'user') return i;
+          }
+          return -1;
+        })();
+        const prevContent = previousUserIdx >= 0 ? messages[previousUserIdx].content : '';
         (async () => {
           try {
-            if (!accessToken) return;
             const resp = await fetch('/api/chat/ask', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-              body: JSON.stringify({ PersonaId: personaId, ProviderId: providerId, ModelId: modelId || null, Input: prevContent || 'Regenerate the previous assistant response with a different approach.', RolePlay: false })
+              body: JSON.stringify({ AgentId: agentId, PersonaId: personaForAgent, ProviderId: providerId, ModelId: modelId || null, Input: prevContent || 'Regenerate the previous assistant response with a different approach.' }),
             });
             if (!resp.ok) return;
             const data = await resp.json();
-            const text = String(data.reply || data.content || '').trim();
+            const text = String(data?.reply ?? data?.content ?? '').trim();
             if (!text) return;
-            // Persist as server version if message id is known
             const msgId = (messages[idx] as any).id as string | undefined;
             if (conversationId && msgId) {
               try {
                 await fetch(`/api/conversations/${conversationId}/messages/${msgId}/versions`, {
-                  method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ Content: text })
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+                  body: JSON.stringify({ Content: text }),
                 });
               } catch {}
             }
-            // UI will update on hub 'assistant-version-appended' event
           } catch {}
         })();
       }}
-      onPrevVersion={(idx) => {
+      onPrevVersion={idx => {
         const msgId = (messages[idx] as any).id as string | undefined;
         if (conversationId && msgId && accessToken) {
           const current = typeof (messages[idx] as any).versionIndex === 'number' ? (messages[idx] as any).versionIndex : 0;
           const target = Math.max(0, current - 1);
           fetch(`/api/conversations/${conversationId}/messages/${msgId}/active-version`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ Index: target })
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+            body: JSON.stringify({ Index: target }),
           }).catch(() => {});
         }
       }}
-      onNextVersion={(idx) => {
+      onNextVersion={idx => {
         const msgId = (messages[idx] as any).id as string | undefined;
         if (conversationId && msgId && accessToken) {
           const current = typeof (messages[idx] as any).versionIndex === 'number' ? (messages[idx] as any).versionIndex : 0;
           const target = current + 1;
           fetch(`/api/conversations/${conversationId}/messages/${msgId}/active-version`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ Index: target })
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+            body: JSON.stringify({ Index: target }),
           }).catch(() => {});
         }
       }}

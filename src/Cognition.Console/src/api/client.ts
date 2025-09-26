@@ -4,9 +4,16 @@ export async function fetchImageStyles(accessToken: string): Promise<any[]> {
   if (res.ok) return await res.json();
   return [];
 }
-export async function fetchConversations(accessToken: string, personaId?: string): Promise<any[]> {
+export async function fetchConversations(accessToken: string, options?: { agentId?: string; personaId?: string }): Promise<any[]> {
   const headers = { Authorization: `Bearer ${accessToken}` };
-  const url = personaId ? `/api/conversations?participantId=${personaId}` : `/api/conversations`;
+  const params = new URLSearchParams();
+  if (options?.agentId) {
+    params.set('agentId', options.agentId);
+  } else if (options?.personaId) {
+    params.set('participantId', options.personaId);
+  }
+  const query = params.toString();
+  const url = query ? `/api/conversations?${query}` : `/api/conversations`;
   const res = await fetch(url, { headers });
   if (res.ok) return await res.json();
   return [];

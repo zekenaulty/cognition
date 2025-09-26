@@ -18,6 +18,12 @@ The code is organized to be pragmatic, composable, and easy to extend for new pr
 - `src/Cognition.Api` — ASP.NET Core API, Swagger, JWT auth, SignalR hub, Hangfire Dashboard
   - Entry point and hosting: `src/Cognition.Api/Program.cs`
   - Controllers for chat, personas, conversations, tools, LLM, images, users, etc.
+  - API v2 (agent-centric):
+    - POST `/api/chat/ask-v2` (AgentId)
+    - POST `/api/chat/ask-with-tools-v2` (AgentId)
+    - POST `/api/chat/ask-chat-v2` (ConversationId only)
+    - POST `/api/conversations/v2` (create bound to AgentId)
+    - v1 personaId endpoints are deprecated and return `Deprecation`/`Sunset` headers with `Link: rel=alternate` to v2
   - Infrastructure: JWT helpers, password hashing, Swagger filters, Hangfire wiring
 - `src/Cognition.Jobs` — Background worker (Hangfire + Rebus)
   - Event handlers for planning and tool execution, SignalR notifier

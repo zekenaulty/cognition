@@ -12,6 +12,9 @@ public class ConversationMessage : BaseEntity
     public Guid? ToPersonaId { get; set; }
     public Modules.Personas.Persona? ToPersona { get; set; }
 
+    public Guid FromAgentId { get; set; }
+    public Modules.Agents.Agent FromAgent { get; set; } = null!;
+
     public Guid? CreatedByUserId { get; set; }
 
     public ChatRole Role { get; set; }

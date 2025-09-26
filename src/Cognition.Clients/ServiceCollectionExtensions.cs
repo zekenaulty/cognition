@@ -19,6 +19,8 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient("llm");
         services.AddScoped<ILLMClientFactory, LLMClientFactory>();
         services.AddScoped<ILLMProviderResolver, LLMProviderResolver>();
+        // Embeddings client (OpenAI)
+        services.AddHttpClient<IEmbeddingsClient, OpenAIEmbeddingsClient>();
         services.AddHttpClient<IImageClient, OpenAIImageClient>(c =>
         {
             // Allow long-running image generation (up to 10 minutes)
