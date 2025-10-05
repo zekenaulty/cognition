@@ -82,20 +82,17 @@ public class CognitionDbContext : DbContext
 
     // Fiction module
     public DbSet<FictionProject> FictionProjects => Set<FictionProject>();
-    public DbSet<StyleGuide> StyleGuides => Set<StyleGuide>();
-    public DbSet<GlossaryTerm> GlossaryTerms => Set<GlossaryTerm>();
-    public DbSet<WorldAsset> WorldAssets => Set<WorldAsset>();
-    public DbSet<WorldAssetVersion> WorldAssetVersions => Set<WorldAssetVersion>();
-    public DbSet<CanonRule> CanonRules => Set<CanonRule>();
-    public DbSet<Source> Sources => Set<Source>();
-    public DbSet<PlotArc> PlotArcs => Set<PlotArc>();
-    public DbSet<OutlineNode> OutlineNodes => Set<OutlineNode>();
-    public DbSet<OutlineNodeVersion> OutlineNodeVersions => Set<OutlineNodeVersion>();
-    public DbSet<TimelineEvent> TimelineEvents => Set<TimelineEvent>();
-    public DbSet<TimelineEventAsset> TimelineEventAssets => Set<TimelineEventAsset>();
-    public DbSet<DraftSegment> DraftSegments => Set<DraftSegment>();
-    public DbSet<DraftSegmentVersion> DraftSegmentVersions => Set<DraftSegmentVersion>();
-    public DbSet<Annotation> Annotations => Set<Annotation>();
+    public DbSet<FictionPlan> FictionPlans => Set<FictionPlan>();
+    public DbSet<FictionPlanPass> FictionPlanPasses => Set<FictionPlanPass>();
+    public DbSet<FictionPlanCheckpoint> FictionPlanCheckpoints => Set<FictionPlanCheckpoint>();
+    public DbSet<FictionChapterBlueprint> FictionChapterBlueprints => Set<FictionChapterBlueprint>();
+    public DbSet<FictionChapterScroll> FictionChapterScrolls => Set<FictionChapterScroll>();
+    public DbSet<FictionChapterSection> FictionChapterSections => Set<FictionChapterSection>();
+    public DbSet<FictionChapterScene> FictionChapterScenes => Set<FictionChapterScene>();
+    public DbSet<FictionPlanTranscript> FictionPlanTranscripts => Set<FictionPlanTranscript>();
+    public DbSet<FictionStoryMetric> FictionStoryMetrics => Set<FictionStoryMetric>();
+    public DbSet<FictionWorldBible> FictionWorldBibles => Set<FictionWorldBible>();
+    public DbSet<FictionWorldBibleEntry> FictionWorldBibleEntries => Set<FictionWorldBibleEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -186,193 +183,6 @@ public class CognitionDbContext : DbContext
             }
         }
 
-        // Project Fiction entities to Knowledge on save (append/update KnowledgeItems)
-        await ProjectFictionToKnowledgeAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task ProjectFictionToKnowledgeAsync(CancellationToken cancellationToken)
-    {
-        // GlossaryTerm -> KnowledgeItem (KeywordDefinition)
-        var newTerms = ChangeTracker.Entries<Cognition.Data.Relational.Modules.Fiction.GlossaryTerm>()
-            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
-            .ToList();
-        foreach (var entry in newTerms)
-        {
-            var term = entry.Entity;
-            var ki = term.KnowledgeItemId.HasValue
-                ? await Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().FirstOrDefaultAsync(x => x.Id == term.KnowledgeItemId.Value, cancellationToken)
-                : null;
-            if (ki is null)
-            {
-                ki = new Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem
-                {
-                    ContentType = Cognition.Data.Relational.Modules.Knowledge.KnowledgeContentType.KeywordDefinition,
-                    CreatedAtUtc = DateTime.UtcNow
-                };
-                Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().Add(ki);
-                term.KnowledgeItemId = ki.Id;
-            }
-            ki.Content = term.Definition;
-            ki.Categories = new[] { "fiction", "glossary" };
-            ki.Keywords = new[] { term.Term };
-            ki.Source = $"project:{term.FictionProjectId}";
-            ki.Timestamp = DateTime.UtcNow;
-            ki.Properties = new Dictionary<string, object?>
-            {
-                ["term"] = term.Term,
-                ["aliases"] = term.Aliases,
-                ["domain"] = term.Domain,
-                ["projectId"] = term.FictionProjectId
-            };
-        }
-
-        // CanonRule -> KnowledgeItem (Fact)
-        var canonEntries = ChangeTracker.Entries<Cognition.Data.Relational.Modules.Fiction.CanonRule>()
-            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
-            .ToList();
-        foreach (var entry in canonEntries)
-        {
-            var rule = entry.Entity;
-            var ki = rule.KnowledgeItemId.HasValue
-                ? await Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().FirstOrDefaultAsync(x => x.Id == rule.KnowledgeItemId.Value, cancellationToken)
-                : null;
-            if (ki is null)
-            {
-                ki = new Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem
-                {
-                    ContentType = Cognition.Data.Relational.Modules.Knowledge.KnowledgeContentType.Fact,
-                    CreatedAtUtc = DateTime.UtcNow
-                };
-                Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().Add(ki);
-                rule.KnowledgeItemId = ki.Id;
-            }
-            ki.Content = Newtonsoft.Json.JsonConvert.SerializeObject(rule.Value ?? new Dictionary<string, object?>());
-            ki.Categories = new[] { "fiction", "canon", rule.Scope.ToString() };
-            ki.Keywords = new[] { rule.Key };
-            ki.Source = $"project:{rule.FictionProjectId}";
-            ki.Timestamp = DateTime.UtcNow;
-            ki.Properties = new Dictionary<string, object?>
-            {
-                ["scope"] = rule.Scope.ToString(),
-                ["key"] = rule.Key,
-                ["evidence"] = rule.Evidence,
-                ["confidence"] = rule.Confidence,
-                ["plotArcId"] = rule.PlotArcId,
-                ["projectId"] = rule.FictionProjectId
-            };
-        }
-
-        // WorldAssetVersion -> KnowledgeItem (Concept)
-        var wavEntries = ChangeTracker.Entries<Cognition.Data.Relational.Modules.Fiction.WorldAssetVersion>()
-            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
-            .ToList();
-        foreach (var entry in wavEntries)
-        {
-            var wav = entry.Entity;
-            await Entry(wav).Reference(x => x.WorldAsset).LoadAsync(cancellationToken);
-            var asset = wav.WorldAsset;
-            var ki = wav.KnowledgeItemId.HasValue
-                ? await Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().FirstOrDefaultAsync(x => x.Id == wav.KnowledgeItemId.Value, cancellationToken)
-                : null;
-            if (ki is null)
-            {
-                ki = new Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem
-                {
-                    ContentType = Cognition.Data.Relational.Modules.Knowledge.KnowledgeContentType.Concept,
-                    CreatedAtUtc = DateTime.UtcNow
-                };
-                Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().Add(ki);
-                wav.KnowledgeItemId = ki.Id;
-            }
-            var content = wav.Content ?? new Dictionary<string, object?>();
-            ki.Content = Newtonsoft.Json.JsonConvert.SerializeObject(content);
-            ki.Categories = new[] { "fiction", "world", asset.Type.ToString() };
-            ki.Keywords = new[] { asset.Name };
-            ki.Source = $"project:{asset.FictionProjectId}";
-            ki.Timestamp = DateTime.UtcNow;
-            ki.Properties = new Dictionary<string, object?>
-            {
-                ["assetId"] = asset.Id,
-                ["assetType"] = asset.Type.ToString(),
-                ["assetName"] = asset.Name,
-                ["versionIndex"] = wav.VersionIndex,
-                ["projectId"] = asset.FictionProjectId
-            };
-        }
-
-        // OutlineNodeVersion -> KnowledgeItem (Summary)
-        var onvEntries = ChangeTracker.Entries<Cognition.Data.Relational.Modules.Fiction.OutlineNodeVersion>()
-            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
-            .ToList();
-        foreach (var entry in onvEntries)
-        {
-            var onv = entry.Entity;
-            await Entry(onv).Reference(x => x.OutlineNode).LoadAsync(cancellationToken);
-            var node = onv.OutlineNode;
-            var ki = onv.KnowledgeItemId.HasValue
-                ? await Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().FirstOrDefaultAsync(x => x.Id == onv.KnowledgeItemId.Value, cancellationToken)
-                : null;
-            if (ki is null)
-            {
-                ki = new Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem
-                {
-                    ContentType = Cognition.Data.Relational.Modules.Knowledge.KnowledgeContentType.Summary,
-                    CreatedAtUtc = DateTime.UtcNow
-                };
-                Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().Add(ki);
-                onv.KnowledgeItemId = ki.Id;
-            }
-            var beats = onv.Beats ?? new Dictionary<string, object?>();
-            ki.Content = Newtonsoft.Json.JsonConvert.SerializeObject(beats);
-            ki.Categories = new[] { "fiction", "outline", node.Type.ToString() };
-            ki.Keywords = new[] { node.Title };
-            ki.Source = $"project:{node.FictionProjectId}";
-            ki.Timestamp = DateTime.UtcNow;
-            ki.Properties = new Dictionary<string, object?>
-            {
-                ["outlineNodeId"] = node.Id,
-                ["type"] = node.Type.ToString(),
-                ["title"] = node.Title,
-                ["sequenceIndex"] = node.SequenceIndex,
-                ["versionIndex"] = onv.VersionIndex,
-                ["projectId"] = node.FictionProjectId
-            };
-        }
-
-        // DraftSegmentVersion -> KnowledgeItem (Other)
-        var dsvEntries = ChangeTracker.Entries<Cognition.Data.Relational.Modules.Fiction.DraftSegmentVersion>()
-            .Where(e => e.State == EntityState.Added || e.State == EntityState.Modified)
-            .ToList();
-        foreach (var entry in dsvEntries)
-        {
-            var dsv = entry.Entity;
-            await Entry(dsv).Reference(x => x.DraftSegment).LoadAsync(cancellationToken);
-            var seg = dsv.DraftSegment;
-            var ki = dsv.KnowledgeItemId.HasValue
-                ? await Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().FirstOrDefaultAsync(x => x.Id == dsv.KnowledgeItemId.Value, cancellationToken)
-                : null;
-            if (ki is null)
-            {
-                ki = new Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem
-                {
-                    ContentType = Cognition.Data.Relational.Modules.Knowledge.KnowledgeContentType.Other,
-                    CreatedAtUtc = DateTime.UtcNow
-                };
-                Set<Cognition.Data.Relational.Modules.Knowledge.KnowledgeItem>().Add(ki);
-                dsv.KnowledgeItemId = ki.Id;
-            }
-            ki.Content = seg.Title + "\n\n" + (dsv.BodyMarkdown ?? string.Empty);
-            ki.Categories = new[] { "fiction", "draft", "scene" };
-            ki.Keywords = new[] { seg.Title };
-            ki.Source = $"project:{seg.FictionProjectId}";
-            ki.Timestamp = DateTime.UtcNow;
-            ki.Properties = new Dictionary<string, object?>
-            {
-                ["draftSegmentId"] = seg.Id,
-                ["outlineNodeId"] = seg.OutlineNodeId,
-                ["versionIndex"] = dsv.VersionIndex,
-                ["projectId"] = seg.FictionProjectId
-            };
-        }
-    }
 }

@@ -57,110 +57,20 @@ END $$;");
                     Param("mode","string", false)
                 }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "WorldbuilderTool",
-                classPath: "Cognition.Clients.Tools.Fiction.WorldbuilderTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("projectId","guid", true),
-                    Param("type","string", true),
-                    Param("name","string", true),
-                    Param("personaId","guid", false),
-                    Param("description","string", false),
-                    Param("content","object", false),
-                    Param("autoSeedGlossary","bool", false),
-                    Param("providerId","guid", false),
-                    Param("modelId","guid", false)
-                }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "LoreKeeperTool",
-                classPath: "Cognition.Clients.Tools.Fiction.LoreKeeperTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("projectId","guid", true),
-                    Param("styleRules","object", false),
-                    Param("terms","object", false),
-                    Param("canon","object", false),
-                    Param("extractText","string", false),
-                    Param("providerId","guid", false),
-                    Param("modelId","guid", false)
-                }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "OutlinerTool",
-                classPath: "Cognition.Clients.Tools.Fiction.OutlinerTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("projectId","guid", true),
-                    Param("nodeType","string", true),
-                    Param("title","string", true),
-                    Param("parentId","guid", false),
-                    Param("plotArcId","guid", false),
-                    Param("sequenceIndex","int", false),
-                    Param("beats","object", false),
-                    Param("providerId","guid", false),
-                    Param("modelId","guid", false),
-                    Param("autoBeats","bool", false)
-                }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "SceneDraftTool",
-                classPath: "Cognition.Clients.Tools.Fiction.SceneDraftTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("projectId","guid", true),
-                    Param("outlineNodeId","guid", false),
-                    Param("draftSegmentId","guid", false),
-                    Param("prompt","string", false),
-                    Param("providerId","guid", false),
-                    Param("modelId","guid", false)
-                }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "FactCheckerTool",
-                classPath: "Cognition.Clients.Tools.Fiction.FactCheckerTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("projectId","guid", true),
-                    Param("draftSegmentVersionId","guid", true)
-                }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "RewriterTool",
-                classPath: "Cognition.Clients.Tools.Fiction.RewriterTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("draftSegmentId","guid", false),
-                    Param("draftSegmentVersionId","guid", false),
-                    Param("mode","string", false),
-                    Param("providerId","guid", false),
-                    Param("modelId","guid", false)
-                }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "NPCDesignerTool",
-                classPath: "Cognition.Clients.Tools.Fiction.NPCDesignerTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("projectId","guid", true),
-                    Param("personaId","guid", true),
-                    Param("name","string", false),
-                    Param("content","object", false)
-                }));
 
-            migrationBuilder.Sql(SeedToolSql(
-                name: "NPCSimulatorTool",
-                classPath: "Cognition.Clients.Tools.Fiction.NPCSimulatorTool, Cognition.Clients",
-                parameters: new[] {
-                    Param("projectId","guid", true),
-                    Param("characterAssetId","guid", true),
-                    Param("outlineNodeId","guid", false),
-                    Param("goal","string", false),
-                    Param("constraints","string", false),
-                    Param("stakes","string", false)
-                }));
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             // Remove seeded tools and related parameters/provider supports
             var toolNames = new[] {
-                "Knowledge Query","Memory Write","Text Transform",
-                "WorldbuilderTool","LoreKeeperTool","OutlinerTool","SceneDraftTool","FactCheckerTool","RewriterTool","NPCDesignerTool","NPCSimulatorTool"
+                "Knowledge Query","Memory Write","Text Transform"
             };
             foreach (var name in toolNames)
             {

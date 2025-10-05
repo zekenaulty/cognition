@@ -15,9 +15,6 @@ public class FictionChapterScene : BaseEntity
 
     public FictionSceneStatus Status { get; set; } = FictionSceneStatus.Pending;
 
-    public Guid? DraftSegmentVersionId { get; set; }
-    public DraftSegmentVersion? DraftSegmentVersion { get; set; }
-
     public Guid? DerivedFromSceneId { get; set; }
     public FictionChapterScene? DerivedFromScene { get; set; }
 

@@ -728,214 +728,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.ToTable("feature_flags", (string)null);
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.Annotation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Details")
-                        .HasColumnType("text")
-                        .HasColumnName("details");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<string>("Message")
-                        .HasColumnType("text")
-                        .HasColumnName("message");
-
-                    b.Property<bool>("Resolved")
-                        .HasColumnType("boolean")
-                        .HasColumnName("resolved");
-
-                    b.Property<string>("Severity")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("severity");
-
-                    b.Property<Guid>("TargetId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("target_id");
-
-                    b.Property<string>("TargetType")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("target_type");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("type");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_annotations");
-
-                    b.HasIndex("FictionProjectId", "TargetType", "TargetId")
-                        .HasDatabaseName("ix_annotations_target");
-
-                    b.ToTable("annotations", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.CanonRule", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<double>("Confidence")
-                        .HasColumnType("double precision")
-                        .HasColumnName("confidence");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Evidence")
-                        .HasColumnType("text")
-                        .HasColumnName("evidence");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("key");
-
-                    b.Property<Guid?>("KnowledgeItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("knowledge_item_id");
-
-                    b.Property<Guid?>("PlotArcId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("plot_arc_id");
-
-                    b.Property<string>("Scope")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("scope");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<Dictionary<string, object>>("Value")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("value");
-
-                    b.HasKey("Id")
-                        .HasName("pk_canon_rules");
-
-                    b.HasIndex("PlotArcId");
-
-                    b.HasIndex("FictionProjectId", "Key")
-                        .HasDatabaseName("ix_canon_rules_project_key");
-
-                    b.ToTable("canon_rules", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.DraftSegment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<int>("ActiveVersionIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("active_version_index");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<Guid?>("OutlineNodeId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("outline_node_id");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_draft_segments");
-
-                    b.HasIndex("FictionProjectId");
-
-                    b.HasIndex("OutlineNodeId");
-
-                    b.ToTable("draft_segments", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.DraftSegmentVersion", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("BodyMarkdown")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("body_markdown");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("DraftSegmentId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("draft_segment_id");
-
-                    b.Property<Guid?>("KnowledgeItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("knowledge_item_id");
-
-                    b.Property<Dictionary<string, object>>("Metrics")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("metrics");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("VersionIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("version_index");
-
-                    b.HasKey("Id")
-                        .HasName("pk_draft_segment_versions");
-
-                    b.HasIndex("DraftSegmentId", "VersionIndex")
-                        .IsUnique()
-                        .HasDatabaseName("ux_draft_segment_versions_segment_index");
-
-                    b.ToTable("draft_segment_versions", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
+                                                            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -1028,10 +821,6 @@ namespace Cognition.Data.Relational.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
-                    b.Property<Guid?>("DraftSegmentVersionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("draft_segment_version_id");
-
                     b.Property<Guid>("FictionChapterSectionId")
                         .HasColumnType("uuid")
                         .HasColumnName("fiction_chapter_section_id");
@@ -1067,8 +856,6 @@ namespace Cognition.Data.Relational.Migrations
                         .HasName("pk_fiction_chapter_scenes");
 
                     b.HasIndex("DerivedFromSceneId");
-
-                    b.HasIndex("DraftSegmentVersionId");
 
                     b.HasIndex("FictionChapterSectionId", "SceneIndex")
                         .HasDatabaseName("ix_fiction_chapter_scenes_section_index");
@@ -1466,10 +1253,6 @@ namespace Cognition.Data.Relational.Migrations
                         .HasColumnType("text")
                         .HasColumnName("logline");
 
-                    b.Property<Guid?>("PrimaryStyleGuideId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("primary_style_guide_id");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
@@ -1486,8 +1269,6 @@ namespace Cognition.Data.Relational.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_fiction_projects");
-
-                    b.HasIndex("PrimaryStyleGuideId");
 
                     b.ToTable("fiction_projects", (string)null);
                 });
@@ -1506,10 +1287,6 @@ namespace Cognition.Data.Relational.Migrations
                     b.Property<Dictionary<string, object>>("Data")
                         .HasColumnType("jsonb")
                         .HasColumnName("data");
-
-                    b.Property<Guid?>("DraftSegmentVersionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("draft_segment_version_id");
 
                     b.Property<Guid?>("FictionChapterSceneId")
                         .HasColumnType("uuid")
@@ -1538,8 +1315,6 @@ namespace Cognition.Data.Relational.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_fiction_story_metrics");
-
-                    b.HasIndex("DraftSegmentVersionId");
 
                     b.HasIndex("FictionChapterSceneId");
 
@@ -1666,476 +1441,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.ToTable("fiction_world_bible_entries", (string)null);
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.GlossaryTerm", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.PrimitiveCollection<string[]>("Aliases")
-                        .HasColumnType("text[]")
-                        .HasColumnName("aliases");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Definition")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("definition");
-
-                    b.Property<string>("Domain")
-                        .HasColumnType("text")
-                        .HasColumnName("domain");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<Guid?>("KnowledgeItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("knowledge_item_id");
-
-                    b.Property<string>("Term")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("term");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_glossary_terms");
-
-                    b.HasIndex("FictionProjectId", "Term")
-                        .IsUnique()
-                        .HasDatabaseName("ux_glossary_terms_project_term");
-
-                    b.ToTable("glossary_terms", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.OutlineNode", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<int>("ActiveVersionIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("active_version_index");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<Guid?>("ParentId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("parent_id");
-
-                    b.Property<Guid?>("PlotArcId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("plot_arc_id");
-
-                    b.Property<int>("SequenceIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("sequence_index");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("type");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_outline_nodes");
-
-                    b.HasIndex("ParentId");
-
-                    b.HasIndex("PlotArcId");
-
-                    b.HasIndex("FictionProjectId", "Type", "SequenceIndex")
-                        .HasDatabaseName("ix_outline_nodes_project_type_seq");
-
-                    b.ToTable("outline_nodes", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.OutlineNodeVersion", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Dictionary<string, object>>("Beats")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("beats");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Goals")
-                        .HasColumnType("text")
-                        .HasColumnName("goals");
-
-                    b.Property<Guid?>("KnowledgeItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("knowledge_item_id");
-
-                    b.Property<Guid>("OutlineNodeId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("outline_node_id");
-
-                    b.Property<string>("Pov")
-                        .HasColumnType("text")
-                        .HasColumnName("pov");
-
-                    b.Property<string>("Status")
-                        .HasColumnType("text")
-                        .HasColumnName("status");
-
-                    b.Property<string>("Tension")
-                        .HasColumnType("text")
-                        .HasColumnName("tension");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("VersionIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("version_index");
-
-                    b.HasKey("Id")
-                        .HasName("pk_outline_node_versions");
-
-                    b.HasIndex("OutlineNodeId", "VersionIndex")
-                        .IsUnique()
-                        .HasDatabaseName("ux_outline_node_versions_node_index");
-
-                    b.ToTable("outline_node_versions", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.PlotArc", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Conflict")
-                        .HasColumnType("text")
-                        .HasColumnName("conflict");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<string>("Goal")
-                        .HasColumnType("text")
-                        .HasColumnName("goal");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Premise")
-                        .HasColumnType("text")
-                        .HasColumnName("premise");
-
-                    b.Property<string>("Resolution")
-                        .HasColumnType("text")
-                        .HasColumnName("resolution");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_plot_arcs");
-
-                    b.HasIndex("FictionProjectId");
-
-                    b.ToTable("plot_arcs", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.Source", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Citation")
-                        .HasColumnType("text")
-                        .HasColumnName("citation");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<DateTime?>("PublishedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("published_at");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<string>("Url")
-                        .HasColumnType("text")
-                        .HasColumnName("url");
-
-                    b.HasKey("Id")
-                        .HasName("pk_sources");
-
-                    b.HasIndex("FictionProjectId");
-
-                    b.ToTable("sources", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.StyleGuide", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("name");
-
-                    b.Property<Dictionary<string, object>>("Rules")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("rules");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_style_guides");
-
-                    b.HasIndex("FictionProjectId");
-
-                    b.ToTable("style_guides", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.TimelineEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text")
-                        .HasColumnName("description");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<string>("InWorldDate")
-                        .HasColumnType("text")
-                        .HasColumnName("in_world_date");
-
-                    b.Property<int?>("Index")
-                        .HasColumnType("integer")
-                        .HasColumnName("index");
-
-                    b.Property<Guid?>("OutlineNodeId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("outline_node_id");
-
-                    b.Property<string>("Title")
-                        .HasColumnType("text")
-                        .HasColumnName("title");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_timeline_events");
-
-                    b.HasIndex("FictionProjectId");
-
-                    b.HasIndex("OutlineNodeId");
-
-                    b.ToTable("timeline_events", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.TimelineEventAsset", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("TimelineEventId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("timeline_event_id");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<Guid>("WorldAssetId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("world_asset_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_timeline_event_assets");
-
-                    b.HasIndex("WorldAssetId");
-
-                    b.HasIndex("TimelineEventId", "WorldAssetId")
-                        .IsUnique()
-                        .HasDatabaseName("ux_timeline_event_assets_event_asset");
-
-                    b.ToTable("timeline_event_assets", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.WorldAsset", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<int>("ActiveVersionIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("active_version_index");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid>("FictionProjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("fiction_project_id");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("name");
-
-                    b.Property<Guid?>("PersonaId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("persona_id");
-
-                    b.Property<string>("Slug")
-                        .HasColumnType("text")
-                        .HasColumnName("slug");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("type");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.HasKey("Id")
-                        .HasName("pk_world_assets");
-
-                    b.HasIndex("FictionProjectId", "Type", "Name")
-                        .HasDatabaseName("ix_world_assets_project_type_name");
-
-                    b.ToTable("world_assets", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.WorldAssetVersion", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Dictionary<string, object>>("Content")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("content");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<Guid?>("KnowledgeItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("knowledge_item_id");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc");
-
-                    b.Property<int>("VersionIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("version_index");
-
-                    b.Property<Guid>("WorldAssetId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("world_asset_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_world_asset_versions");
-
-                    b.HasIndex("WorldAssetId", "VersionIndex")
-                        .IsUnique()
-                        .HasDatabaseName("ux_world_asset_versions_asset_index");
-
-                    b.ToTable("world_asset_versions", (string)null);
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
+                                                                                                                                    modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -4169,69 +3475,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Conversation");
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.Annotation", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany()
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_annotations_project");
-
-                    b.Navigation("FictionProject");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.CanonRule", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany()
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_canon_rules_project");
-
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.PlotArc", "PlotArc")
-                        .WithMany()
-                        .HasForeignKey("PlotArcId")
-                        .HasConstraintName("fk_canon_rules_plot_arc");
-
-                    b.Navigation("FictionProject");
-
-                    b.Navigation("PlotArc");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.DraftSegment", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany()
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_draft_segments_project");
-
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.OutlineNode", "OutlineNode")
-                        .WithMany()
-                        .HasForeignKey("OutlineNodeId")
-                        .HasConstraintName("fk_draft_segments_outline_node");
-
-                    b.Navigation("FictionProject");
-
-                    b.Navigation("OutlineNode");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.DraftSegmentVersion", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.DraftSegment", "DraftSegment")
-                        .WithMany("Versions")
-                        .HasForeignKey("DraftSegmentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_draft_segment_versions_segment");
-
-                    b.Navigation("DraftSegment");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
+                                                            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
                 {
                     b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionPlan", "FictionPlan")
                         .WithMany("ChapterBlueprints")
@@ -4257,11 +3501,6 @@ namespace Cognition.Data.Relational.Migrations
                         .HasForeignKey("DerivedFromSceneId")
                         .HasConstraintName("fk_fiction_chapter_scenes_parent");
 
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.DraftSegmentVersion", "DraftSegmentVersion")
-                        .WithMany()
-                        .HasForeignKey("DraftSegmentVersionId")
-                        .HasConstraintName("fk_fiction_chapter_scenes_draft_segment_version");
-
                     b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionChapterSection", "FictionChapterSection")
                         .WithMany("Scenes")
                         .HasForeignKey("FictionChapterSectionId")
@@ -4270,8 +3509,6 @@ namespace Cognition.Data.Relational.Migrations
                         .HasConstraintName("fk_fiction_chapter_scenes_section");
 
                     b.Navigation("DerivedFromScene");
-
-                    b.Navigation("DraftSegmentVersion");
 
                     b.Navigation("FictionChapterSection");
                 });
@@ -4376,23 +3613,8 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("FictionPlan");
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionProject", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.StyleGuide", "PrimaryStyleGuide")
-                        .WithMany()
-                        .HasForeignKey("PrimaryStyleGuideId")
-                        .HasConstraintName("fk_fiction_projects_primary_style_guide");
-
-                    b.Navigation("PrimaryStyleGuide");
-                });
-
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionStoryMetric", b =>
                 {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.DraftSegmentVersion", "DraftSegmentVersion")
-                        .WithMany()
-                        .HasForeignKey("DraftSegmentVersionId")
-                        .HasConstraintName("fk_fiction_story_metrics_draft_segment_version");
-
                     b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionChapterScene", "FictionChapterScene")
                         .WithMany("StoryMetrics")
                         .HasForeignKey("FictionChapterSceneId")
@@ -4404,8 +3626,6 @@ namespace Cognition.Data.Relational.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_fiction_story_metrics_plan");
-
-                    b.Navigation("DraftSegmentVersion");
 
                     b.Navigation("FictionChapterScene");
 
@@ -4457,157 +3677,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("FictionWorldBible");
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.GlossaryTerm", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany("GlossaryTerms")
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_glossary_terms_project");
-
-                    b.Navigation("FictionProject");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.OutlineNode", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany()
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_outline_nodes_project");
-
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.OutlineNode", "Parent")
-                        .WithMany("Children")
-                        .HasForeignKey("ParentId")
-                        .HasConstraintName("fk_outline_nodes_parent");
-
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.PlotArc", "PlotArc")
-                        .WithMany("OutlineNodes")
-                        .HasForeignKey("PlotArcId")
-                        .HasConstraintName("fk_outline_nodes_plot_arc");
-
-                    b.Navigation("FictionProject");
-
-                    b.Navigation("Parent");
-
-                    b.Navigation("PlotArc");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.OutlineNodeVersion", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.OutlineNode", "OutlineNode")
-                        .WithMany("Versions")
-                        .HasForeignKey("OutlineNodeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_outline_node_versions_node");
-
-                    b.Navigation("OutlineNode");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.PlotArc", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany("PlotArcs")
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_plot_arcs_project");
-
-                    b.Navigation("FictionProject");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.Source", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany()
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_sources_project");
-
-                    b.Navigation("FictionProject");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.StyleGuide", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany("StyleGuides")
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_style_guides_project");
-
-                    b.Navigation("FictionProject");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.TimelineEvent", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany()
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_timeline_events_project");
-
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.OutlineNode", "OutlineNode")
-                        .WithMany()
-                        .HasForeignKey("OutlineNodeId")
-                        .HasConstraintName("fk_timeline_events_outline_node");
-
-                    b.Navigation("FictionProject");
-
-                    b.Navigation("OutlineNode");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.TimelineEventAsset", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.TimelineEvent", "TimelineEvent")
-                        .WithMany("Assets")
-                        .HasForeignKey("TimelineEventId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_timeline_event_assets_event");
-
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.WorldAsset", "WorldAsset")
-                        .WithMany()
-                        .HasForeignKey("WorldAssetId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_timeline_event_assets_asset");
-
-                    b.Navigation("TimelineEvent");
-
-                    b.Navigation("WorldAsset");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.WorldAsset", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionProject", "FictionProject")
-                        .WithMany("WorldAssets")
-                        .HasForeignKey("FictionProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_world_assets_project");
-
-                    b.Navigation("FictionProject");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.WorldAssetVersion", b =>
-                {
-                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.WorldAsset", "WorldAsset")
-                        .WithMany("Versions")
-                        .HasForeignKey("WorldAssetId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_world_asset_versions_asset");
-
-                    b.Navigation("WorldAsset");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
+                                                                                                                                    modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
                 {
                     b.HasOne("Cognition.Data.Relational.Modules.Conversations.Conversation", "Conversation")
                         .WithMany()
@@ -4969,12 +4039,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Tasks");
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.DraftSegment", b =>
-                {
-                    b.Navigation("Versions");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
+                        modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
                 {
                     b.Navigation("Scrolls");
                 });
@@ -5020,14 +4085,6 @@ namespace Cognition.Data.Relational.Migrations
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionProject", b =>
                 {
                     b.Navigation("FictionPlans");
-
-                    b.Navigation("GlossaryTerms");
-
-                    b.Navigation("PlotArcs");
-
-                    b.Navigation("StyleGuides");
-
-                    b.Navigation("WorldAssets");
                 });
 
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionWorldBible", b =>
@@ -5035,29 +4092,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Entries");
                 });
 
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.OutlineNode", b =>
-                {
-                    b.Navigation("Children");
-
-                    b.Navigation("Versions");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.PlotArc", b =>
-                {
-                    b.Navigation("OutlineNodes");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.TimelineEvent", b =>
-                {
-                    b.Navigation("Assets");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.WorldAsset", b =>
-                {
-                    b.Navigation("Versions");
-                });
-
-            modelBuilder.Entity("Cognition.Data.Relational.Modules.Instructions.Instruction", b =>
+                                                            modelBuilder.Entity("Cognition.Data.Relational.Modules.Instructions.Instruction", b =>
                 {
                     b.Navigation("InstructionSetItems");
                 });
