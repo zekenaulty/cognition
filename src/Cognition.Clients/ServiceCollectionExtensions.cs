@@ -1,6 +1,7 @@
 using Cognition.Clients.Images;
 using Cognition.Clients.LLM;
 using Cognition.Clients.Tools;
+using Cognition.Clients.Tools.Fiction.Weaver;
 using Microsoft.Extensions.DependencyInjection;
 using Cognition.Clients.Agents;
 using Polly;
@@ -28,6 +29,12 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<IImageService, ImageService>();
         services.AddScoped<IAgentService, AgentService>();
+        services.AddScoped<IFictionPhaseRunner, VisionPlannerRunner>();
+        services.AddScoped<IFictionPhaseRunner, WorldBibleManagerRunner>();
+        services.AddScoped<IFictionPhaseRunner, IterativePlannerRunner>();
+        services.AddScoped<IFictionPhaseRunner, ChapterArchitectRunner>();
+        services.AddScoped<IFictionPhaseRunner, ScrollRefinerRunner>();
+        services.AddScoped<IFictionPhaseRunner, SceneWeaverRunner>();
         return services;
     }
 
@@ -54,3 +61,7 @@ public static class ServiceCollectionExtensions
 
     // Per-request resiliency is handled in the client implementations for portability.
 }
+
+
+
+

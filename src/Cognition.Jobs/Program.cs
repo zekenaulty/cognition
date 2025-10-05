@@ -74,10 +74,15 @@ builder.Services.AddRebus(config =>
 // Register Db + clients so jobs can use the same services as API
 builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddCognitionClients();
+builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
+
+var workflowEventsEnabled = builder.Configuration.GetValue("WorkflowEvents:Enabled", true);
+builder.Services.AddScoped(sp => new WorkflowEventLogger(sp.GetRequiredService<CognitionDbContext>(), workflowEventsEnabled));
 
 
 // Register example + concrete jobs and recurring registration
 builder.Services.AddTransient<TextJobs>();
+builder.Services.AddTransient<FictionWeaverJobs>();
 builder.Services.AddTransient<ImageJobs>();
 builder.Services.AddHostedService<RecurringJobsRegistrar>();
 

@@ -29,6 +29,7 @@ namespace Cognition.Jobs
             {
                 await _connection.StartAsync();
             }
+
             if (messageId.HasValue)
             {
                 await _connection.InvokeAsync("SendAssistantMessage", conversationId.ToString(), personaId.ToString(), content, messageId.Value.ToString());
@@ -45,7 +46,18 @@ namespace Cognition.Jobs
             {
                 await _connection.StartAsync();
             }
+
             await _connection.InvokeAsync("SendAssistantDelta", conversationId.ToString(), personaId.ToString(), delta);
+        }
+
+        public async Task NotifyPlanProgressAsync(Guid conversationId, object payload)
+        {
+            if (_connection.State != HubConnectionState.Connected)
+            {
+                await _connection.StartAsync();
+            }
+
+            await _connection.InvokeAsync("SendPlanProgress", conversationId.ToString(), payload);
         }
     }
 }

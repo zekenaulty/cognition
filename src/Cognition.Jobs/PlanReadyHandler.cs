@@ -1,17 +1,28 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Cognition.Contracts.Events;
-using Rebus.Handlers;
 using Cognition.Data.Relational;
-using Cognition.Jobs;
+using Cognition.Data.Relational.Modules.Conversations;
+using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
+using Rebus.Handlers;
 
 namespace Cognition.Jobs
 {
     public class PlanReadyHandler : IHandleMessages<PlanReady>
     {
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = false
+        };
+
         private readonly CognitionDbContext _db;
         private readonly Rebus.Bus.IBus _bus;
         private readonly WorkflowEventLogger _logger;
+
         public PlanReadyHandler(CognitionDbContext db, Rebus.Bus.IBus bus, WorkflowEventLogger logger)
         {
             _db = db;
@@ -21,17 +32,120 @@ namespace Cognition.Jobs
 
         public async Task Handle(PlanReady message)
         {
-            // Update ConversationWorkflowState, emit ToolExecutionRequested
-            await _db.SaveChangesAsync(); // placeholder for workflow logic
+            var branchSlug = string.IsNullOrWhiteSpace(message.BranchSlug) ? "main" : message.BranchSlug.Trim();
 
-            // Log event
-            await _logger.LogAsync(message.ConversationId, nameof(PlanReady), JObject.FromObject(message));
+            var conversationPlan = await _db.ConversationPlans
+                .Include(p => p.Tasks)
+                .FirstOrDefaultAsync(p => p.Id == message.ConversationPlanId)
+                .ConfigureAwait(false);
+            if (conversationPlan is null)
+            {
+                throw new InvalidOperationException($"Conversation plan {message.ConversationPlanId} not found for conversation {message.ConversationId}.");
+            }
 
-            // Publish ToolExecutionRequested
-            var toolId = Guid.Empty; // TODO: set actual toolId from plan
-            var args = new System.Collections.Generic.Dictionary<string, object?>(); // TODO: set actual args from plan
-            var toolRequested = new ToolExecutionRequested(message.ConversationId, message.PersonaId, toolId, args);
-            await _bus.Publish(toolRequested);
+            var nextTask = conversationPlan.Tasks
+                .OrderBy(t => t.StepNumber)
+                .FirstOrDefault(t => string.Equals(t.Status, "Pending", StringComparison.OrdinalIgnoreCase));
+            if (nextTask is null)
+            {
+                await _logger.LogAsync(message.ConversationId, nameof(PlanReady), JObject.FromObject(new
+                {
+                    message.ConversationId,
+                    message.AgentId,
+                    message.PersonaId,
+                    message.ConversationPlanId,
+                    message.FictionPlanId,
+                    BranchSlug = branchSlug,
+                    Note = "No pending tasks remaining"
+                })).ConfigureAwait(false);
+                return;
+            }
+
+            var toolName = nextTask.ToolName;
+            if (string.IsNullOrWhiteSpace(toolName))
+            {
+                throw new InvalidOperationException($"Plan task {nextTask.Id} does not define a tool name.");
+            }
+
+            var args = ParseArgs(nextTask.ArgsJson);
+            nextTask.Status = "Requested";
+            await _db.SaveChangesAsync().ConfigureAwait(false);
+
+            var metadata = BuildMetadata(message.Metadata, conversationPlan.Id, nextTask, branchSlug);
+
+            await _logger.LogAsync(message.ConversationId, nameof(PlanReady), JObject.FromObject(new
+            {
+                message.ConversationId,
+                message.AgentId,
+                message.PersonaId,
+                message.ConversationPlanId,
+                message.FictionPlanId,
+                BranchSlug = branchSlug,
+                TaskId = nextTask.Id,
+                nextTask.StepNumber,
+                Tool = toolName,
+                Args = args
+            })).ConfigureAwait(false);
+
+            var toolRequested = new ToolExecutionRequested(
+                message.ConversationId,
+                message.AgentId,
+                message.PersonaId,
+                toolName,
+                args,
+                message.ConversationPlanId,
+                nextTask.StepNumber,
+                message.FictionPlanId,
+                branchSlug,
+                metadata);
+
+            await _bus.Publish(toolRequested).ConfigureAwait(false);
+        }
+
+        private static Dictionary<string, object?> ParseArgs(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            try
+            {
+                var dictionary = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonOptions);
+                return dictionary ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private static Dictionary<string, object?> BuildMetadata(Dictionary<string, object?>? source, Guid conversationPlanId, ConversationTask task, string branchSlug)
+        {
+            var metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["conversationPlanId"] = conversationPlanId,
+                ["taskId"] = task.Id,
+                ["stepNumber"] = task.StepNumber,
+                ["branchSlug"] = branchSlug,
+                ["toolName"] = task.ToolName,
+                ["goal"] = task.Goal
+            };
+
+            if (!string.IsNullOrWhiteSpace(task.Thought))
+            {
+                metadata["thought"] = task.Thought;
+            }
+
+            if (source is not null)
+            {
+                foreach (var kvp in source)
+                {
+                    metadata[kvp.Key] = kvp.Value;
+                }
+            }
+
+            return metadata;
         }
     }
 }

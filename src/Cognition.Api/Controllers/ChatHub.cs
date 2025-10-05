@@ -59,6 +59,11 @@ namespace Cognition.Api.Controllers
             await Clients.Group(conversationId).SendAsync("AssistantTokenDelta", evt);
         }
 
+        public async Task SendPlanProgress(string conversationId, object payload)
+        {
+            await Clients.Group(conversationId).SendAsync("FictionPhaseProgressed", payload);
+        }
+
         public async Task AppendUserMessage(string conversationId, string text, string personaId, string providerId, string? modelId)
         {
             Guid? modelGuid = null;
@@ -97,3 +102,4 @@ namespace Cognition.Api.Controllers
         }
     }
 }
+

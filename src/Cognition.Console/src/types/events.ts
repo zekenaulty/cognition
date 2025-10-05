@@ -10,26 +10,45 @@ export interface AssistantMessageAppended {
 
 export interface PlanReady {
   conversationId: string;
+  agentId: string;
   personaId: string;
+  providerId: string;
+  modelId?: string | null;
   plan: any;
+  conversationPlanId: string;
+  fictionPlanId: string;
+  branchSlug: string;
+  metadata?: Record<string, any> | null;
   timestamp: string;
 }
 
 export interface ToolExecutionRequested {
   conversationId: string;
+  agentId: string;
   personaId: string;
-  toolId: string;
+  tool: string;
   args: Record<string, any>;
+  conversationPlanId?: string | null;
+  stepNumber?: number;
+  fictionPlanId?: string | null;
+  branchSlug?: string;
+  metadata?: Record<string, any> | null;
   timestamp: string;
 }
 
 export interface ToolExecutionCompleted {
   conversationId: string;
+  agentId: string;
   personaId: string;
-  toolId: string;
+  tool: string;
   result: any;
   success: boolean;
   error?: string;
+  conversationPlanId?: string | null;
+  stepNumber?: number;
+  fictionPlanId?: string | null;
+  branchSlug?: string;
+  metadata?: Record<string, any> | null;
   timestamp: string;
 }
 

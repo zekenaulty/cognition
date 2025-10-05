@@ -1,4 +1,4 @@
-using Cognition.Data.Relational.Modules.Common;
+﻿using Cognition.Data.Relational.Modules.Common;
 
 namespace Cognition.Data.Relational.Modules.Fiction;
 
@@ -14,6 +14,7 @@ public class FictionProject : BaseEntity
     public List<StyleGuide> StyleGuides { get; set; } = [];
     public List<GlossaryTerm> GlossaryTerms { get; set; } = [];
     public List<WorldAsset> WorldAssets { get; set; } = [];
+    public List<FictionPlan> FictionPlans { get; set; } = [];
     public List<PlotArc> PlotArcs { get; set; } = [];
 }
 
@@ -23,4 +24,5 @@ public enum FictionProjectStatus
     Paused,
     Archived
 }
+
 

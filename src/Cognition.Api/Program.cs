@@ -11,6 +11,7 @@ using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Cognition.Api.Infrastructure.Swagger;
 using Cognition.Api.Infrastructure.Hangfire;
+using Cognition.Jobs;
 using Microsoft.EntityFrameworkCore;
 using Rebus.ServiceProvider;
 using Rebus.Config;
@@ -36,6 +37,7 @@ builder.Services.AddCognitionTools();
 builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Clients.Agents.AgentService>();
 // Retrieval service (scope-enforcing RAG entrypoint)
 builder.Services.AddScoped<Cognition.Clients.Retrieval.IRetrievalService, Cognition.Clients.Retrieval.RetrievalService>();
+builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Cognition.Clients.Agents;
@@ -8,6 +9,7 @@ using Rebus.Bus;
 
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
+using Cognition.Data.Relational.Modules.Fiction;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -219,6 +221,8 @@ public class ChatController : ControllerBase
 
     public record AskWithPlanRequest(
         Guid ConversationId,
+        Guid FictionPlanId,
+        string? BranchSlug,
         Guid ProviderId,
         Guid? ModelId,
         string Input,
@@ -234,14 +238,40 @@ public class ChatController : ControllerBase
     [HttpPost("ask-with-plan")]
     public async Task<IActionResult> AskWithPlan([FromBody] AskWithPlanRequest req)
     {
-        // Persist user message
-        var agentPersona = await _db.Conversations.AsNoTracking()
-            .Where(c => c.Id == req.ConversationId)
-            .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => new { a.Id, a.PersonaId })
-            .FirstOrDefaultAsync();
-        if (agentPersona == null) return NotFound(new { code = "conversation_or_agent_not_found", message = "Conversation/Agent not found" });
-        var planFromAgentId = agentPersona.Id;
-        var planFromPersonaId = agentPersona.PersonaId;
+        var conversation = await _db.Conversations
+            .Include(c => c.Agent)
+            .FirstOrDefaultAsync(c => c.Id == req.ConversationId);
+        if (conversation is null)
+        {
+            return NotFound(new { code = "conversation_not_found", message = "Conversation not found" });
+        }
+
+        var branchSlug = string.IsNullOrWhiteSpace(req.BranchSlug) ? "main" : req.BranchSlug!.Trim();
+
+        var fictionPlan = await _db.Set<FictionPlan>()
+            .Include(p => p.FictionProject)
+            .FirstOrDefaultAsync(p => p.Id == req.FictionPlanId);
+        if (fictionPlan is null)
+        {
+            return NotFound(new { code = "fiction_plan_not_found", message = "Fiction plan not found" });
+        }
+
+        var planFromAgentId = conversation.AgentId;
+        var planFromPersonaId = conversation.Agent.PersonaId;
+
+        conversation.Metadata ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        conversation.Metadata["fictionPlanId"] = req.FictionPlanId;
+        conversation.Metadata["fictionBranchSlug"] = branchSlug;
+        conversation.Metadata["plannerProviderId"] = req.ProviderId;
+        if (req.ModelId.HasValue)
+        {
+            conversation.Metadata["plannerModelId"] = req.ModelId.Value;
+        }
+        else if (conversation.Metadata.ContainsKey("plannerModelId"))
+        {
+            conversation.Metadata.Remove("plannerModelId");
+        }
+
         var message = new ConversationMessage
         {
             ConversationId = req.ConversationId,
@@ -255,11 +285,27 @@ public class ChatController : ControllerBase
         _db.ConversationMessages.Add(message);
         await _db.SaveChangesAsync();
 
-        // Publish UserMessageAppended and PlanRequested events
         await _bus.Publish(new UserMessageAppended(req.ConversationId, planFromPersonaId, req.Input));
-        await _bus.Publish(new PlanRequested(req.ConversationId, planFromPersonaId, req.Input));
 
-        // Return 202 Accepted
+        var metadata = new Dictionary<string, object?>
+        {
+            ["conversationMessageId"] = message.Id,
+            ["source"] = "ask-with-plan"
+        };
+
+        await _bus.Publish(new PlanRequested(
+            req.ConversationId,
+            planFromAgentId,
+            planFromPersonaId,
+            req.ProviderId,
+            req.ModelId,
+            req.Input,
+            req.MinSteps,
+            req.MaxSteps,
+            req.FictionPlanId,
+            branchSlug,
+            metadata));
+
         return Accepted(new { ok = true, correlationId = message.Id });
     }
 

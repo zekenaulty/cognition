@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Cognition.Data.Relational;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cognition.Data.Relational.Migrations
 {
     [DbContext(typeof(CognitionDbContext))]
-    partial class CognitionDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250928173755_AddFictionPlanGraph")]
+    partial class AddFictionPlanGraph
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

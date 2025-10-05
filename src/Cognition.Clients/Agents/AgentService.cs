@@ -1,4 +1,5 @@
 using System.Text;
+using System.Linq;
 using System.Text.Json;
 using Cognition.Clients.LLM;
 using Cognition.Data.Relational;
@@ -414,12 +415,13 @@ public class AgentService : IAgentService
                                                         && s.SupportLevel != Cognition.Data.Relational.Modules.Common.SupportLevel.Unsupported))
             .AsNoTracking()
             .ToListAsync(ct);
+        var respondAnswerToolId = tools.FirstOrDefault(t => string.Equals(t.Name, "Respond.Answer", StringComparison.OrdinalIgnoreCase))?.Id;
         var toolIndex = BuildToolIndexSection(tools);
         var sys = persona is null ? "" : BuildSystemMessage(persona);
         var client = await _factory.CreateAsync(prov, modl);
 
         // 3. Generate OUTLINE_PLAN
-        var compactHistory = ""; // TODO: build compact history from recent messages
+        var compactHistory = await BuildCompactHistoryAsync(conversationId, ct);
         var outlinePrompt = BuildOutlinePlanPrompt(input, compactHistory, toolIndex);
         var outlineJson = await client.GenerateAsync(outlinePrompt, track: false);
 
@@ -455,7 +457,7 @@ public class AgentService : IAgentService
         for (int step = 1; step <= maxSteps; step++)
         {
             // Build state for PLAN prompt
-            var goalCompact = input; // TODO: refine
+            var goalCompact = CompactText(input, 200);
             var outlineState = outlineJson ?? "[]";
             var completedJson = System.Text.Json.JsonSerializer.Serialize(completedSteps);
             var planPrompt = BuildStepPlanPrompt(goalCompact, maxSteps, outlineState, completedJson, toolIndex);
@@ -543,8 +545,11 @@ public class AgentService : IAgentService
             string result = "";
             if (finish && !string.IsNullOrWhiteSpace(finalAnswer))
             {
-                // TODO: get Respond.Answer toolId
-                var respondToolId = toolId ?? Guid.Empty;
+                var respondToolId = toolId ?? respondAnswerToolId ?? Guid.Empty;
+                if (respondToolId == Guid.Empty)
+                {
+                    throw new InvalidOperationException("Respond.Answer tool is not registered for this persona.");
+                }
                 var finalizePrompt = BuildFinalizePrompt(finalAnswer, respondToolId.ToString());
                 result = await client.GenerateAsync(finalizePrompt, track: false);
                 status = "Success";
@@ -681,6 +686,33 @@ public class AgentService : IAgentService
 
         return finalResponse;
     }
+
+
+private async Task<string> BuildCompactHistoryAsync(Guid conversationId, CancellationToken ct)
+{
+    var history = await _db.ConversationMessages
+        .AsNoTracking()
+        .Where(m => m.ConversationId == conversationId)
+        .OrderByDescending(m => m.Timestamp)
+        .Take(6)
+        .Select(m => new { m.Role, m.Content })
+        .ToListAsync(ct);
+
+    if (history.Count == 0)
+    {
+        return "(no recent history)";
+    }
+
+    history.Reverse();
+    return string.Join("\n", history.Select(m => $"{m.Role}: {CompactText(m.Content, 160)}"));
+}
+
+private static string CompactText(string? text, int maxLength)
+{
+    if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+    var trimmed = text.Trim();
+    return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength] + "…";
+}
 
     private static string CompactObservation(string? s, int max = 200)
     {
