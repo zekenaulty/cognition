@@ -22,7 +22,6 @@ public sealed class KnowledgeIndexingService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Simple periodic indexer; upserts all KnowledgeItems each run (idempotent).
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -40,6 +39,7 @@ public sealed class KnowledgeIndexingService : BackgroundService
             {
                 _logger.LogError(ex, "Knowledge indexing failed");
             }
+
             await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
         }
     }
@@ -47,7 +47,9 @@ public sealed class KnowledgeIndexingService : BackgroundService
     private async Task IndexAllAsync(CancellationToken ct)
     {
         const int batchSize = 500;
-        int page = 0; int indexed = 0;
+        var page = 0;
+        var indexed = 0;
+
         while (true)
         {
             var items = await _db.KnowledgeItems
@@ -56,36 +58,46 @@ public sealed class KnowledgeIndexingService : BackgroundService
                 .Skip(page * batchSize)
                 .Take(batchSize)
                 .ToListAsync(ct);
+
             if (items.Count == 0) break;
 
             var docs = new List<VectorItem>(items.Count);
             foreach (var ki in items)
             {
-                var meta = new Dictionary<string, object?>
-                {
-                    ["contentType"] = ki.ContentType.ToString(),
-                    ["categories"] = ki.Categories,
-                    ["keywords"] = ki.Keywords,
-                    ["source"] = ki.Source,
-                    ["timestamp"] = ki.Timestamp,
-                    ["properties"] = ki.Properties
-                };
+                var meta = BuildMetadata(ki);
                 docs.Add(new VectorItem
                 {
                     Id = ki.Id.ToString(),
                     TenantKey = "default",
                     Kind = "knowledge",
                     Text = ki.Content ?? string.Empty,
-                    Embedding = null, // computed by pipeline
+                    Embedding = null,
                     Metadata = meta,
                     SchemaVersion = 1
                 });
             }
 
             await _store.UpsertManyAsync(docs, ct);
-            indexed += docs.Count; page++;
+            indexed += docs.Count;
+            page++;
         }
+
         _logger.LogInformation("Knowledge indexing upserted {Count} items", indexed);
     }
-}
 
+    private static Dictionary<string, object> BuildMetadata(KnowledgeItem ki)
+    {
+        var meta = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["contentType"] = ki.ContentType.ToString()
+        };
+
+        if (ki.Categories is { Length: > 0 }) meta["categories"] = ki.Categories;
+        if (ki.Keywords is { Length: > 0 }) meta["keywords"] = ki.Keywords;
+        if (!string.IsNullOrWhiteSpace(ki.Source)) meta["source"] = ki.Source!;
+        meta["timestamp"] = ki.Timestamp;
+        if (ki.Properties is not null && ki.Properties.Count > 0) meta["properties"] = ki.Properties;
+
+        return meta;
+    }
+}

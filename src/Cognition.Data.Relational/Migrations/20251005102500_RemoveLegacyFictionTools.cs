@@ -13,9 +13,7 @@ namespace Cognition.Data.Relational.Migrations
                 name: "fk_fiction_projects_primary_style_guide",
                 table: "fiction_projects");
 
-            migrationBuilder.DropIndex(
-                name: "IX_fiction_projects_PrimaryStyleGuideId",
-                table: "fiction_projects");
+            migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_fiction_projects_PrimaryStyleGuideId\";");
 
             migrationBuilder.DropForeignKey(
                 name: "fk_fiction_story_metrics_draft_segment_version",
@@ -59,13 +57,13 @@ namespace Cognition.Data.Relational.Migrations
                 name: "outline_nodes");
 
             migrationBuilder.DropTable(
+                name: "canon_rules");
+
+            migrationBuilder.DropTable(
                 name: "plot_arcs");
 
             migrationBuilder.DropTable(
                 name: "sources");
-
-            migrationBuilder.DropTable(
-                name: "canon_rules");
 
             migrationBuilder.DropTable(
                 name: "world_asset_versions");

@@ -77,7 +77,6 @@ public class ClientProfilesController : ControllerBase
     }
 
     [HttpPatch("{id:guid}")]
-    [HttpPatch("{id:guid}")]
     [Swashbuckle.AspNetCore.Annotations.SwaggerOperation(
         Summary = "Update ClientProfile",
         Description = "Update model/parameters. To disable a profile set isActive=false. Use force=true to reassign in-use tools/agents to default profile before disabling.")]
@@ -123,7 +122,6 @@ public class ClientProfilesController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [HttpDelete("{id:guid}")]
     [Swashbuckle.AspNetCore.Annotations.SwaggerOperation(
         Summary = "Delete ClientProfile",
         Description = "Deletes the profile. Use force=true to reassign in-use tools/agents to default profile before delete.")]
@@ -156,3 +154,4 @@ public class ClientProfilesController : ControllerBase
         return def?.Id;
     }
 }
+

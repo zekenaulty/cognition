@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 namespace Cognition.Api.Controllers;
 
 [ApiController]
-[Route("api/knowledge")] 
+[Route("api/knowledge")]
 public class KnowledgeIndexController : ControllerBase
 {
     private readonly CognitionDbContext _db;
@@ -25,13 +25,16 @@ public class KnowledgeIndexController : ControllerBase
     public KnowledgeIndexController(CognitionDbContext db, IVectorStore store, IOptions<OpenSearchVectorsOptions> options)
     { _db = db; _store = store; _options = options; }
 
-    [HttpPost("reindex")] 
+    [HttpPost("reindex")]
     public async Task<IActionResult> Reindex(CancellationToken ct)
     {
         if (!_options.Value.UseEmbeddingPipeline)
             return BadRequest(new { message = "OpenSearch embedding pipeline disabled; set OpenSearch:Vectors:UseEmbeddingPipeline=true." });
 
-        int batchSize = 500; int page = 0; int indexed = 0;
+        const int batchSize = 500;
+        var page = 0;
+        var indexed = 0;
+
         while (true)
         {
             var items = await _db.KnowledgeItems
@@ -40,36 +43,44 @@ public class KnowledgeIndexController : ControllerBase
                 .Skip(page * batchSize)
                 .Take(batchSize)
                 .ToListAsync(ct);
+
             if (items.Count == 0) break;
 
             var docs = new List<VectorItem>(items.Count);
             foreach (var ki in items)
             {
-                var meta = new Dictionary<string, object?>
-                {
-                    ["contentType"] = ki.ContentType.ToString(),
-                    ["categories"] = ki.Categories,
-                    ["keywords"] = ki.Keywords,
-                    ["source"] = ki.Source,
-                    ["timestamp"] = ki.Timestamp,
-                    ["properties"] = ki.Properties
-                };
+                var meta = BuildMetadata(ki);
                 docs.Add(new VectorItem
                 {
                     Id = ki.Id.ToString(),
                     TenantKey = "default",
                     Kind = "knowledge",
                     Text = ki.Content ?? string.Empty,
-                    Embedding = null, // computed by OpenSearch ingest pipeline
+                    Embedding = null,
                     Metadata = meta,
                     SchemaVersion = 1
                 });
             }
+
             await _store.UpsertManyAsync(docs, ct);
-            indexed += docs.Count; page++;
+            indexed += docs.Count;
+            page++;
         }
 
         return Ok(new { indexed });
     }
-}
 
+    private static Dictionary<string, object> BuildMetadata(KnowledgeItem ki)
+    {
+        var meta = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["contentType"] = ki.ContentType.ToString()
+        };
+        if (ki.Categories is { Length: > 0 }) meta["categories"] = ki.Categories;
+        if (ki.Keywords is { Length: > 0 }) meta["keywords"] = ki.Keywords;
+        if (!string.IsNullOrWhiteSpace(ki.Source)) meta["source"] = ki.Source!;
+        meta["timestamp"] = ki.Timestamp;
+        if (ki.Properties is not null && ki.Properties.Count > 0) meta["properties"] = ki.Properties;
+        return meta;
+    }
+}

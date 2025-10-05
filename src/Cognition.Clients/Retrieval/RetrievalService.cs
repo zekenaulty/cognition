@@ -32,8 +32,7 @@ public sealed class RetrievalService : IRetrievalService
         CancellationToken ct = default)
     {
         // Build strict filters
-        var baseFilters = new Dictionary<string, object?>();
-        if (filters is not null) foreach (var kv in filters) baseFilters[kv.Key] = kv.Value;
+        var baseFilters = ToFilterDictionary(filters);
 
         var tenantKey = ResolveTenantKey(scope);
         // Compute query embedding via embeddings client
@@ -50,7 +49,7 @@ public sealed class RetrievalService : IRetrievalService
         // 1) Conversation-scoped search
         if (scope.ConversationId.HasValue)
         {
-            var f = new Dictionary<string, object?>(baseFilters)
+            var f = new Dictionary<string, object>(baseFilters)
             {
                 ["ConversationId"] = scope.ConversationId.Value.ToString()
             };
@@ -65,7 +64,7 @@ public sealed class RetrievalService : IRetrievalService
         if (results.Count < k && scope.AgentId.HasValue)
         {
             var need = k - results.Count;
-            var f = new Dictionary<string, object?>(baseFilters)
+            var f = new Dictionary<string, object>(baseFilters)
             {
                 ["AgentId"] = scope.AgentId.Value.ToString()
             };
@@ -113,6 +112,18 @@ public sealed class RetrievalService : IRetrievalService
         return true;
     }
 
+    private static Dictionary<string, object> ToFilterDictionary(IDictionary<string, object?>? source)
+    {
+        if (source is null) return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in source)
+        {
+            if (kv.Value is null) continue;
+            result[kv.Key] = kv.Value;
+        }
+        return result;
+    }
+
     private static string ResolveTenantKey(ScopeToken scope)
     {
         // Prefer TenantId, else AppId, else default
@@ -121,26 +132,35 @@ public sealed class RetrievalService : IRetrievalService
         return "default";
     }
 
-    private static Dictionary<string, object?> BuildScopeMetadata(ScopeToken scope, IDictionary<string, object?>? extra)
+    private static Dictionary<string, object> BuildScopeMetadata(ScopeToken scope, IDictionary<string, object?>? extra)
     {
-        var m = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        var m = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        void Add(string key, object? value)
         {
-            ["TenantId"] = scope.TenantId?.ToString(),
-            ["AppId"] = scope.AppId?.ToString(),
-            ["PersonaId"] = scope.PersonaId?.ToString(),
-            ["AgentId"] = scope.AgentId?.ToString(),
-            ["ConversationId"] = scope.ConversationId?.ToString(),
-            ["ProjectId"] = scope.ProjectId?.ToString(),
-            ["WorldId"] = scope.WorldId?.ToString(),
-        };
+            if (value is null) return;
+            m[key] = value;
+        }
+
+        Add("TenantId", scope.TenantId?.ToString());
+        Add("AppId", scope.AppId?.ToString());
+        Add("PersonaId", scope.PersonaId?.ToString());
+        Add("AgentId", scope.AgentId?.ToString());
+        Add("ConversationId", scope.ConversationId?.ToString());
+        Add("ProjectId", scope.ProjectId?.ToString());
+        Add("WorldId", scope.WorldId?.ToString());
+
         if (extra is not null)
         {
-            foreach (var kv in extra) m[kv.Key] = kv.Value;
+            foreach (var kv in extra)
+            {
+                if (kv.Value is null) continue;
+                m[kv.Key] = kv.Value;
+            }
         }
         return m;
     }
 
-    private static string ComputeContentHash(string content, ScopeToken scope, IDictionary<string, object?> meta)
+    private static string ComputeContentHash(string content, ScopeToken scope, IReadOnlyDictionary<string, object> meta)
     {
         var sb = new StringBuilder();
         sb.AppendLine(content.Trim());
