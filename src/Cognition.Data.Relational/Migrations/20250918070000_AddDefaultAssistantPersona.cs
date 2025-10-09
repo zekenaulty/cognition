@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Cognition.Data.Relational.Migrations
 {
+    [Migration("20250918070000_AddDefaultAssistantPersona")]
     public partial class AddDefaultAssistantPersona : Migration
     {
         private const string DefaultId = "11111111-1111-1111-1111-111111111111";
@@ -25,4 +26,5 @@ END $$;");
         }
     }
 }
+
 

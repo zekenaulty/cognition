@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Cognition.Data.Relational.Tests</AssemblyName>
+    <RunSettingsFilePath>$(MSBuildProjectDirectory)\..\..\coverlet.runsettings</RunSettingsFilePath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cognition.Data.Relational\Cognition.Data.Relational.csproj" />
+    <ProjectReference Include="..\\Cognition.Testing\\Cognition.Testing.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

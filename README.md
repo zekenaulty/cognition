@@ -214,6 +214,14 @@ Rebus contracts (`src/Cognition.Contracts/Events.cs`) define the event flow.
 
 ---
 
+---
+
+### Testing & Coverage
+
+- Shared test infrastructure lives under `tests/Directory.Build.props` and the `tests/Cognition.Testing` helper library (DbContext factories, HTTP client stubs, environment guards).
+- Run unit suites with `dotnet test` from the repo root; individual projects can be targeted via `dotnet test tests/<Project>/<Project>.csproj`.
+- Coverage runs use `coverlet.runsettings`, which excludes EF Core `.Designer.cs` scaffolding. The setting is wired up in `.vscode/settings.json` and as `RunSettingsFilePath` inside each test project, so `dotnet test --collect:"XPlat Code Coverage"` and VS Code's "Run Tests with Coverage" share the same exclusions.
+- New fixtures default to the EF InMemory provider for speed; leverage `TestDbContextFactory.CreateSqliteInMemory*` if you need relational behaviors.
 ### Migrations
 
 The API applies migrations automatically on startup. To manage migrations manually:
@@ -267,3 +275,5 @@ README.md
 ```
 
 For a full tree, run the snapshot helper `arc.py` (optional) to generate a Markdown directory listing that honors `.gitignore`.
+
+

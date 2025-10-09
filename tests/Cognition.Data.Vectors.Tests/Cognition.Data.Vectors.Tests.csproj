@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Cognition.Data.Vectors.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cognition.Data.Vectors\Cognition.Data.Vectors.csproj" />
+  </ItemGroup>
+</Project>

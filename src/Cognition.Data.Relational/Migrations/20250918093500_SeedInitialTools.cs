@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Cognition.Data.Relational.Migrations
 {
+    [Migration("20250918093500_SeedInitialTools")]
     public partial class SeedInitialTools : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)

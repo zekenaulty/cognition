@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Cognition.Api.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cognition.Api\Cognition.Api.csproj" />
+    <ProjectReference Include="..\Cognition.Testing\Cognition.Testing.csproj" />
+  </ItemGroup>
+</Project>

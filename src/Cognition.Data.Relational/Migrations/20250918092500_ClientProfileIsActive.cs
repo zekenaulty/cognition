@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Cognition.Data.Relational.Migrations
 {
+    [Migration("20250918092500_ClientProfileIsActive")]
     public partial class ClientProfileIsActive : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)

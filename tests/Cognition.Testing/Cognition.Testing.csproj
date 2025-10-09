@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cognition.Contracts\Cognition.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Cognition.Clients\Cognition.Clients.csproj" />
+  </ItemGroup>
+</Project>
