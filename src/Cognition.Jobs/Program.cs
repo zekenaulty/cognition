@@ -94,6 +94,7 @@ builder.Services.AddTransient<ToolExecutionHandler>();
 
 // Register SignalRNotifier and inject into ResponseHandler
 builder.Services.AddSingleton(sp => new SignalRNotifier("http://localhost:5000/hub/chat"));
+builder.Services.AddSingleton<IPlanProgressNotifier>(sp => sp.GetRequiredService<SignalRNotifier>());
 builder.Services.AddTransient<ResponseHandler>();
 builder.Services.AddTransient<HubForwarderHandler>();
 

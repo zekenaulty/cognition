@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Tools;
 using Cognition.Data.Relational.Modules.Common;
@@ -17,6 +18,105 @@ public class ToolDispatcher : IToolDispatcher
     public ToolDispatcher(CognitionDbContext db, IServiceProvider sp, IToolRegistry registry, ILogger<ToolDispatcher> logger)
     {
         _db = db; _sp = sp; _registry = registry; _logger = logger;
+    }
+
+    public async Task<(bool ok, PlannerResult? result, string? error)> ExecutePlannerAsync(
+        Guid toolId,
+        PlannerContext plannerContext,
+        PlannerParameters parameters,
+        bool log = true)
+    {
+        if (plannerContext is null) throw new ArgumentNullException(nameof(plannerContext));
+        if (parameters is null) throw new ArgumentNullException(nameof(parameters));
+
+        var tool = await _db.Tools
+            .Include(t => t.Parameters)
+            .Include(t => t.ClientProfile)
+            .FirstAsync(t => t.Id == toolId);
+
+        var args = new Dictionary<string, object?>(parameters.AsReadOnlyDictionary(), StringComparer.OrdinalIgnoreCase);
+        var sw = Stopwatch.StartNew();
+        PlannerResult? result = null;
+        string? error = null;
+        var ok = true;
+
+        try
+        {
+            if (!_registry.TryResolveByClassPath(tool.ClassPath, out var implType))
+                throw new InvalidOperationException($"Tool impl not registered/known: {tool.ClassPath}");
+
+            if (!typeof(IPlannerTool).IsAssignableFrom(implType))
+                throw new InvalidOperationException($"Tool {tool.ClassPath} does not implement IPlannerTool.");
+
+            var impl = (IPlannerTool?)_sp.GetService(implType);
+            if (impl is null)
+                throw new InvalidOperationException($"Tool impl not registered in DI: {tool.ClassPath}");
+
+            var inputParams = tool.Parameters.Where(p => p.Direction == ToolParamDirection.Input).ToList();
+            var allowed = new HashSet<string>(inputParams.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var extras = args.Keys.Where(k => !allowed.Contains(k)).ToList();
+            if (extras.Count > 0)
+                throw new ArgumentException($"Unknown parameter(s): {string.Join(", ", extras)}");
+
+            foreach (var p in inputParams)
+            {
+                if (!args.ContainsKey(p.Name) || args[p.Name] is null)
+                {
+                    if (p.Required) throw new ArgumentException($"Missing required parameter '{p.Name}'");
+                    if (p.DefaultValue is not null)
+                    {
+                        args[p.Name] = p.DefaultValue.Count == 1 && p.DefaultValue.ContainsKey("value")
+                            ? p.DefaultValue["value"]
+                            : p.DefaultValue;
+                    }
+                }
+
+                if (args.ContainsKey(p.Name))
+                {
+                    args[p.Name] = CoerceToType(JsonToDotNet(args[p.Name]), p.Type);
+                }
+            }
+
+            EnsureProviderModelArgs(tool, plannerContext.ToolContext, args);
+
+            var plannerParameters = new PlannerParameters(args);
+            var ctxWithToolId = plannerContext.ToolId == tool.Id
+                ? plannerContext
+                : plannerContext with { ToolId = tool.Id };
+
+            _logger.LogInformation("Executing planner {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId}", tool.Name, tool.Id, tool.ClassPath, plannerContext.ToolContext.ConversationId);
+            result = await impl.PlanAsync(ctxWithToolId, plannerParameters, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            ok = false;
+            error = ex.Message;
+            result = null;
+            _logger.LogError(ex, "Planner execution failed for {ToolName} ({ToolId})", tool.Name, tool.Id);
+        }
+
+        sw.Stop();
+
+        if (log)
+        {
+            var startedAt = DateTime.UtcNow - sw.Elapsed;
+            var redacted = RedactArgs(args);
+            _db.ToolExecutionLogs.Add(new ToolExecutionLog
+            {
+                ToolId = tool.Id,
+                AgentId = plannerContext.ToolContext.AgentId,
+                StartedAtUtc = startedAt,
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Success = ok,
+                Request = redacted,
+                Response = ok ? result?.ToDictionary() : null,
+                Error = ok ? null : error
+            });
+            await _db.SaveChangesAsync(plannerContext.ToolContext.Ct);
+        }
+
+        _logger.LogInformation("Planner {ToolName} ({ToolId}) completed success={Success} durationMs={Duration}", tool.Name, tool.Id, ok, (int)sw.ElapsedMilliseconds);
+        return (ok, result, error);
     }
 
     public async Task<(bool ok, object? result, string? error)> ExecuteAsync(

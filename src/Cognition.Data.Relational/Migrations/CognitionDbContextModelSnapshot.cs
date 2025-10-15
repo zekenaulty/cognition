@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Planning;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -728,7 +729,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.ToTable("feature_flags", (string)null);
                 });
 
-                                                            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -858,7 +859,8 @@ namespace Cognition.Data.Relational.Migrations
                     b.HasIndex("DerivedFromSceneId");
 
                     b.HasIndex("FictionChapterSectionId", "SceneIndex")
-                        .HasDatabaseName("ix_fiction_chapter_scenes_section_index");
+                        .IsUnique()
+                        .HasDatabaseName("ux_fiction_chapter_scenes_section_index");
 
                     b.ToTable("fiction_chapter_scenes", (string)null);
                 });
@@ -980,7 +982,8 @@ namespace Cognition.Data.Relational.Migrations
                     b.HasIndex("ParentSectionId");
 
                     b.HasIndex("FictionChapterScrollId", "SectionIndex")
-                        .HasDatabaseName("ix_fiction_chapter_sections_scroll_index");
+                        .IsUnique()
+                        .HasDatabaseName("ux_fiction_chapter_sections_scroll_index");
 
                     b.ToTable("fiction_chapter_sections", (string)null);
                 });
@@ -1030,6 +1033,68 @@ namespace Cognition.Data.Relational.Migrations
                         .HasDatabaseName("ix_fiction_plans_project_name");
 
                     b.ToTable("fiction_plans", (string)null);
+                });
+
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionPlanBacklogItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BacklogId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("backlog_id");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("FictionPlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("fiction_plan_id");
+
+                    b.Property<DateTime?>("InProgressAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("in_progress_at_utc");
+
+                    b.PrimitiveCollection<string[]>("Inputs")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("inputs");
+
+                    b.PrimitiveCollection<string[]>("Outputs")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("outputs");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fiction_plan_backlog");
+
+                    b.HasIndex("FictionPlanId", "BacklogId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_fiction_plan_backlog_plan_backlog_id");
+
+                    b.ToTable("fiction_plan_backlog", (string)null);
                 });
 
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionPlanCheckpoint", b =>
@@ -1441,7 +1506,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.ToTable("fiction_world_bible_entries", (string)null);
                 });
 
-                                                                                                                                    modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -1806,6 +1871,22 @@ namespace Cognition.Data.Relational.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("schema_version");
 
+                    b.Property<string>("ScopePath")
+                        .HasColumnType("text")
+                        .HasColumnName("scope_path");
+
+                    b.Property<Guid?>("ScopePrincipalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("scope_principal_id");
+
+                    b.Property<string>("ScopePrincipalType")
+                        .HasColumnType("text")
+                        .HasColumnName("scope_principal_type");
+
+                    b.Property<Dictionary<string, string>>("ScopeSegments")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("scope_segments");
+
                     b.Property<string>("Space")
                         .HasColumnType("text")
                         .HasColumnName("space");
@@ -1837,6 +1918,9 @@ namespace Cognition.Data.Relational.Migrations
 
                     b.HasIndex("Provider")
                         .HasDatabaseName("ix_knowledge_embeddings_provider");
+
+                    b.HasIndex("ScopePrincipalType", "ScopePrincipalId")
+                        .HasDatabaseName("ix_knowledge_embeddings_scope_principal");
 
                     b.HasIndex("KnowledgeItemId", "Model", "ModelVersion", "ChunkIndex")
                         .IsUnique()
@@ -2702,6 +2786,85 @@ namespace Cognition.Data.Relational.Migrations
                     b.ToTable("persona_personas", (string)null);
                 });
 
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Planning.PlannerExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AgentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("agent_id");
+
+                    b.Property<Dictionary<string, object>>("Artifacts")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("artifacts");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<Dictionary<string, object>>("ConversationState")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("conversation_state");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<Dictionary<string, string>>("Diagnostics")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("diagnostics");
+
+                    b.Property<string>("Environment")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("environment");
+
+                    b.Property<Dictionary<string, double>>("Metrics")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("metrics");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("outcome");
+
+                    b.Property<string>("PlannerName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("planner_name");
+
+                    b.Property<Guid?>("PrimaryAgentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("primary_agent_id");
+
+                    b.Property<string>("ScopePath")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("scope_path");
+
+                    b.Property<Guid?>("ToolId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tool_id");
+
+                    b.Property<List<PlannerExecutionTranscriptEntry>>("Transcript")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("transcript");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.HasKey("Id")
+                        .HasName("pk_planner_executions");
+
+                    b.ToTable("planner_executions", (string)null);
+                });
+
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Prompts.PromptTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3475,7 +3638,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Conversation");
                 });
 
-                                                            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
                 {
                     b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionPlan", "FictionPlan")
                         .WithMany("ChapterBlueprints")
@@ -3561,6 +3724,18 @@ namespace Cognition.Data.Relational.Migrations
                         .HasConstraintName("fk_fiction_plans_project");
 
                     b.Navigation("FictionProject");
+                });
+
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionPlanBacklogItem", b =>
+                {
+                    b.HasOne("Cognition.Data.Relational.Modules.Fiction.FictionPlan", "FictionPlan")
+                        .WithMany("Backlog")
+                        .HasForeignKey("FictionPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_fiction_plan_backlog_plan");
+
+                    b.Navigation("FictionPlan");
                 });
 
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionPlanCheckpoint", b =>
@@ -3677,7 +3852,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("FictionWorldBible");
                 });
 
-                                                                                                                                    modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Images.ImageAsset", b =>
                 {
                     b.HasOne("Cognition.Data.Relational.Modules.Conversations.Conversation", "Conversation")
                         .WithMany()
@@ -4039,7 +4214,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Tasks");
                 });
 
-                        modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionChapterBlueprint", b =>
                 {
                     b.Navigation("Scrolls");
                 });
@@ -4069,6 +4244,8 @@ namespace Cognition.Data.Relational.Migrations
 
             modelBuilder.Entity("Cognition.Data.Relational.Modules.Fiction.FictionPlan", b =>
                 {
+                    b.Navigation("Backlog");
+
                     b.Navigation("ChapterBlueprints");
 
                     b.Navigation("Checkpoints");
@@ -4092,7 +4269,7 @@ namespace Cognition.Data.Relational.Migrations
                     b.Navigation("Entries");
                 });
 
-                                                            modelBuilder.Entity("Cognition.Data.Relational.Modules.Instructions.Instruction", b =>
+            modelBuilder.Entity("Cognition.Data.Relational.Modules.Instructions.Instruction", b =>
                 {
                     b.Navigation("InstructionSetItems");
                 });

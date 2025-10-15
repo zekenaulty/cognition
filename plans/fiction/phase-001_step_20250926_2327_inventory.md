@@ -26,9 +26,12 @@ Completion
 
 Follow-Up Tasks
 - [ ] Audit remaining prompts outside fiction tools (e.g., remember/promotion flows) for completeness (track under Phase 001 Milestone A).
+- [ ] Thread `backlogItemId` metadata from conversation/task scheduling so phase runners automatically close matching backlog entries, then document the contract for future planners (review note 2025-10-14).
 - [ ] Review a `_context` snapshot to verify the file-output list and capture anomalies (file new issue if discrepancies persist).
 - [ ] Verify the front-end persists `fictionPlanId`/provider/model metadata before the next user turn so auto-resume triggers reliably (coordinate with UI team).
 - [ ] Confirm SignalR listeners consume the richer `FictionPhaseProgressed` payload and add an integration assertion for the new schema.
+- [ ] Land the `FictionPlanCheckpoint` lock manager migration, add resume/cancel regression tests, and ensure backlog status flips respect checkpoint failures.
+- [ ] Capture per-phase token budgets (vision/iterative/architect/scroll/scene), implement soft-stop `Partial` outcomes, and persist token metrics alongside backlog snapshots.
 
 
 Update (data modeling)
@@ -44,3 +47,9 @@ Phase runner modeling
 - Added weaver runner skeletons, context, and result types under `src/Cognition.Clients/Tools/Fiction/Weaver`.
 - Implemented Hangfire job wrappers composing phase runners with checkpoint locking/persistence (see `src/Cognition.Jobs/FictionWeaverJobs.cs`); jobs now write `FictionPlanTranscript` rows and publish `FictionPhaseProgressed` bus/SignalR notifications with branch-aware cancel/resume flows.
 - Hangfire job wrappers now enqueue all fiction phases with checkpoint persistence and progress signaling (see [Hangfire job matrix](hangfire_jobs.md)); integration validation and replay tests remain outstanding follow-ups.
+
+Vision planner backlog alignment
+- Vision planner prompt now returns a dynamic `planningBacklog` scaffold (instead of a finished outline) paired with book goals and author summary.
+- Backlog items enumerate pending planner passes (e.g., outline arcs, map conflicts) so the iterative pipeline from `reference/iterate-book.py` can fill them through blueprint/scroll runners.
+- Schema change captured in `FictionResponseValidator.BuildVisionSchema`; seeder/template updates ensure lower environments adopt the backlog-based contract.
+- `FictionWeaverJobs` now persists backlog state via `FictionPlanBacklogItem`; upcoming work (tracked above) must finish backlog progression for IterativePlanner/Architect/ScrollRefiner/SceneWeaver and auto-create backlog rows from Vision outputs.

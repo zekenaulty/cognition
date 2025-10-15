@@ -187,19 +187,45 @@ public static class FictionResponseValidator
 
     private static JSchema BuildVisionSchema()
     {
+        var backlogItemSchema = new JSchema
+        {
+            Type = JSchemaType.Object,
+            AllowAdditionalProperties = false
+        };
+        backlogItemSchema.Properties.Add("id", new JSchema { Type = JSchemaType.String, MinimumLength = 1 });
+        backlogItemSchema.Properties.Add("description", new JSchema { Type = JSchemaType.String, MinimumLength = 5 });
+        backlogItemSchema.Properties.Add("status", new JSchema
+        {
+            Type = JSchemaType.String,
+            Enum = { new JValue("pending"), new JValue("in_progress"), new JValue("complete") }
+        });
+        backlogItemSchema.Properties.Add("inputs", new JSchema { Type = JSchemaType.Array, Items = { new JSchema { Type = JSchemaType.String, MinimumLength = 1 } } });
+        backlogItemSchema.Properties.Add("outputs", new JSchema { Type = JSchemaType.Array, Items = { new JSchema { Type = JSchemaType.String, MinimumLength = 1 } } });
+        backlogItemSchema.Required.Add("id");
+        backlogItemSchema.Required.Add("description");
+
+        var backlogSchema = new JSchema { Type = JSchemaType.Array, MinimumItems = 1 };
+        backlogSchema.Items.Add(backlogItemSchema);
+
+        var goalsSchema = new JSchema { Type = JSchemaType.Array, MinimumItems = 1 };
+        goalsSchema.Items.Add(new JSchema { Type = JSchemaType.String, MinimumLength = 3 });
+
+        var optionalStringArray = new JSchema { Type = JSchemaType.Array };
+        optionalStringArray.Items.Add(new JSchema { Type = JSchemaType.String, MinimumLength = 3 });
+
         var schema = new JSchema
         {
             Type = JSchemaType.Object,
             AllowAdditionalProperties = false
         };
         schema.Properties.Add("authorSummary", new JSchema { Type = JSchemaType.String, MinimumLength = 10 });
-        var goalsSchema = new JSchema { Type = JSchemaType.Array, MinimumItems = 1 };
-        goalsSchema.Items.Add(new JSchema { Type = JSchemaType.String, MinimumLength = 5 });
         schema.Properties.Add("bookGoals", goalsSchema);
-        schema.Properties.Add("storyPlan", new JSchema { Type = JSchemaType.String, MinimumLength = 20 });
+        schema.Properties.Add("planningBacklog", backlogSchema);
+        schema.Properties.Add("openQuestions", optionalStringArray);
+        schema.Properties.Add("worldSeeds", optionalStringArray);
         schema.Required.Add("authorSummary");
         schema.Required.Add("bookGoals");
-        schema.Required.Add("storyPlan");
+        schema.Required.Add("planningBacklog");
         return schema;
     }
 

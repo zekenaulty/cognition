@@ -13,6 +13,7 @@ using Cognition.Data.Relational.Modules.Config;
 using Cognition.Data.Relational.Modules.Users;
 using Cognition.Data.Relational.Modules.Images;
 using Cognition.Data.Relational.Modules.Fiction;
+using Cognition.Data.Relational.Modules.Planning;
 
 namespace Cognition.Data.Relational;
 
@@ -89,10 +90,12 @@ public class CognitionDbContext : DbContext
     public DbSet<FictionChapterScroll> FictionChapterScrolls => Set<FictionChapterScroll>();
     public DbSet<FictionChapterSection> FictionChapterSections => Set<FictionChapterSection>();
     public DbSet<FictionChapterScene> FictionChapterScenes => Set<FictionChapterScene>();
+    public DbSet<FictionPlanBacklogItem> FictionPlanBacklogItems => Set<FictionPlanBacklogItem>();
     public DbSet<FictionPlanTranscript> FictionPlanTranscripts => Set<FictionPlanTranscript>();
     public DbSet<FictionStoryMetric> FictionStoryMetrics => Set<FictionStoryMetric>();
     public DbSet<FictionWorldBible> FictionWorldBibles => Set<FictionWorldBible>();
     public DbSet<FictionWorldBibleEntry> FictionWorldBibleEntries => Set<FictionWorldBibleEntry>();
+    public DbSet<PlannerExecution> PlannerExecutions => Set<PlannerExecution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

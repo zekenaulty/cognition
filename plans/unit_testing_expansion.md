@@ -80,30 +80,28 @@ High-Value Tests To Author Now (cognition.20251007_232521)
 - `tests/Cognition.Jobs.Tests/FictionWeaverJobs_VisionPlannerTests.cs`: deterministic transcript and progress events from `FictionWeaverJobs`.
 - `tests/Cognition.Api.Tests/Security/JwtTokenHelperRotateRefreshTests.cs`: rotation success, reuse rejection, and expiry updates for refresh tokens.
 
-## Current Status (2025-10-07)
+## Current Status (2025-10-12)
 - Test project scaffolding remains in place (API, Clients, Data Relational/Vectors, Jobs) and builds via `dotnet test`.
 - Shared DbContext, HTTP, and environment fixtures exist; new time, token, and LLM fakes are queued to round out deterministic harnesses.
-- Phase 1 coverage hits DbContext invariants and password hashing, but `JwtTokenHelper.RotateRefreshAsync` scenarios are still uncovered.
+- Phase 1 coverage hits DbContext invariants and password hashing; JWT rotation scenarios are now covered.
 - Retrieval service helper methods are tested; full `SearchAsync` conversation -> agent ordering remains outstanding.
-- Vector DSL coverage touches guards and utilities; scoped filter assertions and `OpenSearchVectorStore.UpsertAsync` dimension guards still need tests.
+- Vector DSL coverage now includes scoped filter assertions; `OpenSearchVectorStore.UpsertAsync` dimension guards still need tests.
 - API and Jobs suites are scaffolded but awaiting first controller and job regression coverage.
 
-### Recent Progress (2025-10-07)
-- Re-reviewed retrieval and security backlog and captured the concrete test silhouettes listed above.
-- Aligned on shared fake implementations required for deterministic tool, planner, and job flows.
-- Verified solution scaffolding and existing fixtures continue to compile and run cleanly after plan pause.
-- Introduced shared FakeClock, FakeTokenizer, ScriptedLLM, ScriptedEmbeddingsClient, and InMemoryVectorStore helpers in Cognition.Testing with README documentation.
-- Added RetrievalService and AgentRememberTool regression tests using the scripted vector/embedding stack to enforce conversation-first reads and agent-root promotion.
-- Landed JwtTokenHelper.RotateRefreshAsync regression coverage for rotation success, expiry rejection, and revoked token reuse.
-- Added ToolDispatcher scope propagation and OpenAIEmbeddingsClient transport tests using the shared fakes.
+### Recent Progress (2025-10-12)
+- Extended `QueryDslBuilder.BuildKnnQuery` tests to assert scope path/principal/segment filters.
+- Added dispatcher telemetry tests covering planner execution success/failure and capability discovery.
+- Validated Vision planner execution through new base class with scripted fakes to keep regression harness deterministic.
 
 ### Upcoming Focus (High Priority)
-1. Extend vector store coverage: scoped filters in `QueryDslBuilder.BuildKnnQuery` plus `OpenSearchVectorStore.UpsertAsync` guards.
-2. Stand up `ChatController` ask and ask-chat tests to enforce agent-centric routing and `ScopeToken` creation.
+1. Add `OpenSearchVectorStore.UpsertAsync` dimension guard and scope metadata assertions.
+2. Stand up `ChatController` ask/ask-chat tests to enforce agent-centric routing and `ScopeToken` creation.
+3. Capture FictionWeaver job transcript telemetry tests once planner sinks are available.
 
 ## Next Steps
-1. Draft `QueryDslBuilder` scoped-filter and `OpenSearchVectorStore.UpsertAsync` tests, reusing the same fixtures.
+1. Draft `OpenSearchVectorStore.UpsertAsync` guard tests (dimension mismatch, null embeddings) on the scripted vector stack.
 2. Prepare controller and job regression harnesses (ChatController, FictionWeaverJobs) once shared fakes are in place.
+3. Align planner telemetry storage tests with forthcoming sinks to keep tool dispatcher coverage comprehensive.
 
 Tooling & Conventions
 - Testing stack: xUnit, FluentAssertions, NSubstitute (or Moq if preferred), AutoFixture for data generation.

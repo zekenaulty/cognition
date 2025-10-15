@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -5,6 +6,8 @@ using System.Text.RegularExpressions;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Users;
+using Cognition.Data.Relational.Modules.Prompts;
+using Cognition.Data.Relational.Modules.Common;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cognition.Api.Infrastructure;
@@ -66,6 +69,7 @@ public static class StartupDataSeeder
         // Seed default client profiles
         await EnsureClientProfilesAsync(db, logger);
         await EnsureImageStylesAsync(db, logger);
+        await EnsurePlannerPromptTemplatesAsync(db, logger);
 
         // Seed personas from reference files if present
         var contentRoot = scope.ServiceProvider.GetRequiredService<IHostEnvironment>().ContentRootPath;
@@ -367,6 +371,134 @@ public static class StartupDataSeeder
         return (name, nickname, role, gender, essence, beliefs, background, comms, emotions, sig.Count>0? sig.ToArray(): null, themes.Count>0? themes.ToArray(): null, domain.Count>0? domain.ToArray(): null);
     }
 
+    private static async Task EnsurePlannerPromptTemplatesAsync(CognitionDbContext db, ILogger logger)
+    {
+        const string visionTemplate = """
+You are the lead creative planner for the fiction project "{{projectTitle}}" on branch "{{branch}}".
+
+Project description:
+{{description}}
+
+Project logline:
+{{logline}}
+
+Produce minified JSON with the following shape:
+{
+  "authorSummary": "string describing the author persona voice, tone, pacing, and stylistic edges",
+  "bookGoals": ["goal 1", "goal 2", "goal 3"],
+  "planningBacklog": [
+    {
+      "id": "outline-core-conflicts",
+      "description": "Define the headline conflicts and stakes",
+      "status": "pending"
+    }
+  ],
+  "openQuestions": ["unknown or risky assumptions"],
+  "worldSeeds": ["worldbuilding seeds to expand later"]
+}
+
+Ensure backlog entries capture still-needed planner passes rather than a finished story outline.
+Respond with JSON only.
+""";
+
+        var templates = new List<PromptTemplate>
+        {
+            new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "planner.fiction.vision",
+                PromptType = PromptType.SystemInstruction,
+                Template = visionTemplate,
+                Tokens = new Dictionary<string, object?>
+                {
+                    ["projectTitle"] = "string",
+                    ["branch"] = "string",
+                    ["description"] = "string",
+                    ["logline"] = "string"
+                },
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow
+            }
+        };
+
+        foreach (var seed in templates)
+        {
+            var existing = await db.PromptTemplates.FirstOrDefaultAsync(x => x.Name == seed.Name);
+            if (existing is null)
+            {
+                db.PromptTemplates.Add(seed);
+                await db.SaveChangesAsync();
+                logger.LogInformation("Seeded prompt template {TemplateName}.", seed.Name);
+                continue;
+            }
+
+            bool changed = false;
+            if (!existing.IsActive)
+            {
+                existing.IsActive = true;
+                changed = true;
+            }
+
+            if (!string.Equals(existing.Template, seed.Template, StringComparison.Ordinal))
+            {
+                existing.Template = seed.Template;
+                changed = true;
+            }
+
+            if (existing.PromptType != seed.PromptType)
+            {
+                existing.PromptType = seed.PromptType;
+                changed = true;
+            }
+
+            if (!DictionaryEquals(existing.Tokens, seed.Tokens))
+            {
+                existing.Tokens = seed.Tokens;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                existing.UpdatedAtUtc = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+                logger.LogInformation("Updated prompt template {TemplateName}.", existing.Name);
+            }
+        }
+    }
+
+    private static bool DictionaryEquals(Dictionary<string, object?>? left, Dictionary<string, object?>? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left is null || right is null)
+        {
+            return false;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, value) in left)
+        {
+            if (!right.TryGetValue(key, out var otherValue))
+            {
+                return false;
+            }
+
+            if (!Equals(value, otherValue))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static async Task EnsureImageStylesAsync(CognitionDbContext db, ILogger logger)
     {
         var styles = new List<(string name, string desc, string prefix, string? neg)>();
@@ -415,7 +547,6 @@ public static class StartupDataSeeder
         }
     }
 }
-
 
 
 

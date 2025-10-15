@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -15,6 +15,10 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="9.*" />
     <PackageReference Include="OpenSearch.Client" Version="1.8.0" />
     <PackageReference Include="OpenSearch.Net" Version="1.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cognition.Contracts\Cognition.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Rebus.ServiceProvider;
 using Rebus.Config;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch;
+using Cognition.Clients.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +33,9 @@ builder.Services.AddOpenApi();
 builder.Services.AddCognitionClients();
 builder.Services.AddCognitionOpenSearchVectors(builder.Configuration);
 builder.Services.AddCognitionTools();
+builder.Services.AddOptions<ScopePathOptions>()
+    .Bind(builder.Configuration.GetSection(ScopePathOptions.SectionName));
+builder.Services.AddScoped<Cognition.Api.Infrastructure.ScopePath.ScopePathBackfillService>();
 // Background knowledge indexer is disabled for now; use the API endpoint to trigger indexing on-demand.
 // Wire AgentService DI for API controllers
 builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Clients.Agents.AgentService>();

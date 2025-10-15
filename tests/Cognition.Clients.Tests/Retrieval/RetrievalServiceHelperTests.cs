@@ -63,7 +63,7 @@ public class RetrievalServiceHelperTests
     }
 
     [Fact]
-    public void ComputeContentHash_ShouldIncludeTrimmedContentAndScope()
+    public void ComputeContentHash_ShouldIncludeTrimmedContentAndScope_WhenLegacyMode()
     {
         var scope = new ScopeToken(Guid.NewGuid(), Guid.NewGuid(), null, Guid.NewGuid(), null, null, null);
         var metadata = new Dictionary<string, object>
@@ -73,9 +73,9 @@ public class RetrievalServiceHelperTests
         };
 
         var content = "  hello world  ";
-        var hash = Invoke<string>(ComputeContentHashMethod, content, scope, metadata);
+        var hash = Invoke<string>(ComputeContentHashMethod, content, scope, metadata, false);
 
-        var expected = ExpectedHash(content, scope, metadata);
+        var expected = ExpectedHashLegacy(content, scope, metadata);
         hash.Should().Be(expected);
     }
 
@@ -86,13 +86,39 @@ public class RetrievalServiceHelperTests
         var scopeB = new ScopeToken(Guid.NewGuid(), null, null, null, null, null, null);
         var metadata = new Dictionary<string, object>();
 
-        var hashA = Invoke<string>(ComputeContentHashMethod, "content", scopeA, metadata);
-        var hashB = Invoke<string>(ComputeContentHashMethod, "content", scopeB, metadata);
+        var hashA = Invoke<string>(ComputeContentHashMethod, "content", scopeA, metadata, false);
+        var hashB = Invoke<string>(ComputeContentHashMethod, "content", scopeB, metadata, false);
 
         hashA.Should().NotBe(hashB);
     }
 
-    private static string ExpectedHash(string content, ScopeToken scope, Dictionary<string, object> meta)
+    [Fact]
+    public void ComputeContentHash_ShouldUseCanonicalPath_WhenPathAwareEnabled()
+    {
+        var tenantId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var scope = new ScopeToken(tenantId, null, null, agentId, conversationId, null, null);
+        var metadata = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Source"] = "path-aware"
+        };
+
+        var hash = Invoke<string>(ComputeContentHashMethod, "content", scope, metadata, true);
+
+        var expectedInput = new StringBuilder()
+            .AppendLine("content")
+            .Append("|principal=agent:").Append(agentId.ToString("D"))
+            .Append("|conversation=").Append(conversationId.ToString("D"))
+            .Append("|tenant=").Append(tenantId.ToString("D"))
+            .Append("|Source=path-aware")
+            .ToString();
+
+        var expectedHash = Sha(expectedInput);
+        hash.Should().Be(expectedHash);
+    }
+
+    private static string ExpectedHashLegacy(string content, ScopeToken scope, Dictionary<string, object> meta)
     {
         var sb = new StringBuilder();
         sb.AppendLine(content.Trim());
@@ -114,8 +140,13 @@ public class RetrievalServiceHelperTests
             Add("Source", src);
         }
 
+        return Sha(sb.ToString());
+    }
+
+    private static string Sha(string input)
+    {
         using var sha = SHA256.Create();
-        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+        var bytes = Encoding.UTF8.GetBytes(input);
         return Convert.ToHexString(sha.ComputeHash(bytes));
     }
 

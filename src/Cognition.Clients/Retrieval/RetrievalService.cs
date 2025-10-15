@@ -1,11 +1,15 @@
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Cognition.Contracts;
-using Cognition.Data.Vectors.OpenSearch.OpenSearch.Models;
+using Cognition.Contracts.Scopes;
+using Cognition.Clients.Configuration;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Store;
+using Cognition.Clients.Scope;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch.Models;
 
 namespace Cognition.Clients.Retrieval;
 
@@ -15,12 +19,22 @@ public sealed class RetrievalService : IRetrievalService
     private readonly ILogger<RetrievalService> _logger;
     private readonly OpenSearchVectorsOptions _options;
     private readonly Cognition.Clients.LLM.IEmbeddingsClient _emb;
+    private readonly ScopePathOptions _scopeOptions;
+    private readonly IScopePathDiagnostics _diagnostics;
 
-    public RetrievalService(IVectorStore store, IOptions<OpenSearchVectorsOptions> options, ILogger<RetrievalService> logger, Cognition.Clients.LLM.IEmbeddingsClient emb)
+    public RetrievalService(
+        IVectorStore store,
+        IOptions<OpenSearchVectorsOptions> options,
+        IOptions<ScopePathOptions> scopeOptions,
+        IScopePathDiagnostics diagnostics,
+        ILogger<RetrievalService> logger,
+        Cognition.Clients.LLM.IEmbeddingsClient emb)
     {
         _store = store;
         _logger = logger;
         _options = options.Value;
+        _scopeOptions = scopeOptions.Value;
+        _diagnostics = diagnostics;
         _emb = emb;
     }
 
@@ -89,7 +103,39 @@ public sealed class RetrievalService : IRetrievalService
         var tenantKey = ResolveTenantKey(scope);
 
         var meta = BuildScopeMetadata(scope, metadata);
-        var id = ComputeContentHash(content, scope, meta);
+        var id = ComputeContentHash(content, scope, meta, _scopeOptions.PathAwareHashingEnabled);
+        Dictionary<string, string>? scopeSegments = null;
+        string? scopePrincipalId = null;
+        string? scopePrincipalType = null;
+        string? scopePath = null;
+
+        ScopePathProjection projection = default;
+        var hasProjection = _scopeOptions.DualWriteEnabled && ScopePathProjection.TryCreate(scope, out projection);
+
+        if (hasProjection)
+        {
+            scopePath = projection.Canonical;
+            scopePrincipalType = projection.PrincipalType;
+            scopePrincipalId = projection.PrincipalId;
+            scopeSegments = projection.ToSegmentDictionary();
+
+            meta["ScopePath"] = scopePath;
+            meta["ScopePrincipalType"] = scopePrincipalType ?? "none";
+            if (!string.IsNullOrEmpty(scopePrincipalId))
+            {
+                meta["ScopePrincipalId"] = scopePrincipalId;
+            }
+            if (scopeSegments.Count > 0)
+            {
+                meta["ScopeSegments"] = scopeSegments;
+            }
+
+            _diagnostics.RecordPathWrite(id, projection);
+        }
+        else
+        {
+            _diagnostics.RecordLegacyWrite();
+        }
 
         var item = new VectorItem
         {
@@ -99,7 +145,11 @@ public sealed class RetrievalService : IRetrievalService
             Text = content,
             Embedding = _options.UseEmbeddingPipeline ? null : null, // require pipeline; else not supported here
             Metadata = meta,
-            SchemaVersion = 1
+            SchemaVersion = 1,
+            ScopePath = scopePath,
+            ScopePrincipalType = scopePrincipalType,
+            ScopePrincipalId = scopePrincipalId,
+            ScopeSegments = scopeSegments
         };
 
         if (!_options.UseEmbeddingPipeline)
@@ -160,18 +210,41 @@ public sealed class RetrievalService : IRetrievalService
         return m;
     }
 
-    private static string ComputeContentHash(string content, ScopeToken scope, IReadOnlyDictionary<string, object> meta)
+    private static string ComputeContentHash(string content, ScopeToken scope, IReadOnlyDictionary<string, object> meta, bool pathAwareHashingEnabled)
     {
         var sb = new StringBuilder();
         sb.AppendLine(content.Trim());
-        void Add(string k, object? v) { if (v is null) return; sb.Append('|').Append(k).Append('=').Append(v); }
-        Add("TenantId", scope.TenantId);
-        Add("AppId", scope.AppId);
-        Add("AgentId", scope.AgentId);
-        Add("ConversationId", scope.ConversationId);
-        Add("ProjectId", scope.ProjectId);
-        Add("WorldId", scope.WorldId);
-        if (meta.TryGetValue("Source", out var src)) Add("Source", src);
+
+        if (pathAwareHashingEnabled)
+        {
+            var path = scope.ToScopePath();
+            sb.Append("|principal=").Append(path.Principal.Canonical);
+            foreach (var segment in path.Segments)
+            {
+                sb.Append('|').Append(segment.Canonical);
+            }
+        }
+        else
+        {
+            void AddLegacy(string k, object? v)
+            {
+                if (v is null) return;
+                sb.Append('|').Append(k).Append('=').Append(v);
+            }
+
+            AddLegacy("TenantId", scope.TenantId);
+            AddLegacy("AppId", scope.AppId);
+            AddLegacy("AgentId", scope.AgentId);
+            AddLegacy("ConversationId", scope.ConversationId);
+            AddLegacy("ProjectId", scope.ProjectId);
+            AddLegacy("WorldId", scope.WorldId);
+        }
+
+        if (meta.TryGetValue("Source", out var src) && src is not null)
+        {
+            sb.Append("|Source=").Append(src);
+        }
+
         using var sha = SHA256.Create();
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
         var hash = sha.ComputeHash(bytes);

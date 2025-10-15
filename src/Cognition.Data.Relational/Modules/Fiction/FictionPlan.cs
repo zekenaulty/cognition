@@ -15,6 +15,7 @@ public class FictionPlan : BaseEntity
     public List<FictionPlanPass> Passes { get; set; } = [];
     public List<FictionChapterBlueprint> ChapterBlueprints { get; set; } = [];
     public List<FictionPlanCheckpoint> Checkpoints { get; set; } = [];
+    public List<FictionPlanBacklogItem> Backlog { get; set; } = [];
     public List<FictionPlanTranscript> Transcripts { get; set; } = [];
     public List<FictionStoryMetric> StoryMetrics { get; set; } = [];
     public List<FictionWorldBible> WorldBibles { get; set; } = [];

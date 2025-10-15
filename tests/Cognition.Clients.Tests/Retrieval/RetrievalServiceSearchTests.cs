@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Cognition.Clients.LLM;
+using Cognition.Clients.Configuration;
 using Cognition.Clients.Retrieval;
+using Cognition.Clients.Scope;
+using Cognition.Clients.LLM;
 using Cognition.Contracts;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Models;
@@ -92,7 +94,9 @@ public class RetrievalServiceSearchTests
             DefaultIndex = "vectors-test"
         });
         var logger = LoggerFactory.Create(b => { }).CreateLogger<RetrievalService>();
-        return new RetrievalService(store, options, logger, embeddings);
+        var scopeOptions = Options.Create(new ScopePathOptions { PathAwareHashingEnabled = false, DualWriteEnabled = false });
+        var diagnostics = new ScopePathDiagnostics();
+        return new RetrievalService(store, options, scopeOptions, diagnostics, logger, embeddings);
     }
 
     private sealed class EmbeddingsClientStub : IEmbeddingsClient

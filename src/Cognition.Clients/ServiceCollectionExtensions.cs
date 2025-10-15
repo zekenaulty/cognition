@@ -1,12 +1,14 @@
 using Cognition.Clients.Images;
 using Cognition.Clients.LLM;
 using Cognition.Clients.Tools;
+using Cognition.Clients.Tools.Planning;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Microsoft.Extensions.DependencyInjection;
 using Cognition.Clients.Agents;
 using Polly;
 using System.Net;
 using System.Net.Http;
+using Cognition.Clients.Scope;
 
 namespace Cognition.Clients;
 
@@ -35,11 +37,16 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFictionPhaseRunner, ChapterArchitectRunner>();
         services.AddScoped<IFictionPhaseRunner, ScrollRefinerRunner>();
         services.AddScoped<IFictionPhaseRunner, SceneWeaverRunner>();
+        services.AddSingleton<IScopePathDiagnostics, ScopePathDiagnostics>();
         return services;
     }
 
     public static IServiceCollection AddCognitionTools(this IServiceCollection services)
     {
+        services.AddSingleton<IPlannerTelemetry, LoggerPlannerTelemetry>();
+        services.AddScoped<IPlannerTranscriptStore, PlannerTranscriptStore>();
+        services.AddScoped<IPlannerTemplateRepository, PlannerTemplateRepository>();
+        services.AddSingleton<IPlannerCatalog, PlannerCatalog>();
         services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddScoped<IToolDispatcher, ToolDispatcher>();
 

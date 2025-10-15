@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
 
 namespace Cognition.Data.Vectors.OpenSearch.OpenSearch.Provisioning.Mappings;
@@ -20,6 +21,10 @@ public static class VectorIndexMappingProvider
                     ["tenantKey"] = new { type = "keyword" },
                     ["kind"] = new { type = "keyword" },
                     ["text"] = new { type = "text" },
+                    ["scopePath"] = new { type = "keyword" },
+                    ["scopePrincipalType"] = new { type = "keyword" },
+                    ["scopePrincipalId"] = new { type = "keyword" },
+                    ["scopeSegments"] = new { type = "object", enabled = true },
                     [embeddingField] = new
                     {
                         type = "knn_vector",
@@ -35,4 +40,3 @@ public static class VectorIndexMappingProvider
         return body;
     }
 }
-

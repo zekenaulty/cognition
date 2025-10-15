@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Cognition.Data.Relational.Modules.Common;
 
 namespace Cognition.Data.Relational.Modules.Knowledge;
@@ -30,6 +31,12 @@ public class KnowledgeEmbedding : BaseEntity
     public int? CharEnd { get; set; }
     public string? Language { get; set; }
     public int? SchemaVersion { get; set; }
+
+    // Scope path dual-write columns
+    public Guid? ScopePrincipalId { get; set; }
+    public string? ScopePrincipalType { get; set; }
+    public string? ScopePath { get; set; }
+    public Dictionary<string, string>? ScopeSegments { get; set; }
 }
 
 public enum EmbeddingSpace

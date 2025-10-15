@@ -74,12 +74,17 @@ public class KnowledgeEmbeddingConfiguration : IEntityTypeConfiguration<Knowledg
         b.Property(x => x.CharEnd).HasColumnName("char_end");
         b.Property(x => x.Language).HasColumnName("language");
         b.Property(x => x.SchemaVersion).HasColumnName("schema_version");
+        b.Property(x => x.ScopePrincipalId).HasColumnName("scope_principal_id");
+        b.Property(x => x.ScopePrincipalType).HasColumnName("scope_principal_type");
+        b.Property(x => x.ScopePath).HasColumnName("scope_path");
+        b.Property(x => x.ScopeSegments).HasColumnName("scope_segments").HasColumnType("jsonb");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.HasIndex(x => x.KnowledgeItemId).HasDatabaseName("ix_knowledge_embeddings_item_id");
         b.HasIndex(x => x.Model).HasDatabaseName("ix_knowledge_embeddings_model");
         b.HasIndex(x => x.Provider).HasDatabaseName("ix_knowledge_embeddings_provider");
         b.HasIndex(x => x.Dimensions).HasDatabaseName("ix_knowledge_embeddings_dimensions");
+        b.HasIndex(x => new { x.ScopePrincipalType, x.ScopePrincipalId }).HasDatabaseName("ix_knowledge_embeddings_scope_principal");
         b.HasIndex(x => new { x.KnowledgeItemId, x.Model, x.ModelVersion, x.ChunkIndex })
             .IsUnique()
             .HasDatabaseName("ux_knowledge_embeddings_item_model_version_chunk");

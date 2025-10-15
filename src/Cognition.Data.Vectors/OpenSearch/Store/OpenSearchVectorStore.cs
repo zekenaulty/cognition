@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
@@ -95,7 +96,13 @@ public sealed class OpenSearchVectorStore : IVectorStore
                 TenantKey = src.TryGetProperty("tenantKey", out var tk) ? tk.GetString() ?? string.Empty : string.Empty,
                 Kind = src.TryGetProperty("kind", out var kd) ? kd.GetString() ?? string.Empty : string.Empty,
                 Text = src.TryGetProperty("text", out var tx) ? tx.GetString() ?? string.Empty : string.Empty,
-                SchemaVersion = src.TryGetProperty("schemaVersion", out var sv) && sv.TryGetInt32(out var svi) ? svi : 1
+                SchemaVersion = src.TryGetProperty("schemaVersion", out var sv) && sv.TryGetInt32(out var svi) ? svi : 1,
+                ScopePath = src.TryGetProperty("scopePath", out var sp) ? sp.GetString() : null,
+                ScopePrincipalType = src.TryGetProperty("scopePrincipalType", out var spt) ? spt.GetString() : null,
+                ScopePrincipalId = src.TryGetProperty("scopePrincipalId", out var spi) ? spi.GetString() : null,
+                ScopeSegments = src.TryGetProperty("scopeSegments", out var ss) && ss.ValueKind == JsonValueKind.Object
+                    ? ss.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString() ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    : null
             };
             results.Add(new SearchResult { Item = item, Score = score });
         }
@@ -123,6 +130,14 @@ public sealed class OpenSearchVectorStore : IVectorStore
             dict["embedding"] = item.Embedding;
         if (item.Metadata is not null)
             dict["metadata"] = item.Metadata;
+        if (!string.IsNullOrWhiteSpace(item.ScopePath))
+            dict["scopePath"] = item.ScopePath;
+        if (!string.IsNullOrWhiteSpace(item.ScopePrincipalType))
+            dict["scopePrincipalType"] = item.ScopePrincipalType;
+        if (!string.IsNullOrWhiteSpace(item.ScopePrincipalId))
+            dict["scopePrincipalId"] = item.ScopePrincipalId;
+        if (item.ScopeSegments is not null && item.ScopeSegments.Count > 0)
+            dict["scopeSegments"] = item.ScopeSegments;
 
         return dict;
     }

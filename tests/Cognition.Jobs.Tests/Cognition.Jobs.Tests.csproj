@@ -6,4 +6,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cognition.Jobs\Cognition.Jobs.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NSubstitute" Version="5.1.0" />
+  </ItemGroup>
 </Project>

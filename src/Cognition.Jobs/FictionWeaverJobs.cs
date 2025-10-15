@@ -4,11 +4,13 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Tools.Fiction.Weaver;
+using Cognition.Clients.Tools.Planning;
 using Cognition.Contracts.Events;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Fiction;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Rebus.Bus;
 
@@ -20,14 +22,14 @@ public class FictionWeaverJobs
     private readonly ILogger<FictionWeaverJobs> _logger;
     private readonly IReadOnlyDictionary<FictionPhase, IFictionPhaseRunner> _runnerLookup;
     private readonly IBus _bus;
-    private readonly SignalRNotifier _notifier;
+    private readonly IPlanProgressNotifier _planNotifier;
     private readonly WorkflowEventLogger _workflowLogger;
 
     public FictionWeaverJobs(
         CognitionDbContext db,
         IEnumerable<IFictionPhaseRunner> runners,
         IBus bus,
-        SignalRNotifier notifier,
+        IPlanProgressNotifier notifier,
         WorkflowEventLogger workflowLogger,
         ILogger<FictionWeaverJobs> logger)
     {
@@ -35,7 +37,7 @@ public class FictionWeaverJobs
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _runnerLookup = runners?.ToDictionary(r => r.Phase) ?? throw new ArgumentNullException(nameof(runners));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
-        _notifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
+        _planNotifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
         _workflowLogger = workflowLogger ?? throw new ArgumentNullException(nameof(workflowLogger));
     }
 
@@ -112,7 +114,8 @@ public class FictionWeaverJobs
 
         var effectiveContext = NormalizeContext(context, plan.PrimaryBranchSlug);
 
-        if (plan.Status == FictionPlanStatus.Draft)
+                var backlogItemId = GetBacklogItemId(effectiveContext);
+if (plan.Status == FictionPlanStatus.Draft)
         {
             plan.Status = FictionPlanStatus.InProgress;
             plan.UpdatedAtUtc = DateTime.UtcNow;
@@ -142,7 +145,12 @@ public class FictionWeaverJobs
             checkpoint.LockedByConversationId = null;
             checkpoint.LockedAtUtc = null;
             checkpoint.Progress = BuildProgressSnapshot(phase, effectiveContext, "resumed", "Branch resumed.");
-            checkpoint.UpdatedAtUtc = DateTime.UtcNow;
+            checkpoint.UpdatedAtUtc = DateTime.UtcNow;            if (!string.IsNullOrEmpty(backlogItemId))
+            {
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, cancellationToken).ConfigureAwait(false);
+            }
+
+
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "resumed", "Branch resumed.", null, null, null, cancellationToken).ConfigureAwait(false);
         }
@@ -160,13 +168,28 @@ public class FictionWeaverJobs
         var startedAtUtc = DateTime.UtcNow;
         await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "started", "Phase execution started.", null, null, startedAtUtc, cancellationToken).ConfigureAwait(false);
 
-        try
+                if (!string.IsNullOrEmpty(backlogItemId))
+        {
+            await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.InProgress, cancellationToken).ConfigureAwait(false);
+        }
+
+try
         {
             _logger.LogInformation("Running fiction phase {Phase} for plan {PlanId} (branch {Branch}).", phase, plan.Id, effectiveContext.BranchSlug);
 
             var result = await runner.RunAsync(effectiveContext, cancellationToken).ConfigureAwait(false);
 
-            await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancellationToken).ConfigureAwait(false);
+                        if (phase == FictionPhase.VisionPlanner)
+            {
+                await ApplyVisionPlannerBacklogAsync(plan.Id, result, cancellationToken).ConfigureAwait(false);
+            }
+            else if (!string.IsNullOrEmpty(backlogItemId))
+            {
+                var finalStatus = MapPhaseStatusToBacklog(result.Status);
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, finalStatus, cancellationToken).ConfigureAwait(false);
+            }
+
+await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancellationToken).ConfigureAwait(false);
 
             checkpoint.LockedByAgentId = null;
             checkpoint.LockedByConversationId = null;
@@ -249,6 +272,187 @@ public class FictionWeaverJobs
         return raw.Equals("true", StringComparison.OrdinalIgnoreCase) || raw.Equals("1") || raw.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 
+    private async Task ApplyVisionPlannerBacklogAsync(Guid planId, FictionPhaseResult result, CancellationToken cancellationToken)
+    {
+        var backlog = ExtractPlannerBacklog(result);
+        await UpsertBacklogAsync(planId, backlog, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task UpsertBacklogAsync(Guid planId, IReadOnlyList<PlannerBacklogItem> backlog, CancellationToken cancellationToken)
+    {
+        var existing = await _db.FictionPlanBacklogItems
+            .Where(x => x.FictionPlanId == planId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var now = DateTime.UtcNow;
+        var incomingIds = new HashSet<string>(backlog.Select(b => b.Id), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entity in existing.ToList())
+        {
+            if (!incomingIds.Contains(entity.BacklogId))
+            {
+                _db.FictionPlanBacklogItems.Remove(entity);
+            }
+        }
+
+        foreach (var item in backlog)
+        {
+            var existingItem = existing.FirstOrDefault(x => string.Equals(x.BacklogId, item.Id, StringComparison.OrdinalIgnoreCase));
+            if (existingItem is null)
+            {
+                existingItem = new FictionPlanBacklogItem
+                {
+                    Id = Guid.NewGuid(),
+                    FictionPlanId = planId,
+                    BacklogId = item.Id,
+                    CreatedAtUtc = now
+                };
+                _db.FictionPlanBacklogItems.Add(existingItem);
+                existing.Add(existingItem);
+            }
+
+            existingItem.Description = item.Description;
+            existingItem.Status = MapPlannerStatus(item.Status);
+            existingItem.Inputs = item.Inputs.Count == 0 ? null : item.Inputs.Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+            existingItem.Outputs = item.Outputs.Count == 0 ? null : item.Outputs.Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+            existingItem.UpdatedAtUtc = now;
+
+            switch (existingItem.Status)
+            {
+                case FictionPlanBacklogStatus.InProgress:
+                    existingItem.InProgressAtUtc ??= now;
+                    existingItem.CompletedAtUtc = null;
+                    break;
+                case FictionPlanBacklogStatus.Complete:
+                    existingItem.InProgressAtUtc ??= now;
+                    existingItem.CompletedAtUtc ??= now;
+                    break;
+                default:
+                    existingItem.InProgressAtUtc = null;
+                    existingItem.CompletedAtUtc = null;
+                    break;
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SetBacklogStatusAsync(Guid planId, string backlogId, FictionPlanBacklogStatus status, CancellationToken cancellationToken)
+    {
+        var entity = (await _db.FictionPlanBacklogItems
+            .Where(x => x.FictionPlanId == planId)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false))
+            .FirstOrDefault(x => string.Equals(x.BacklogId, backlogId, StringComparison.OrdinalIgnoreCase));
+
+        if (entity is null)
+        {
+            _logger.LogWarning("Backlog item {BacklogId} was not found for plan {PlanId}.", backlogId, planId);
+            return;
+        }
+
+        if (entity.Status == status && status != FictionPlanBacklogStatus.InProgress)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        entity.Status = status;
+        entity.UpdatedAtUtc = now;
+
+        switch (status)
+        {
+            case FictionPlanBacklogStatus.InProgress:
+                entity.InProgressAtUtc = now;
+                entity.CompletedAtUtc = null;
+                break;
+            case FictionPlanBacklogStatus.Complete:
+                entity.InProgressAtUtc ??= now;
+                entity.CompletedAtUtc = now;
+                break;
+            default:
+                entity.InProgressAtUtc = null;
+                entity.CompletedAtUtc = null;
+                break;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static FictionPlanBacklogStatus MapPlannerStatus(PlannerBacklogStatus status) => status switch
+    {
+        PlannerBacklogStatus.InProgress => FictionPlanBacklogStatus.InProgress,
+        PlannerBacklogStatus.Complete => FictionPlanBacklogStatus.Complete,
+        _ => FictionPlanBacklogStatus.Pending
+    };
+
+    private static FictionPlanBacklogStatus MapPhaseStatusToBacklog(FictionPhaseStatus status) => status switch
+    {
+        FictionPhaseStatus.Completed => FictionPlanBacklogStatus.Complete,
+        _ => FictionPlanBacklogStatus.Pending
+    };
+
+    private static string? GetBacklogItemId(FictionPhaseExecutionContext context)
+    {
+        if (context.Metadata is null) return null;
+        if (!context.Metadata.TryGetValue("backlogItemId", out var value)) return null;
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static IReadOnlyList<PlannerBacklogItem> ExtractPlannerBacklog(FictionPhaseResult result)
+    {
+        if (result.Data is null || !result.Data.TryGetValue("backlog", out var backlogObj) || backlogObj is null)
+        {
+            return Array.Empty<PlannerBacklogItem>();
+        }
+
+        try
+        {
+            var json = JsonConvert.SerializeObject(backlogObj);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return Array.Empty<PlannerBacklogItem>();
+            }
+
+            var contracts = JsonConvert.DeserializeObject<List<PlannerBacklogContract>>(json);
+            if (contracts is null)
+            {
+                return Array.Empty<PlannerBacklogItem>();
+            }
+
+            var list = new List<PlannerBacklogItem>(contracts.Count);
+            foreach (var contract in contracts)
+            {
+                if (string.IsNullOrWhiteSpace(contract.Id))
+                {
+                    continue;
+                }
+
+                var description = string.IsNullOrWhiteSpace(contract.Description) ? contract.Id : contract.Description!;
+                var status = PlannerBacklogStatusExtensions.Parse(contract.Status);
+                var inputs = contract.Inputs?.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()).ToArray() ?? Array.Empty<string>();
+                var outputs = contract.Outputs?.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()).ToArray() ?? Array.Empty<string>();
+                list.Add(new PlannerBacklogItem(contract.Id!, description, status, inputs, outputs));
+            }
+
+            return list;
+        }
+        catch (Newtonsoft.Json.JsonException)
+        {
+            return Array.Empty<PlannerBacklogItem>();
+        }
+    }
+
+    private sealed record PlannerBacklogContract
+    {
+        public string? Id { get; init; }
+        public string? Description { get; init; }
+        public string? Status { get; init; }
+        public string[]? Inputs { get; init; }
+        public string[]? Outputs { get; init; }
+    }
+
     private async Task PublishProgressAsync(
         FictionPhase phase,
         FictionPlan plan,
@@ -297,7 +501,7 @@ public class FictionWeaverJobs
             payload,
             timestampUtc = DateTime.UtcNow
         };
-        await _notifier.NotifyPlanProgressAsync(context.ConversationId, signalPayload).ConfigureAwait(false);
+        await _planNotifier.NotifyPlanProgressAsync(context.ConversationId, signalPayload).ConfigureAwait(false);
     }
 
     private static void CancelCheckpoint(FictionPhase phase, FictionPlanCheckpoint checkpoint, FictionPhaseExecutionContext context)
@@ -499,8 +703,6 @@ public class FictionWeaverJobs
         _ => status.ToString().ToLowerInvariant()
     };
 }
-
-
 
 
 

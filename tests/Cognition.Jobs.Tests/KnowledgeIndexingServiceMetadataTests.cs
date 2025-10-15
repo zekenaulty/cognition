@@ -1,5 +1,6 @@
 using System.Reflection;
 using Cognition.Data.Relational.Modules.Knowledge;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch.Models;
 using Cognition.Jobs;
 using FluentAssertions;
 using Xunit;
@@ -53,6 +54,28 @@ public class KnowledgeIndexingServiceMetadataTests
         metadata.Should().ContainKey("contentType").WhoseValue.Should().Be("Other");
         metadata.Should().ContainKey("timestamp");
         metadata.Keys.Should().NotContain(new[] { "categories", "keywords", "source", "properties" });
+    }
+
+    [Fact]
+    public void ApplyScopeFromMetadata_ShouldPopulateVectorItem()
+    {
+        var agentId = Guid.NewGuid();
+        var properties = new Dictionary<string, object?>
+        {
+            ["AgentId"] = agentId,
+            ["ConversationId"] = Guid.NewGuid()
+        };
+
+        var metadata = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var vector = new VectorItem { Metadata = metadata };
+
+        var applied = vector.ApplyScopeFromMetadata(properties, metadata);
+
+        applied.Should().BeTrue();
+        vector.ScopePrincipalType.Should().Be("agent");
+        vector.ScopePrincipalId.Should().Be(agentId.ToString("D"));
+        vector.ScopeSegments.Should().NotBeNull();
+        metadata.Should().ContainKey("ScopePath");
     }
 
     private static Dictionary<string, object> InvokeBuildMetadata(KnowledgeItem item)

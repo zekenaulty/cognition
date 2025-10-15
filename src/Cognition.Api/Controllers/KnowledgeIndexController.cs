@@ -50,7 +50,7 @@ public class KnowledgeIndexController : ControllerBase
             foreach (var ki in items)
             {
                 var meta = BuildMetadata(ki);
-                docs.Add(new VectorItem
+                var doc = new VectorItem
                 {
                     Id = ki.Id.ToString(),
                     TenantKey = "default",
@@ -59,7 +59,9 @@ public class KnowledgeIndexController : ControllerBase
                     Embedding = null,
                     Metadata = meta,
                     SchemaVersion = 1
-                });
+                };
+                doc.ApplyScopeFromMetadata(ki.Properties, meta);
+                docs.Add(doc);
             }
 
             await _store.UpsertManyAsync(docs, ct);

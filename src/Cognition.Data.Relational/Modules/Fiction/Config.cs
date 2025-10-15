@@ -37,6 +37,10 @@ public class FictionPlanConfiguration : IEntityTypeConfiguration<FictionPlan>
             .HasForeignKey(x => x.FictionProjectId)
             .HasConstraintName("fk_fiction_plans_project");
         b.HasIndex(x => new { x.FictionProjectId, x.Name }).HasDatabaseName("ix_fiction_plans_project_name");
+        b.HasMany(x => x.Backlog)
+            .WithOne(x => x.FictionPlan)
+            .HasForeignKey(x => x.FictionPlanId)
+            .HasConstraintName("fk_fiction_plan_backlog_plan");
     }
 }
 
@@ -59,6 +63,27 @@ public class FictionPlanPassConfiguration : IEntityTypeConfiguration<FictionPlan
             .HasForeignKey(x => x.FictionPlanId)
             .HasConstraintName("fk_fiction_plan_passes_plan");
         b.HasIndex(x => new { x.FictionPlanId, x.PassIndex }).IsUnique().HasDatabaseName("ux_fiction_plan_passes_plan_index");
+    }
+}
+
+public class FictionPlanBacklogItemConfiguration : IEntityTypeConfiguration<FictionPlanBacklogItem>
+{
+    public void Configure(EntityTypeBuilder<FictionPlanBacklogItem> b)
+    {
+        b.ToTable("fiction_plan_backlog");
+        b.HasKey(x => x.Id).HasName("pk_fiction_plan_backlog");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.FictionPlanId).HasColumnName("fiction_plan_id");
+        b.Property(x => x.BacklogId).HasColumnName("backlog_id").HasMaxLength(128);
+        b.Property(x => x.Description).HasColumnName("description").HasMaxLength(512);
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<string>();
+        b.Property(x => x.Inputs).HasColumnName("inputs").HasColumnType("jsonb");
+        b.Property(x => x.Outputs).HasColumnName("outputs").HasColumnType("jsonb");
+        b.Property(x => x.InProgressAtUtc).HasColumnName("in_progress_at_utc");
+        b.Property(x => x.CompletedAtUtc).HasColumnName("completed_at_utc");
+        b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+        b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        b.HasIndex(x => new { x.FictionPlanId, x.BacklogId }).IsUnique().HasDatabaseName("ux_fiction_plan_backlog_plan_backlog_id");
     }
 }
 
@@ -156,17 +181,23 @@ public class FictionChapterSectionConfiguration : IEntityTypeConfiguration<Ficti
         b.HasKey(x => x.Id).HasName("pk_fiction_chapter_sections");
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.FictionChapterScrollId).HasColumnName("fiction_chapter_scroll_id");
+        b.Property(x => x.ParentSectionId).HasColumnName("parent_section_id");
         b.Property(x => x.SectionIndex).HasColumnName("section_index");
         b.Property(x => x.SectionSlug).HasColumnName("section_slug");
         b.Property(x => x.Title).HasColumnName("title");
         b.Property(x => x.Description).HasColumnName("description");
         b.Property(x => x.Metadata).HasColumnName("metadata").HasColumnType("jsonb");
+        b.Property(x => x.BranchId).HasColumnName("branch_id");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.HasOne(x => x.FictionChapterScroll)
             .WithMany(s => s.Sections)
             .HasForeignKey(x => x.FictionChapterScrollId)
             .HasConstraintName("fk_fiction_chapter_sections_scroll");
+        b.HasOne(x => x.ParentSection)
+            .WithMany(x => x.ChildSections)
+            .HasForeignKey(x => x.ParentSectionId)
+            .HasConstraintName("fk_fiction_chapter_sections_parent");
         b.HasIndex(x => new { x.FictionChapterScrollId, x.SectionIndex }).IsUnique().HasDatabaseName("ux_fiction_chapter_sections_scroll_index");
     }
 }

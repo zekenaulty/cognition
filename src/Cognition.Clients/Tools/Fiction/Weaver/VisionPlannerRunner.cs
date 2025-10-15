@@ -1,9 +1,14 @@
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Text;
+using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Tools;
+using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Tools.Planning.Fiction;
+using Cognition.Contracts;
+using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -13,9 +18,19 @@ namespace Cognition.Clients.Tools.Fiction.Weaver;
 
 public class VisionPlannerRunner : FictionPhaseRunnerBase
 {
-    public VisionPlannerRunner(CognitionDbContext db, IAgentService agentService, ILogger<VisionPlannerRunner> logger)
+    private readonly IServiceProvider _serviceProvider;
+    private readonly VisionPlannerTool _planner;
+
+    public VisionPlannerRunner(
+        CognitionDbContext db,
+        IAgentService agentService,
+        IServiceProvider serviceProvider,
+        VisionPlannerTool planner,
+        ILogger<VisionPlannerRunner> logger)
         : base(db, agentService, logger, FictionPhase.VisionPlanner)
     {
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _planner = planner ?? throw new ArgumentNullException(nameof(planner));
     }
 
     protected override async Task<FictionPhaseResult> ExecuteCoreAsync(
@@ -24,75 +39,148 @@ public class VisionPlannerRunner : FictionPhaseRunnerBase
         FictionPhaseExecutionContext context,
         CancellationToken cancellationToken)
     {
-        Logger.LogDebug("VisionPlanner runner invoked for plan {PlanId} on branch {Branch}.", plan.Id, context.BranchSlug);
+        Logger.LogInformation("VisionPlanner runner invoked for plan {PlanId} on branch {Branch}.", plan.Id, context.BranchSlug);
 
         var (providerId, modelId) = ResolveProviderAndModel(context);
-        var prompt = BuildVisionPrompt(plan, context);
+        var parameters = VisionPlannerParameters.Create(plan, conversation, context, providerId, modelId);
 
-        var stopwatch = Stopwatch.StartNew();
-        var (reply, messageId) = await AgentService.ChatAsync(
-            context.ConversationId,
+        var toolContext = new ToolContext(
             context.AgentId,
-            providerId,
-            modelId,
-            prompt,
-            cancellationToken).ConfigureAwait(false);
-        stopwatch.Stop();
+            context.ConversationId,
+            PersonaId: null,
+            _serviceProvider,
+            cancellationToken);
 
-        var validation = FictionResponseValidator.ValidateVisionPayload(reply, plan, context);
-        if (!validation.IsValid)
+        ScopePath? scopePath = null;
+        if (context.AgentId != Guid.Empty || context.ConversationId != Guid.Empty)
         {
-            throw new FictionResponseValidationException(validation);
+            var scopeToken = new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null);
+            scopePath = scopeToken.ToScopePath();
         }
 
-        var data = BuildResponseData(reply, "vision");
-        var transcriptMetadata = new Dictionary<string, object?>
+        var plannerContext = PlannerContext.FromToolContext(
+            toolContext,
+            scopePath,
+            primaryAgentId: context.AgentId,
+            conversationState: new Dictionary<string, object?>
+            {
+                ["planId"] = plan.Id,
+                ["branch"] = context.BranchSlug
+            });
+
+        var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        return ToPhaseResult(plannerResult, context);
+    }
+
+    private FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)
+    {
+        var summary = result.Diagnostics.TryGetValue("validationSummary", out var validationSummary)
+            ? validationSummary
+            : $"Planner completed with outcome {result.Outcome}.";
+
+        var data = result.ToDictionary();
+        var transcripts = BuildTranscripts(result, context);
+
+        var status = result.Outcome switch
         {
-            ["promptType"] = "vision-planner"
+            PlannerOutcome.Success => FictionPhaseStatus.Completed,
+            PlannerOutcome.Partial => FictionPhaseStatus.Blocked,
+            PlannerOutcome.Cancelled => FictionPhaseStatus.Cancelled,
+            _ => FictionPhaseStatus.Failed
         };
 
-        return BuildResult(
-            FictionPhaseStatus.Completed,
-            "Vision planning response recorded.",
-            context,
-            prompt,
-            reply,
-            messageId,
+        return new FictionPhaseResult(
+            FictionPhase.VisionPlanner,
+            status,
+            summary,
             data,
-            latencyMs: stopwatch.Elapsed.TotalMilliseconds,
-            validationStatus: validation.Status,
-            validationDetails: validation.Details,
-            transcriptMetadata: transcriptMetadata);
+            Exception: null,
+            Transcripts: transcripts);
     }
 
-    private static string BuildVisionPrompt(FictionPlan plan, FictionPhaseExecutionContext context)
+    private static IReadOnlyList<FictionPhaseTranscript> BuildTranscripts(PlannerResult result, FictionPhaseExecutionContext context)
     {
-        var projectTitle = string.IsNullOrWhiteSpace(plan.FictionProject?.Title) ? plan.Name : plan.FictionProject!.Title;
-        var branch = string.IsNullOrWhiteSpace(context.BranchSlug) ? "main" : context.BranchSlug;
-        var description = string.IsNullOrWhiteSpace(plan.Description) ? "(no long-form description captured yet)" : plan.Description!;
-        var logline = string.IsNullOrWhiteSpace(plan.FictionProject?.Logline) ? "(no logline recorded yet)" : plan.FictionProject!.Logline!;
+        var step = result.Steps.LastOrDefault();
+        var prompt = TryGetString(step?.Output, "prompt");
+        var response = TryGetString(step?.Output, "response");
+        var messageId = TryGetGuid(step?.Output, "messageId");
 
-        return $@"You are the lead creative planner for the fiction project ""{projectTitle}"" on branch ""{branch}"".
+        var assistantEntry = result.Transcript.LastOrDefault(t => string.Equals(t.Role, "assistant", StringComparison.OrdinalIgnoreCase));
+        var transcriptMetadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["plannerOutcome"] = result.Outcome.ToString()
+        };
 
-Project description:
-{description}
+        if (assistantEntry?.Metadata is not null)
+        {
+            foreach (var kv in assistantEntry.Metadata)
+            {
+                transcriptMetadata[kv.Key] = kv.Value;
+            }
+        }
 
-Project logline:
-{logline}
+        foreach (var diagnostic in result.Diagnostics)
+        {
+            transcriptMetadata[$"diagnostic:{diagnostic.Key}"] = diagnostic.Value;
+        }
 
-Produce minified JSON with the following shape:
-{{
-  ""authorSummary"": ""string describing the author persona voice, tone, pacing, and stylistic edges"",
-  ""bookGoals"": [""goal 1"", ""goal 2"", ""goal 3""],
-  ""storyPlan"": ""markdown outlining acts, protagonists, antagonists, core conflicts, and thematic threads""
-}}
+        var latency = result.Metrics.TryGetValue("latencyMs", out var latencyMs) ? latencyMs : (double?)null;
+        var validationStatus = ParseValidationStatus(transcriptMetadata.TryGetValue("validationStatus", out var statusObj) ? statusObj?.ToString() : null);
+        var validationDetails = transcriptMetadata.TryGetValue("validationSummary", out var summaryObj) ? summaryObj?.ToString() : null;
 
-Respond with JSON only.";
+        var transcripts = new List<FictionPhaseTranscript>(1)
+        {
+            new FictionPhaseTranscript(
+                AgentId: context.AgentId,
+                ConversationId: context.ConversationId,
+                ConversationMessageId: messageId,
+                ChapterBlueprintId: context.ChapterBlueprintId,
+                ChapterScrollId: context.ChapterScrollId,
+                ChapterSceneId: context.ChapterSceneId,
+                Attempt: 1,
+                IsRetry: false,
+                RequestPayload: prompt,
+                ResponsePayload: response,
+                PromptTokens: null,
+                CompletionTokens: null,
+                LatencyMs: latency,
+                ValidationStatus: validationStatus,
+                ValidationDetails: validationDetails,
+                Metadata: transcriptMetadata)
+        };
+
+        return new ReadOnlyCollection<FictionPhaseTranscript>(transcripts);
+    }
+
+    private static string? TryGetString(IReadOnlyDictionary<string, object?>? dictionary, string key)
+    {
+        if (dictionary is null) return null;
+        if (!dictionary.TryGetValue(key, out var value) || value is null) return null;
+        return value.ToString();
+    }
+
+    private static Guid? TryGetGuid(IReadOnlyDictionary<string, object?>? dictionary, string key)
+    {
+        if (dictionary is null) return null;
+        if (!dictionary.TryGetValue(key, out var value) || value is null) return null;
+
+        return value switch
+        {
+            Guid g => g,
+            string s when Guid.TryParse(s, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static FictionTranscriptValidationStatus ParseValidationStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return FictionTranscriptValidationStatus.Unknown;
+        }
+
+        return Enum.TryParse<FictionTranscriptValidationStatus>(status, ignoreCase: true, out var parsed)
+            ? parsed
+            : FictionTranscriptValidationStatus.Unknown;
     }
 }
-
-
-
-
-
-

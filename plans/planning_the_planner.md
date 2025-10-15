@@ -5,6 +5,14 @@ Objective
 - Define `IPlannerTool`, `PlannerBase`, and supporting contracts so planners are metadata-driven, testable, and compose cleanly with existing tool infrastructure.
 - Outline migration steps to refactor in-flight fiction planners onto the shared foundation without stalling feature work.
 
+Current Status (2025-10-13)
+- Planner contracts and base class are implemented; Vision planner runs through `PlannerBase` with transcript/metric capture.
+- Planner executions now persist via `PlannerTranscriptStore` using the new `planner_executions` table, and the startup seeder provisions the canonical vision planner prompt template.
+- Vision planner prompt now yields a dynamic `planningBacklog` (rather than a finished outline) so downstream phases can iteratively fill gaps, matching the iterative flow captured in `reference/iterate-book.py`.
+- Planner-focused tests cover capability lookup, Vision planner orchestration, transcript persistence, template resolution, and telemetry redaction.
+- Outstanding work includes rolling the migration/template seeding through lower environments, migrating the next planner, and documenting rollout guidance.
+- Third-party review (2025-10-14) highlighted three priorities: (1) guard rails for template availability and self-critique budgets, (2) a planner health/diagnostics surface, and (3) backlog metadata plumbing through the dispatcher + fiction runners.
+
 Scope
 - Interfaces, base classes, and metadata DSL for planner-oriented tools living under `Cognition.Clients.Tools`.
 - Shared planner context/result types, transcripts, telemetry events, and dependency injection wiring.
@@ -173,10 +181,10 @@ Open Questions
 - How to present transcripts in the UI? (Coordinate with API team once telemetry sinks confirm.)
 
 Next Steps
-1. Finalise scope path work (prerequisite).
-2. Draft technical spec for `PlannerBase` (class diagrams, method signatures).
-3. Create skeleton implementation behind feature flag.
-4. Pilot migration with one fiction planner, capture lessons.
-5. Iterate base class, document extension hooks.
-6. Expand migration to remaining planners; deprecate old scaffolding.
-
+1. Deploy `20251013181358_PlannerExecutions`/`AddFictionPlanBacklog` migrations and run the seeder in lower environments; verify transcripts and backlog entries persist, and archive screenshots in the rollout log.
+2. Wire planner health/diagnostics endpoint surfacing planner registrations, template availability, backlog counts, last failures, and token metrics; expose `planner.*` telemetry streams for dashboards.
+3. Enforce template availability: make `PlannerBase` throw when a declared `StepDescriptor` template is missing, and add tests that resolve every template id through `IPlannerTemplateRepository`.
+4. Add self-critique budget controls (metadata + runtime guard) and record critique token usage in planner telemetry; default to disabled unless explicitly enabled per planner/persona.
+5. Automate backlog metadata plumbing: dispatcher must always propagate `backlogItemId`, and fiction phase runners should consume/update statuses without manual args.
+6. Migrate the next fiction planner (iterative/story) onto `PlannerBase`, capture parity results with ScriptedLLM, and update the dev recipe before broader rollout.
+7. Publish planner rollout guidance covering telemetry expectations, prompt layout, backlog usage, and QA signoff requirements once the above foundations are in place.

@@ -1,7 +1,7 @@
 # Scope Token Path Refactor
 
 Objective
-- Move scope identity from fixed fields to a canonical, ordered path while keeping steward ownership explicit (persona/agent).
+- Move scope identity from fixed fields to a canonical, ordered path while keeping steward ownership explicit via a root principal (persona, agent, org, etc.).
 - Ensure hashing, retrieval, and dedupe all respect the path so scoped variants never collide or bleed.
 - Deliver fluent LINQ/query helpers so RAG, jobs, and tools can target scopes without bespoke wiring.
 - Keep migration low-risk via dual-write/backfill phases and transparent rollouts.
@@ -20,47 +20,47 @@ Out of Scope
 - Production data backfills (document plan only if deferred).
 
 Deliverables
-- `ScopeSegment` / `ScopePath` value objects plus normalization helpers.
-- Updated `ScopeToken` (or successor) requiring exactly one persona/agent GUID and ordered meta segments.
-- Path-aware hashing (`ComputeContentHash` replacement) including canonical path input.
-- Dual-write persistence (legacy columns + new path fields), with migration scripts/read models documented.
-- Fluent query extensions (`ForPersona`, `ForAgent`, `WithContext`, `UnderPath`, `WalkUp`) for EF/OpenSearch/Cosmos consumers.
-- Updated tooling docs + developer guidance for constructing scopes.
+- `ScopePrincipal`, `ScopeSegment`, `ScopePath` value objects plus normalization helpers.
+- Updated `ScopeToken` (or successor) requiring exactly one principal segment (RootId + PrincipalType) and ordered context segments.
+- Path-aware hashing (`ComputeContentHash` replacement) including canonical path input and principal fingerprint.
+- Dual-write persistence (legacy columns + new principal/path fields), with migration scripts/read models documented.
+- Fluent query extensions (`ForPrincipal`, `ForPersona`, `ForAgent`, `WithContext`, `UnderPath`, `WalkUp`) for EF/OpenSearch/Cosmos consumers.
+- Updated tooling docs + developer guidance for constructing scopes with principals.
 - Regression tests: hashing, persistence, LINQ helpers, dispatcher integration, retrieval fallbacks.
 
 Strategy
-- Phase 0 – Discovery & Design
+- Phase 0 - Discovery & Design
   - Inventory current scope usage (clients, data, jobs, API) and confirm steward requirements.
-  - Finalize canonical segment schema, allowed keys, normalization rules, and validation guardrails.
+  - Finalize canonical principal + segment schema, allowed keys, normalization rules, and validation guardrails.
   - Author migration approach (dual-write, backfill, cutover).
 
-- Phase 1 – Core Model & Hashing
-  - Introduce `ScopeSegment`, `ScopePath`, and canonical renderer.
-  - Update `ScopeToken` (or successor) to require agent/persona and path segments.
-  - Extend hashing utilities to include canonical path; guard with feature flag.
+- Phase 1 - Core Model & Hashing
+  - Introduce `ScopePrincipal`, `ScopeSegment`, `ScopePath`, and canonical renderer.
+  - Update `ScopeToken` (or successor) to enforce a single principal segment followed by ordered context segments.
+  - Extend hashing utilities to include principal fingerprint + canonical path; guard with feature flag.
 
-- Phase 2 – Persistence & Dual Write
-  - Add path columns/JSON to relational/vector stores; update EF models.
-  - Implement dual-write (legacy fields + path metadata) behind toggle.
-  - Backfill writer logic to populate path and `Source` fallbacks for old records.
+- Phase 2 - Persistence & Dual Write
+  - Add principal/path columns or JSON fields to relational/vector stores; update EF models.
+  - Implement dual-write (legacy fields + new principal/path metadata) behind toggle.
+  - Backfill writer logic to populate principal/path data and `Source` fallbacks for old records.
 
-- Phase 3 – Query & Retrieval Surface
-  - Build LINQ/EF helpers and query extensions (exact, prefix, ancestor walk-up).
+- Phase 3 - Query & Retrieval Surface
+  - Build LINQ/EF helpers and query extensions (exact, prefix, ancestor walk-up) keyed off `ScopePrincipal`.
   - Update RAG retrieval, `ToolDispatcher`, and other callers to consume the fluent API.
   - Provide path-aware filters in vector/OpenSearch builders.
 
-- Phase 4 – Migration & Cutover
+- Phase 4 - Migration & Cutover
   - Run backfill scripts or opportunistic updates; verify coverage.
   - Flip hashing to path-aware mode; monitor collisions.
   - Remove legacy-only code paths once adoption verified; document cleanup.
 
-- Phase 5 – Validation & Hardening
+- Phase 5 - Validation & Hardening
   - Expand tests across suites with shared fakes (scope constructors, retrieval fallbacks).
   - Update documentation, examples, and developer onboarding.
   - Capture metrics for scope usage; prepare regression nets as needed.
 
 Data / Storage Changes
-- New columns/JSON fields for canonical path string and structured segments.
+- New columns/JSON fields for principal (RootId + PrincipalType), canonical path string, and structured segments.
 - Migration scripts for schema adjustments and dual-write toggle.
 - Optional view/materialized path for analytics if required.
 
@@ -78,10 +78,10 @@ Testing / Verification
 - End-to-end smoke (vector upsert/search, API flows) once toggled on.
 
 Risks & Mitigations
-- Collision or bleed if hashing misconfigured → exhaustive tests + feature gating.
-- Query perf regressions on path columns → index strategy and benchmarks.
-- Migration drift → dry-run backfill in lower envs, detailed runbook.
-- Consumer misuse of segments → guard APIs, validation errors, developer docs.
+- Collision or bleed if hashing misconfigured -> exhaustive tests + feature gating.
+- Query perf regressions on principal/path columns -> add indexes and benchmark before enabling flags.
+- Migration drift -> dry-run backfills in lower environments with detailed runbooks.
+- Consumer misuse of segments -> guard APIs, validation errors, and developer documentation.
 
 Worklog Protocol
 - Snapshot via `arc.py` + git tag before major code changes; record in step note.
@@ -90,11 +90,13 @@ Worklog Protocol
 
 Checklist
 - [ ] Capture pre-change snapshot + tag.
-- [ ] Finalize canonical path schema & validation rules.
-- [ ] Implement path-aware model + hashing (behind flag).
-- [ ] Add persistence dual-write paths and migrations.
+- [x] Finalize canonical path schema & validation rules.
+- [x] Implement path-aware model + hashing (behind flag).
+- [x] Add persistence dual-write paths and migrations.
 - [ ] Update retrieval/tooling layers to new LINQ helpers.
 - [ ] Backfill existing data and enable path hashing.
-- [ ] Expand regression tests (clients/data/jobs/api).
+- [x] Expand regression tests (clients/data/jobs/api).
 - [ ] Update documentation & developer guidance.
+- [ ] Apply `ScopePathDualWrite` migration + OpenSearch mapping updates in each environment.
+- [ ] Run scoped backfill + monitoring playbook before flipping `PathAwareHashing`.
 

@@ -194,7 +194,13 @@ public sealed class InMemoryVectorStore : IVectorStore
             SchemaVersion = item.SchemaVersion,
             Extensions = item.Extensions is null
                 ? null
-                : new Dictionary<string, object>(item.Extensions, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, object>(item.Extensions, StringComparer.OrdinalIgnoreCase),
+            ScopePath = item.ScopePath,
+            ScopePrincipalType = item.ScopePrincipalType,
+            ScopePrincipalId = item.ScopePrincipalId,
+            ScopeSegments = item.ScopeSegments is null
+                ? null
+                : new Dictionary<string, string>(item.ScopeSegments, StringComparer.OrdinalIgnoreCase)
         };
     }
 

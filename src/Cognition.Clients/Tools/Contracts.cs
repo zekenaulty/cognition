@@ -1,3 +1,4 @@
+using Cognition.Clients.Tools.Planning;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Cognition.Clients.Tools;
@@ -20,5 +21,5 @@ public interface ITool
 public interface IToolDispatcher
 {
     Task<(bool ok, object? result, string? error)> ExecuteAsync(Guid toolId, ToolContext ctx, IDictionary<string, object?> args, bool log = true);
+    Task<(bool ok, PlannerResult? result, string? error)> ExecutePlannerAsync(Guid toolId, PlannerContext ctx, PlannerParameters parameters, bool log = true);
 }
-

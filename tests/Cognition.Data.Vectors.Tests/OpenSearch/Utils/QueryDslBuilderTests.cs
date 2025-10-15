@@ -59,4 +59,71 @@ public class QueryDslBuilderTests
         filter.GetArrayLength().Should().Be(1);
         filter[0].GetProperty("term").GetProperty("tenantKey").GetString().Should().Be("tenant");
     }
+
+    [Fact]
+    public void BuildKnnQuery_ShouldPromoteScopePathFilters()
+    {
+        var filters = new Dictionary<string, object>
+        {
+            ["ScopePath"] = "agent/test:conversation/abc"
+        };
+
+        var body = QueryDslBuilder.BuildKnnQuery(
+            embeddingField: "embedding",
+            queryVector: new[] { 0.1f, 0.2f, 0.3f },
+            topK: 5,
+            tenantKey: "tenant",
+            kind: null,
+            filters: filters);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(body));
+        var filter = doc.RootElement.GetProperty("query").GetProperty("bool").GetProperty("filter");
+
+        filter.GetArrayLength().Should().Be(1 /* tenant */ + 2 /* scope path */);
+        filter[0].GetProperty("term").GetProperty("tenantKey").GetString().Should().Be("tenant");
+        filter[1].GetProperty("term").GetProperty("scopePath").GetString().Should().Be("agent/test:conversation/abc");
+        filter[2].GetProperty("term").GetProperty("metadata.ScopePath").GetString().Should().Be("agent/test:conversation/abc");
+    }
+
+    [Fact]
+    public void BuildKnnQuery_ShouldExpandScopeSegmentsDictionary()
+    {
+        var filters = new Dictionary<string, object?>
+        {
+            ["ScopeSegments"] = new Dictionary<string, object?>
+            {
+                ["agent"] = "agent/test",
+                ["conversation"] = "conversation/abc"
+            }
+        };
+
+        var body = QueryDslBuilder.BuildKnnQuery(
+            embeddingField: "embedding",
+            queryVector: new[] { 0.1f, 0.2f, 0.3f },
+            topK: 5,
+            tenantKey: "tenant",
+            kind: null,
+            filters: filters);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(body));
+        var filter = doc.RootElement.GetProperty("query").GetProperty("bool").GetProperty("filter");
+
+        filter.GetArrayLength().Should().Be(1 /* tenant */ + 4 /* segments */);
+        filter[0].GetProperty("term").GetProperty("tenantKey").GetString().Should().Be("tenant");
+
+        var fields = new HashSet<string>();
+        for (var i = 1; i < filter.GetArrayLength(); i++)
+        {
+            var term = filter[i].GetProperty("term");
+            foreach (var prop in term.EnumerateObject())
+            {
+                fields.Add($"{prop.Name}:{prop.Value.GetString()}");
+            }
+        }
+
+        fields.Should().Contain("scopeSegments.agent:agent/test");
+        fields.Should().Contain("scopeSegments.conversation:conversation/abc");
+        fields.Should().Contain("metadata.ScopeSegments.agent:agent/test");
+        fields.Should().Contain("metadata.ScopeSegments.conversation:conversation/abc");
+    }
 }
