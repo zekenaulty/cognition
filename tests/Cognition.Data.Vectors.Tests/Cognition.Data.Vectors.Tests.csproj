@@ -4,7 +4,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NSubstitute" Version="5.1.0" />
     <ProjectReference Include="..\..\src\Cognition.Data.Vectors\Cognition.Data.Vectors.csproj" />
   </ItemGroup>
 </Project>

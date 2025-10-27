@@ -71,7 +71,7 @@ namespace Cognition.Jobs
             nextTask.Status = "Requested";
             await _db.SaveChangesAsync().ConfigureAwait(false);
 
-            var metadata = BuildMetadata(message.Metadata, conversationPlan.Id, nextTask, branchSlug);
+            var metadata = BuildMetadata(message.Metadata, conversationPlan.Id, nextTask, branchSlug, args);
 
             await _logger.LogAsync(message.ConversationId, nameof(PlanReady), JObject.FromObject(new
             {
@@ -120,7 +120,7 @@ namespace Cognition.Jobs
             }
         }
 
-        private static Dictionary<string, object?> BuildMetadata(Dictionary<string, object?>? source, Guid conversationPlanId, ConversationTask task, string branchSlug)
+        private static Dictionary<string, object?> BuildMetadata(Dictionary<string, object?>? source, Guid conversationPlanId, ConversationTask task, string branchSlug, IReadOnlyDictionary<string, object?> args)
         {
             var metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
@@ -143,6 +143,11 @@ namespace Cognition.Jobs
                 {
                     metadata[kvp.Key] = kvp.Value;
                 }
+            }
+
+            if (args.TryGetValue("backlogItemId", out var backlogId) && backlogId is not null)
+            {
+                metadata["backlogItemId"] = backlogId.ToString();
             }
 
             return metadata;

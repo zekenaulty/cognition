@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Scope;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -23,18 +24,26 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
     private readonly CognitionDbContext _db;
     private readonly IAgentService _agentService;
     private readonly ILogger _logger;
+    private readonly IScopePathBuilder _scopePathBuilder;
 
-    protected FictionPhaseRunnerBase(CognitionDbContext db, IAgentService agentService, ILogger logger, FictionPhase phase)
+    protected FictionPhaseRunnerBase(
+        CognitionDbContext db,
+        IAgentService agentService,
+        ILogger logger,
+        FictionPhase phase,
+        IScopePathBuilder scopePathBuilder)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _agentService = agentService ?? throw new ArgumentNullException(nameof(agentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _scopePathBuilder = scopePathBuilder ?? throw new ArgumentNullException(nameof(scopePathBuilder));
         Phase = phase;
     }
 
     protected CognitionDbContext DbContext => _db;
     protected IAgentService AgentService => _agentService;
     protected ILogger Logger => _logger;
+    protected IScopePathBuilder ScopePathBuilder => _scopePathBuilder;
     protected virtual DateTime UtcNow => DateTime.UtcNow;
 
     public FictionPhase Phase { get; }
@@ -134,12 +143,23 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
             ["branch"] = context.BranchSlug
         };
 
+        var backlogId = context.Metadata is not null
+            && context.Metadata.TryGetValue("backlogItemId", out var backlogValue)
+            && !string.IsNullOrWhiteSpace(backlogValue)
+            ? backlogValue
+            : null;
+
         if (transcriptMetadata is not null)
         {
             foreach (var kv in transcriptMetadata)
             {
                 transcriptMeta[kv.Key] = kv.Value;
             }
+        }
+
+        if (!string.IsNullOrEmpty(backlogId))
+        {
+            transcriptMeta["backlogItemId"] = backlogId;
         }
 
         var transcript = new FictionPhaseTranscript(
@@ -164,6 +184,11 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
         {
             ["rawResponse"] = responsePayload
         };
+
+        if (!string.IsNullOrEmpty(backlogId))
+        {
+            resultData["backlogItemId"] = backlogId;
+        }
 
         if (data is not null)
         {

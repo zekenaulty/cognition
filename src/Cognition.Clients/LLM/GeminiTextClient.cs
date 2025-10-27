@@ -50,13 +50,7 @@ public class GeminiTextClient : ILLMClient
 
     public async Task<string> ChatAsync(IEnumerable<ChatMessage> messages, bool track = false)
     {
-        var url = $"{_apiBase}/v1beta/models/{_model}:generateContent";
-        var body = ToGeminiContent(messages);
-        var req = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = System.Net.Http.Json.JsonContent.Create(body)
-        };
-        var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
+        var resp = await SendWithRetryAsync(() => CreateRequest(ToGeminiContent(messages), stream: false), HttpCompletionOption.ResponseContentRead);
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         var root = doc.RootElement;
@@ -72,13 +66,7 @@ public class GeminiTextClient : ILLMClient
 
     public async IAsyncEnumerable<string> ChatStreamAsync(IEnumerable<ChatMessage> messages, bool track = false)
     {
-        var url = $"{_apiBase}/v1beta/models/{_model}:streamGenerateContent";
-        var body = ToGeminiContent(messages);
-        var req = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = JsonContent.Create(body)
-        };
-        using var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
+        using var resp = await SendWithRetryAsync(() => CreateRequest(ToGeminiContent(messages), stream: true), HttpCompletionOption.ResponseHeadersRead);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync();
         using var reader = new StreamReader(stream);
@@ -118,36 +106,48 @@ public class GeminiTextClient : ILLMClient
         }
     }
 
+    private HttpRequestMessage CreateRequest(object body, bool stream)
+    {
+        var url = stream
+            ? $"{_apiBase}/v1beta/models/{_model}:streamGenerateContent"
+            : $"{_apiBase}/v1beta/models/{_model}:generateContent";
+
+        return new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(body)
+        };
+    }
+
     private static bool IsTransient(HttpResponseMessage r)
         => r.StatusCode == System.Net.HttpStatusCode.RequestTimeout
            || (int)r.StatusCode == 429
            || ((int)r.StatusCode >= 500 && (int)r.StatusCode <= 599);
 
-    private static async Task<HttpResponseMessage> SendWithRetryAsync(Func<Task<HttpResponseMessage>> send)
+    private async Task<HttpResponseMessage> SendWithRetryAsync(Func<HttpRequestMessage> requestFactory, HttpCompletionOption completionOption)
     {
-        int attempt = 0;
+        const int maxAttempts = 3;
         Exception? lastEx = null;
-        while (attempt < 3)
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             try
             {
-                var resp = await send();
-                if (IsTransient(resp))
+                using var request = requestFactory();
+                var resp = await _http.SendAsync(request, completionOption);
+                if (!IsTransient(resp) || attempt == maxAttempts - 1)
                 {
-                    attempt++;
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
-                    continue;
+                    return resp;
                 }
-                return resp;
+                resp.Dispose();
             }
             catch (HttpRequestException ex)
             {
                 lastEx = ex;
-                attempt++;
-                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                if (attempt == maxAttempts - 1) throw;
             }
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt + 1)));
         }
         if (lastEx != null) throw lastEx;
-        return await send();
+        using var finalRequest = requestFactory();
+        return await _http.SendAsync(finalRequest, completionOption);
     }
 }

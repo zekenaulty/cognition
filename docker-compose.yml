@@ -26,6 +26,7 @@ services:
       - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
       - plugins.security.disabled=true
       - compatibility.override_main_response_version=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Dock3r#OpSearch42!
     ulimits:
       memlock:
         soft: -1
@@ -39,6 +40,9 @@ services:
     container_name: cognition-dashboards
     environment:
       - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+      - OPENSEARCH_USERNAME=admin
+      - OPENSEARCH_PASSWORD=Dock3r#OpSearch42!
     ports:
       - "5601:5601"
 

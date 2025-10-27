@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Tools;
@@ -14,10 +15,20 @@ public class ToolDispatcher : IToolDispatcher
     private readonly IServiceProvider _sp;
     private readonly IToolRegistry _registry;
     private readonly ILogger<ToolDispatcher> _logger;
+    private readonly IScopePathBuilder _scopePathBuilder;
 
-    public ToolDispatcher(CognitionDbContext db, IServiceProvider sp, IToolRegistry registry, ILogger<ToolDispatcher> logger)
+    public ToolDispatcher(
+        CognitionDbContext db,
+        IServiceProvider sp,
+        IToolRegistry registry,
+        ILogger<ToolDispatcher> logger,
+        IScopePathBuilder scopePathBuilder)
     {
-        _db = db; _sp = sp; _registry = registry; _logger = logger;
+        _db = db;
+        _sp = sp;
+        _registry = registry;
+        _logger = logger;
+        _scopePathBuilder = scopePathBuilder ?? throw new ArgumentNullException(nameof(scopePathBuilder));
     }
 
     public async Task<(bool ok, PlannerResult? result, string? error)> ExecutePlannerAsync(
@@ -80,9 +91,26 @@ public class ToolDispatcher : IToolDispatcher
             EnsureProviderModelArgs(tool, plannerContext.ToolContext, args);
 
             var plannerParameters = new PlannerParameters(args);
-            var ctxWithToolId = plannerContext.ToolId == tool.Id
-                ? plannerContext
-                : plannerContext with { ToolId = tool.Id };
+            var scopePath = plannerContext.ScopePath;
+            if (scopePath is null &&
+                _scopePathBuilder.TryBuild(
+                    tenantId: null,
+                    appId: null,
+                    personaId: plannerContext.ToolContext.PersonaId,
+                    agentId: plannerContext.ToolContext.AgentId,
+                    conversationId: plannerContext.ToolContext.ConversationId,
+                    projectId: null,
+                    worldId: null,
+                    out var inferredPath))
+            {
+                scopePath = inferredPath;
+            }
+
+            var enrichedContext = scopePath is null ? plannerContext : plannerContext with { ScopePath = scopePath };
+
+            var ctxWithToolId = enrichedContext.ToolId == tool.Id
+                ? enrichedContext
+                : enrichedContext with { ToolId = tool.Id };
 
             _logger.LogInformation("Executing planner {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId}", tool.Name, tool.Id, tool.ClassPath, plannerContext.ToolContext.ConversationId);
             result = await impl.PlanAsync(ctxWithToolId, plannerParameters, plannerContext.ToolContext.Ct).ConfigureAwait(false);

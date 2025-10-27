@@ -1,11 +1,14 @@
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Text;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Scope;
+using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Tools.Planning.Fiction;
+using Cognition.Contracts;
+using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -16,9 +19,20 @@ namespace Cognition.Clients.Tools.Fiction.Weaver;
 
 public class ScrollRefinerRunner : FictionPhaseRunnerBase
 {
-    public ScrollRefinerRunner(CognitionDbContext db, IAgentService agentService, ILogger<ScrollRefinerRunner> logger)
-        : base(db, agentService, logger, FictionPhase.ScrollRefiner)
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ScrollRefinerPlannerTool _planner;
+
+    public ScrollRefinerRunner(
+        CognitionDbContext db,
+        IAgentService agentService,
+        IServiceProvider serviceProvider,
+        ScrollRefinerPlannerTool planner,
+        ILogger<ScrollRefinerRunner> logger,
+        IScopePathBuilder scopePathBuilder)
+        : base(db, agentService, logger, FictionPhase.ScrollRefiner, scopePathBuilder)
     {
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _planner = planner ?? throw new ArgumentNullException(nameof(planner));
     }
 
     protected override async Task<FictionPhaseResult> ExecuteCoreAsync(
@@ -27,7 +41,7 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
         FictionPhaseExecutionContext context,
         CancellationToken cancellationToken)
     {
-        Logger.LogDebug("ScrollRefiner runner invoked for plan {PlanId} on branch {Branch}.", plan.Id, context.BranchSlug);
+        Logger.LogInformation("ScrollRefiner runner invoked for plan {PlanId} on branch {Branch}.", plan.Id, context.BranchSlug);
 
         var (providerId, modelId) = ResolveProviderAndModel(context);
 
@@ -60,124 +74,155 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
                 .ConfigureAwait(false);
         }
 
-        var prompt = BuildScrollPrompt(plan, context, blueprint, existingScroll);
-
-        var stopwatch = Stopwatch.StartNew();
-        var (reply, messageId) = await AgentService.ChatAsync(
-            context.ConversationId,
-            context.AgentId,
+        var parameters = ScrollRefinerPlannerParameters.Create(
+            plan,
+            conversation,
+            context,
             providerId,
             modelId,
-            prompt,
-            cancellationToken).ConfigureAwait(false);
-        stopwatch.Stop();
+            blueprint,
+            existingScroll);
 
-        var validation = FictionResponseValidator.ValidateScrollPayload(reply, plan, context);
-        if (!validation.IsValid)
+        var toolContext = new ToolContext(
+            context.AgentId,
+            context.ConversationId,
+            PersonaId: null,
+            _serviceProvider,
+            cancellationToken);
+
+        ScopePath? scopePath = null;
+        if (ScopePathBuilder.TryBuild(new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null), out var builtPath))
         {
-            throw new FictionResponseValidationException(validation);
+            scopePath = builtPath;
         }
 
-        var data = BuildResponseData(reply, "chapterScroll");
-        var transcriptMetadata = new Dictionary<string, object?>
+        var plannerContext = PlannerContext.FromToolContext(
+            toolContext,
+            scopePath,
+            primaryAgentId: context.AgentId,
+            conversationState: new Dictionary<string, object?>
+            {
+                ["planId"] = plan.Id,
+                ["branch"] = context.BranchSlug,
+                ["chapterScrollId"] = context.ChapterScrollId,
+                ["chapterBlueprintId"] = context.ChapterBlueprintId ?? blueprint?.Id
+            });
+
+        var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        return ToPhaseResult(plannerResult, context);
+    }
+
+    private static FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)
+    {
+        var summary = result.Diagnostics.TryGetValue("validationSummary", out var validationSummary)
+            ? validationSummary
+            : $"Planner completed with outcome {result.Outcome}.";
+
+        var data = result.ToDictionary();
+        var transcripts = BuildTranscripts(result, context);
+
+        var status = result.Outcome switch
         {
-            ["promptType"] = "scroll-refiner",
-            ["chapterScrollId"] = context.ChapterScrollId,
-            ["chapterBlueprintId"] = context.ChapterBlueprintId ?? blueprint?.Id
+            PlannerOutcome.Success => FictionPhaseStatus.Completed,
+            PlannerOutcome.Partial => FictionPhaseStatus.Blocked,
+            PlannerOutcome.Cancelled => FictionPhaseStatus.Cancelled,
+            _ => FictionPhaseStatus.Failed
         };
 
-        return BuildResult(
-            FictionPhaseStatus.Completed,
-            "Chapter scroll refinement response recorded.",
-            context,
-            prompt,
-            reply,
-            messageId,
+        return new FictionPhaseResult(
+            FictionPhase.ScrollRefiner,
+            status,
+            summary,
             data,
-            latencyMs: stopwatch.Elapsed.TotalMilliseconds,
-            validationStatus: validation.Status,
-            validationDetails: validation.Details,
-            transcriptMetadata: transcriptMetadata);
+            Exception: null,
+            Transcripts: transcripts);
     }
 
-    private static string BuildScrollPrompt(
-        FictionPlan plan,
-        FictionPhaseExecutionContext context,
-        FictionChapterBlueprint? blueprint,
-        FictionChapterScroll? existingScroll)
+    private static IReadOnlyList<FictionPhaseTranscript> BuildTranscripts(PlannerResult result, FictionPhaseExecutionContext context)
     {
-        var branch = string.IsNullOrWhiteSpace(context.BranchSlug) ? "main" : context.BranchSlug;
-        var blueprintSynopsis = blueprint is null
-            ? "No chapter blueprint exists yet."
-            : $"Blueprint {blueprint.ChapterIndex} ({blueprint.ChapterSlug}): {blueprint.Title} — {blueprint.Synopsis}";
+        var step = result.Steps.LastOrDefault();
+        var prompt = TryGetString(step?.Output, "prompt");
+        var response = TryGetString(step?.Output, "response");
+        var messageId = TryGetGuid(step?.Output, "messageId");
 
-        var structureJson = blueprint?.Structure is null
-            ? "(structure not captured yet)"
-            : JsonSerializer.Serialize(blueprint.Structure);
-
-        string scrollSummary;
-        if (existingScroll is null)
+        var assistantEntry = result.Transcript.LastOrDefault(t => string.Equals(t.Role, "assistant", StringComparison.OrdinalIgnoreCase));
+        var transcriptMetadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            scrollSummary = "No prior scroll revisions exist for this chapter.";
-        }
-        else
-        {
-            var sectionSummaries = existingScroll.Sections
-                .OrderBy(s => s.SectionIndex)
-                .Select(section =>
-                {
-                    var sceneSummary = section.Scenes
-                        .OrderBy(scene => scene.SceneIndex)
-                        .Select(scene => $"    Scene {scene.SceneIndex}: {scene.Title} — {scene.Description ?? "(no description)"}")
-                        .DefaultIfEmpty("    (no scenes)");
-                    return $"  Section {section.SectionIndex}: {section.Title} — {section.Description ?? "(no description)"}\n{string.Join("\n", sceneSummary)}";
-                });
+            ["plannerOutcome"] = result.Outcome.ToString(),
+            ["chapterScrollId"] = context.ChapterScrollId,
+            ["chapterBlueprintId"] = context.ChapterBlueprintId
+        };
 
-            scrollSummary = string.Join("\n", sectionSummaries);
+        if (assistantEntry?.Metadata is not null)
+        {
+            foreach (var kv in assistantEntry.Metadata)
+            {
+                transcriptMetadata[kv.Key] = kv.Value;
+            }
         }
 
-        return $@"You are refining the chapter scroll for project ""{plan.Name}"" on branch ""{branch}"".
+        foreach (var diagnostic in result.Diagnostics)
+        {
+            transcriptMetadata[$"diagnostic:{diagnostic.Key}"] = diagnostic.Value;
+        }
 
-Blueprint synopsis:
-{blueprintSynopsis}
+        var latency = result.Metrics.TryGetValue("latencyMs", out var latencyMs) ? latencyMs : (double?)null;
+        var validationStatus = transcriptMetadata.TryGetValue("validationStatus", out var statusObj)
+            ? ParseValidationStatus(statusObj?.ToString())
+            : FictionTranscriptValidationStatus.Unknown;
+        var validationSummary = transcriptMetadata.TryGetValue("validationSummary", out var validationObj) ? validationObj?.ToString() : null;
 
-Blueprint structure (JSON):
-{structureJson}
+        return new List<FictionPhaseTranscript>(1)
+        {
+            new FictionPhaseTranscript(
+                AgentId: context.AgentId,
+                ConversationId: context.ConversationId,
+                ConversationMessageId: messageId,
+                ChapterBlueprintId: context.ChapterBlueprintId,
+                ChapterScrollId: context.ChapterScrollId,
+                ChapterSceneId: context.ChapterSceneId,
+                Attempt: 1,
+                IsRetry: false,
+                RequestPayload: prompt,
+                ResponsePayload: response,
+                PromptTokens: null,
+                CompletionTokens: null,
+                LatencyMs: latency,
+                ValidationStatus: validationStatus,
+                ValidationDetails: validationSummary,
+                Metadata: transcriptMetadata)
+        };
+    }
 
-Existing scroll snapshot:
-{scrollSummary}
+    private static string? TryGetString(IReadOnlyDictionary<string, object?>? dictionary, string key)
+    {
+        if (dictionary is null) return null;
+        if (!dictionary.TryGetValue(key, out var value) || value is null) return null;
+        return value.ToString();
+    }
 
-Produce minified JSON with the following structure:
-{{
-  ""scrollSlug"": ""string"",
-  ""title"": ""string"",
-  ""synopsis"": ""string"",
-  ""sections"": [
-    {{
-      ""sectionSlug"": ""string"",
-      ""title"": ""string"",
-      ""summary"": ""string"",
-      ""transitions"": [""string""],
-      ""scenes"": [
-        {{
-          ""sceneSlug"": ""string"",
-          ""title"": ""string"",
-          ""goal"": ""string"",
-          ""conflict"": ""string"",
-          ""turn"": ""string"",
-          ""fallout"": ""string"",
-          ""carryForward"": [""string""]
-        }}
-      ]
-    }}
-  ]
-}}
+    private static Guid? TryGetGuid(IReadOnlyDictionary<string, object?>? dictionary, string key)
+    {
+        if (dictionary is null) return null;
+        if (!dictionary.TryGetValue(key, out var value) || value is null) return null;
 
-Ensure the scroll aligns with the blueprint beats and that continuity notes flag canonical obligations. Respond with JSON only.";
+        return value switch
+        {
+            Guid g => g,
+            string s when Guid.TryParse(s, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static FictionTranscriptValidationStatus ParseValidationStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return FictionTranscriptValidationStatus.Unknown;
+        }
+
+        return Enum.TryParse<FictionTranscriptValidationStatus>(status, ignoreCase: true, out var parsed)
+            ? parsed
+            : FictionTranscriptValidationStatus.Unknown;
     }
 }
-
-
-
-
-

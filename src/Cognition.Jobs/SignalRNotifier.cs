@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Cognition.Jobs
 {
-    public class SignalRNotifier
+    public class SignalRNotifier : IPlanProgressNotifier
     {
         private readonly string _hubUrl;
         private readonly HubConnection _connection;

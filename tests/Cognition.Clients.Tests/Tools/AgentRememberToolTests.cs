@@ -101,6 +101,7 @@ public class AgentRememberToolTests
         });
         var diagnostics = new ScopePathDiagnostics();
         var logger = NullLogger<RetrievalService>.Instance;
-        return new RetrievalService(store, options, scopeOptions, diagnostics, logger, embeddings);
+        var scopePathBuilder = new ScopePathBuilder();
+        return new RetrievalService(store, options, scopeOptions, diagnostics, scopePathBuilder, logger, embeddings);
     }
 }

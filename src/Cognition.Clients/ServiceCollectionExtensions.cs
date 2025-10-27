@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFictionPhaseRunner, ScrollRefinerRunner>();
         services.AddScoped<IFictionPhaseRunner, SceneWeaverRunner>();
         services.AddSingleton<IScopePathDiagnostics, ScopePathDiagnostics>();
+        services.AddSingleton<IScopePathBuilder, ScopePathBuilder>();
         return services;
     }
 

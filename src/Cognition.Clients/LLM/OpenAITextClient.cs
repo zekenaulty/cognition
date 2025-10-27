@@ -44,16 +44,8 @@ public class OpenAITextClient : ILLMClient
 
     public async Task<string> ChatAsync(IEnumerable<ChatMessage> messages, bool track = false)
     {
-        var payload = new
-        {
-            model = _model,
-            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToArray()
-        };
-        var req = new HttpRequestMessage(HttpMethod.Post, $"{_apiBase}/v1/chat/completions")
-        {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-        };
-        var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
+        var payload = BuildPayload(messages, stream: false);
+        var resp = await SendWithRetryAsync(() => CreateRequest(payload), HttpCompletionOption.ResponseContentRead);
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
@@ -62,17 +54,8 @@ public class OpenAITextClient : ILLMClient
 
     public async IAsyncEnumerable<string> ChatStreamAsync(IEnumerable<ChatMessage> messages, bool track = false)
     {
-        var payload = new
-        {
-            model = _model,
-            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToArray(),
-            stream = true
-        };
-        var req = new HttpRequestMessage(HttpMethod.Post, $"{_apiBase}/v1/chat/completions")
-        {
-            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
-        };
-        using var resp = await SendWithRetryAsync(() => _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead));
+        var payload = BuildPayload(messages, stream: true);
+        using var resp = await SendWithRetryAsync(() => CreateRequest(payload), HttpCompletionOption.ResponseHeadersRead);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync();
         using var reader = new StreamReader(stream);
@@ -101,37 +84,54 @@ public class OpenAITextClient : ILLMClient
         }
     }
 
+    private object BuildPayload(IEnumerable<ChatMessage> messages, bool stream)
+    {
+        return new
+        {
+            model = _model,
+            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToArray(),
+            stream
+        };
+    }
+
+    private HttpRequestMessage CreateRequest(object payload)
+    {
+        return new HttpRequestMessage(HttpMethod.Post, $"{_apiBase}/v1/chat/completions")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+    }
+
     private static bool IsTransient(HttpResponseMessage r)
         => r.StatusCode == System.Net.HttpStatusCode.RequestTimeout
            || (int)r.StatusCode == 429
            || ((int)r.StatusCode >= 500 && (int)r.StatusCode <= 599);
 
-    private static async Task<HttpResponseMessage> SendWithRetryAsync(Func<Task<HttpResponseMessage>> send)
+    private async Task<HttpResponseMessage> SendWithRetryAsync(Func<HttpRequestMessage> requestFactory, HttpCompletionOption completionOption)
     {
-        int attempt = 0;
+        const int maxAttempts = 3;
         Exception? lastEx = null;
-        while (attempt < 3)
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             try
             {
-                var resp = await send();
-                if (IsTransient(resp))
+                using var request = requestFactory();
+                var resp = await _http.SendAsync(request, completionOption);
+                if (!IsTransient(resp) || attempt == maxAttempts - 1)
                 {
-                    attempt++;
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
-                    continue;
+                    return resp;
                 }
-                return resp;
+                resp.Dispose();
             }
             catch (HttpRequestException ex)
             {
                 lastEx = ex;
-                attempt++;
-                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                if (attempt == maxAttempts - 1) throw;
             }
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt + 1)));
         }
         if (lastEx != null) throw lastEx;
-        // Last attempt
-        return await send();
+        using var finalRequest = requestFactory();
+        return await _http.SendAsync(finalRequest, completionOption);
     }
 }

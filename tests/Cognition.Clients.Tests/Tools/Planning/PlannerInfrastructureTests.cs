@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
@@ -19,6 +20,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Cognition.Clients.Tests.Tools.Planning;
@@ -128,12 +130,15 @@ Return minified JSON:
 Ensure backlog entries capture still-needed planner passes rather than a finished story outline.
 Respond with JSON only.";
         var templateRepository = new StubTemplateRepository(template);
+        var scopePathBuilder = new ScopePathBuilder();
         var tool = new VisionPlannerTool(
             agentService,
             NullLoggerFactory.Instance,
             telemetry,
             transcriptStore,
-            templateRepository);
+            templateRepository,
+            Options.Create(new PlannerCritiqueOptions()),
+            scopePathBuilder);
 
         var plan = new FictionPlan
         {
@@ -200,12 +205,174 @@ Respond with JSON only.";
         result.Backlog.Should().OnlyContain(b => b.Status == PlannerBacklogStatus.Pending);
     }
 
+    [Fact]
+    public async Task IterativePlannerTool_uses_template_repository_when_available()
+    {
+        var agentService = new StubAgentService();
+        var telemetry = new SpyPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        var template = @"You are iterating on {{planName}} at branch {{branch}} (iteration {{iterationIndex}}).
+
+Existing passes:
+{{existingPasses}}
+
+Project details:
+{{description}}";
+        var templateRepository = new StubTemplateRepository(template);
+        var scopePathBuilder = new ScopePathBuilder();
+        var tool = new IterativePlannerTool(
+            agentService,
+            NullLoggerFactory.Instance,
+            telemetry,
+            transcriptStore,
+            templateRepository,
+            Options.Create(new PlannerCritiqueOptions()),
+            scopePathBuilder);
+
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Starfall Plan",
+            Description = "A sweeping multi-act space saga."
+        };
+
+        var executionContext = FictionPhaseExecutionContext.ForPlan(plan.Id, Guid.NewGuid(), Guid.NewGuid(), branchSlug: "feature/backlog")
+            with { IterationIndex = 3 };
+
+        var existingPasses = new List<IterativePlanPassSummary>
+        {
+            new(1, "Kickoff", "Defined high level stakes"),
+            new(2, "Character polish", "Refined ensemble arcs")
+        };
+
+        var parameters = IterativePlannerParameters.Create(
+            plan,
+            executionContext,
+            providerId: Guid.NewGuid(),
+            modelId: Guid.NewGuid(),
+            existingPasses);
+
+        var services = new ServiceCollection().BuildServiceProvider();
+        var toolContext = new ToolContext(executionContext.AgentId, executionContext.ConversationId, null, services, CancellationToken.None);
+        var plannerContext = PlannerContext.FromToolContext(toolContext, toolId: Guid.NewGuid());
+
+        var result = await tool.PlanAsync(plannerContext, parameters, CancellationToken.None);
+
+        agentService.Requests.Should().HaveCount(1);
+        var prompt = agentService.Requests.Single().Prompt;
+        prompt.Should().Contain("Starfall Plan");
+        prompt.Should().Contain("feature/backlog");
+        prompt.Should().Contain("iteration 3");
+        prompt.Should().Contain("Pass 1: Kickoff");
+        prompt.Should().NotContain("{{planName}}");
+        result.Artifacts.Should().ContainKey("existingPasses");
+        result.Artifacts.Should().ContainKey("prompt");
+        ((string)result.Artifacts["prompt"]!).Should().Be(prompt);
+        telemetry.Started.Should().HaveCount(1);
+        telemetry.Completed.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task PlannerBase_requests_each_template_once()
+    {
+        var telemetry = new SpyPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        var templateRepository = new CountingTemplateRepository("planner.test.shared", "Shared template content.");
+        var options = Options.Create(new PlannerCritiqueOptions());
+        var scopePathBuilder = new ScopePathBuilder();
+        var planner = new TemplateCountingPlanner(
+            NullLoggerFactory.Instance,
+            telemetry,
+            transcriptStore,
+            templateRepository,
+            options,
+            scopePathBuilder);
+
+        var services = new ServiceCollection().BuildServiceProvider();
+        var toolContext = new ToolContext(
+            AgentId: Guid.NewGuid(),
+            ConversationId: Guid.NewGuid(),
+            PersonaId: null,
+            Services: services,
+            Ct: CancellationToken.None);
+        var plannerContext = PlannerContext.FromToolContext(toolContext, toolId: Guid.NewGuid());
+
+        var result = await planner.PlanAsync(plannerContext, new PlannerParameters(), CancellationToken.None);
+
+        result.Outcome.Should().Be(PlannerOutcome.Success);
+        templateRepository.GetCount("planner.test.shared").Should().Be(1);
+    }
+
     private static CognitionDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options;
         return new PlannerTestDbContext(options);
+    }
+
+    private sealed class TemplateCountingPlanner : PlannerBase<PlannerParameters>
+    {
+        private static readonly PlannerMetadata MetadataDefinition = PlannerMetadata.Create(
+            name: "Template Counting Planner",
+            description: "Ensures templates are only requested once per plan.",
+            steps: new[]
+            {
+                new PlannerStepDescriptor("step-1", "First Step", TemplateId: "planner.test.shared"),
+                new PlannerStepDescriptor("step-2", "Second Step", TemplateId: "planner.test.shared")
+            });
+
+        public TemplateCountingPlanner(
+            ILoggerFactory loggerFactory,
+            IPlannerTelemetry telemetry,
+            IPlannerTranscriptStore transcriptStore,
+            IPlannerTemplateRepository templateRepository,
+            IOptions<PlannerCritiqueOptions> critiqueOptions,
+            IScopePathBuilder scopePathBuilder)
+            : base(loggerFactory, telemetry, transcriptStore, templateRepository, critiqueOptions, scopePathBuilder)
+        {
+        }
+
+        public override PlannerMetadata Metadata => MetadataDefinition;
+
+        protected override Task<PlannerResult> ExecutePlanAsync(PlannerContext context, PlannerParameters parameters, CancellationToken ct)
+        {
+            var result = PlannerResult.Success()
+                .AddStep(new PlannerStepRecord("step-1", PlannerStepStatus.Completed, new Dictionary<string, object?>(), TimeSpan.Zero))
+                .AddStep(new PlannerStepRecord("step-2", PlannerStepStatus.Completed, new Dictionary<string, object?>(), TimeSpan.Zero));
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class CountingTemplateRepository : IPlannerTemplateRepository
+    {
+        private readonly string _templateId;
+        private readonly string _template;
+        private readonly Dictionary<string, int> _counts = new(StringComparer.OrdinalIgnoreCase);
+
+        public CountingTemplateRepository(string templateId, string template)
+        {
+            _templateId = templateId;
+            _template = template;
+        }
+
+        public Task<string?> GetTemplateAsync(string templateId, CancellationToken ct)
+        {
+            _counts.TryGetValue(templateId, out var value);
+            _counts[templateId] = value + 1;
+            if (string.Equals(templateId, _templateId, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult<string?>(_template);
+            }
+
+            return Task.FromResult<string?>(null);
+        }
+
+        public int GetCount(string templateId)
+        {
+            return _counts.TryGetValue(templateId, out var value) ? value : 0;
+        }
     }
 
     private sealed class StubTemplateRepository : IPlannerTemplateRepository
@@ -242,6 +409,33 @@ Respond with JSON only.";
         {
             Requests.Add(new AgentRequest(conversationId, agentId, providerId, modelId, input));
 
+            if (input.Contains("storyAdjustments", StringComparison.OrdinalIgnoreCase) ||
+                input.Contains("iteration", StringComparison.OrdinalIgnoreCase))
+            {
+                const string iterative = @"{
+  ""storyAdjustments"": [
+    ""Deepen the political stakes on the orbital council"",
+    ""Seed foreshadowing for the rival faction's betrayal""
+  ],
+  ""characterPriorities"": [
+    ""Clarify the captain's flaw around delegation"",
+    ""Raise the navigator's emotional cost for the plan""
+  ],
+  ""locationNotes"": [
+    ""Expand the comet sanctuary sensory detail"",
+    ""Document the refugee flotilla morale conditions""
+  ],
+  ""systemsConsiderations"": [
+    ""Ensure the quantum sail behaves consistently with prior chapters""
+  ],
+  ""risks"": [
+    ""Iteration may feel repetitive without new stakes"",
+    ""Antagonist reveal needs clearer timing""
+  ]
+}";
+                return Task.FromResult((iterative, Guid.NewGuid()));
+            }
+
             const string response = @"{
   ""authorSummary"": ""An accomplished storyteller weaving grand adventures."",
   ""bookGoals"": [
@@ -275,9 +469,23 @@ Respond with JSON only.";
         public List<(PlannerTelemetryContext Context, PlannerResult Result)> Completed { get; } = new();
         public List<(PlannerTelemetryContext Context, Exception Exception)> Failed { get; } = new();
 
-        public void PlanStarted(PlannerTelemetryContext context) => Started.Add(context);
-        public void PlanCompleted(PlannerTelemetryContext context, PlannerResult result) => Completed.Add((context, result));
-        public void PlanFailed(PlannerTelemetryContext context, Exception exception) => Failed.Add((context, exception));
+        public Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct)
+        {
+            Started.Add(context);
+            return Task.CompletedTask;
+        }
+
+        public Task PlanCompletedAsync(PlannerTelemetryContext context, PlannerResult result, CancellationToken ct)
+        {
+            Completed.Add((context, result));
+            return Task.CompletedTask;
+        }
+
+        public Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct)
+        {
+            Failed.Add((context, exception));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class PlannerTestDbContext : CognitionDbContext
@@ -338,7 +546,7 @@ Respond with JSON only.";
                 b.Property(x => x.Tokens)
                     .HasConversion(
                         v => Serialize(v),
-                        v => Deserialize<Dictionary<string, object?>>(v));
+                        v => Deserialize<Dictionary<string, JsonElement>>(v));
             });
         }
 

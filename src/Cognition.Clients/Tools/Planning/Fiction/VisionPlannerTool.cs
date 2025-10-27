@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Contracts;
@@ -9,6 +10,7 @@ using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -55,7 +57,7 @@ public sealed class VisionPlannerTool : PlannerBase<VisionPlannerParameters>
         capabilities: new[] { "planning", "fiction", "vision" },
         steps: new[]
         {
-            new PlannerStepDescriptor("vision-plan", "Draft Vision Plan")
+            new PlannerStepDescriptor("vision-plan", "Draft Vision Plan", TemplateId: VisionPlannerTemplateId)
         },
         telemetryTags: new Dictionary<string, string>
         {
@@ -69,8 +71,10 @@ public sealed class VisionPlannerTool : PlannerBase<VisionPlannerParameters>
         ILoggerFactory loggerFactory,
         IPlannerTelemetry telemetry,
         IPlannerTranscriptStore transcriptStore,
-        IPlannerTemplateRepository templateRepository)
-        : base(loggerFactory, telemetry, transcriptStore, templateRepository)
+        IPlannerTemplateRepository templateRepository,
+        IOptions<PlannerCritiqueOptions> critiqueOptions,
+        IScopePathBuilder scopePathBuilder)
+        : base(loggerFactory, telemetry, transcriptStore, templateRepository, critiqueOptions, scopePathBuilder)
     {
         _agentService = agentService ?? throw new ArgumentNullException(nameof(agentService));
     }

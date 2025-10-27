@@ -93,10 +93,15 @@ Checklist
 - [x] Finalize canonical path schema & validation rules.
 - [x] Implement path-aware model + hashing (behind flag).
 - [x] Add persistence dual-write paths and migrations.
-- [ ] Update retrieval/tooling layers to new LINQ helpers.
-- [ ] Backfill existing data and enable path hashing.
+- [x] Update retrieval/tooling layers to new LINQ helpers.
+- [ ] WILL NOT DO Backfill existing data and enable path hashing.
 - [x] Expand regression tests (clients/data/jobs/api).
 - [ ] Update documentation & developer guidance.
-- [ ] Apply `ScopePathDualWrite` migration + OpenSearch mapping updates in each environment.
-- [ ] Run scoped backfill + monitoring playbook before flipping `PathAwareHashing`.
+- [ ] WILL NOT DO Apply `ScopePathDualWrite` migration + OpenSearch mapping updates in each environment.
+- [ ] WILL NOT DO Run scoped backfill + monitoring playbook before flipping `PathAwareHashing`.
 
+## Immediate Next Tasks (2025-10-21)
+- DONE Document the ScopePath builder usage in developer guides and add samples for tools/jobs to prevent regressions.
+- Wire the diagnostics endpoint so ops can inspect dual-write/path hashing flag state alongside collision metrics.
+- DONE Finish the OpenSearch query helper alignment (ensure `QueryDslBuilder`/vector stores expose canonical path filters) and add tests guarding the new LINQ extensions.
+- DONE Capture the remaining doc updates + rollout guidance as part of the shared README refresh.

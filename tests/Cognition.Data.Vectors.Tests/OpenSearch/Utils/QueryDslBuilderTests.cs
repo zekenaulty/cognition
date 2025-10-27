@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Utils;
@@ -88,7 +89,7 @@ public class QueryDslBuilderTests
     [Fact]
     public void BuildKnnQuery_ShouldExpandScopeSegmentsDictionary()
     {
-        var filters = new Dictionary<string, object?>
+        var filters = new Dictionary<string, object>
         {
             ["ScopeSegments"] = new Dictionary<string, object?>
             {
@@ -125,5 +126,46 @@ public class QueryDslBuilderTests
         fields.Should().Contain("scopeSegments.conversation:conversation/abc");
         fields.Should().Contain("metadata.ScopeSegments.agent:agent/test");
         fields.Should().Contain("metadata.ScopeSegments.conversation:conversation/abc");
+    }
+
+    [Fact]
+    public void BuildKnnQuery_ShouldDuplicateScopePrincipalFilters()
+    {
+        var principalId = Guid.NewGuid();
+        var filters = new Dictionary<string, object>
+        {
+            ["ScopePrincipalType"] = "agent",
+            ["ScopePrincipalId"] = principalId
+        };
+
+        var body = QueryDslBuilder.BuildKnnQuery(
+            embeddingField: "embedding",
+            queryVector: new[] { 0.5f, 0.8f },
+            topK: 4,
+            tenantKey: "tenant",
+            kind: "knowledge",
+            filters: filters);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(body));
+        var filter = doc.RootElement.GetProperty("query").GetProperty("bool").GetProperty("filter");
+
+        filter.GetArrayLength().Should().Be(1 /* tenant */ + 1 /* kind */ + 4 /* principal dupes */);
+        var seen = new HashSet<string>();
+        for (var i = 0; i < filter.GetArrayLength(); i++)
+        {
+            var term = filter[i].GetProperty("term");
+            foreach (var prop in term.EnumerateObject())
+            {
+                seen.Add($"{prop.Name}:{prop.Value.GetString()}");
+            }
+        }
+
+        var idString = principalId.ToString("D");
+        seen.Should().Contain("tenantKey:tenant");
+        seen.Should().Contain("kind:knowledge");
+        seen.Should().Contain("scopePrincipalType:agent");
+        seen.Should().Contain("metadata.ScopePrincipalType:agent");
+        seen.Should().Contain($"scopePrincipalId:{idString}");
+        seen.Should().Contain($"metadata.ScopePrincipalId:{idString}");
     }
 }

@@ -1,10 +1,11 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Scope;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -18,8 +19,12 @@ public class WorldBibleManagerRunner : FictionPhaseRunnerBase
 
     private sealed record PlanPassSummary(int PassIndex, string Title, string? Summary);
 
-    public WorldBibleManagerRunner(CognitionDbContext db, IAgentService agentService, ILogger<WorldBibleManagerRunner> logger)
-        : base(db, agentService, logger, FictionPhase.WorldBibleManager)
+    public WorldBibleManagerRunner(
+        CognitionDbContext db,
+        IAgentService agentService,
+        ILogger<WorldBibleManagerRunner> logger,
+        IScopePathBuilder scopePathBuilder)
+        : base(db, agentService, logger, FictionPhase.WorldBibleManager, scopePathBuilder)
     {
     }
 
@@ -87,7 +92,7 @@ public class WorldBibleManagerRunner : FictionPhaseRunnerBase
         var description = string.IsNullOrWhiteSpace(plan.Description) ? "(no long-form description captured yet)" : plan.Description!;
         var passesSummary = passes.Count == 0
             ? "No iterative planning passes have been recorded yet."
-            : string.Join("\n", passes.Select(p => $"Pass {p.PassIndex}: {p.Title} � {p.Summary ?? "(no summary)"}"));
+            : string.Join("\n", passes.Select(p => $"Pass {p.PassIndex}: {p.Title} — {p.Summary ?? "(no summary)"}"));
 
         return $@"You are maintaining the world bible for the fiction project ""{plan.Name}"" on branch ""{branch}"".
 

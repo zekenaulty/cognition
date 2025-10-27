@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -41,23 +41,93 @@ public class FictionWeaverJobs
         _workflowLogger = workflowLogger ?? throw new ArgumentNullException(nameof(workflowLogger));
     }
 
-    public Task<FictionPhaseResult> RunVisionPlannerAsync(Guid planId, Guid agentId, Guid conversationId, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null, CancellationToken cancellationToken = default)
-        => ExecutePhaseAsync(FictionPhase.VisionPlanner, CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata), cancellationToken);
+    public Task<FictionPhaseResult> RunVisionPlannerAsync(
+        Guid planId,
+        Guid agentId,
+        Guid conversationId,
+        Guid providerId,
+        Guid? modelId = null,
+        string branchSlug = "main",
+        IReadOnlyDictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default) =>
+        ExecutePhaseAsync(
+            FictionPhase.VisionPlanner,
+            CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata),
+            cancellationToken);
 
-    public Task<FictionPhaseResult> RunWorldBibleManagerAsync(Guid planId, Guid agentId, Guid conversationId, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null, CancellationToken cancellationToken = default)
-        => ExecutePhaseAsync(FictionPhase.WorldBibleManager, CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata), cancellationToken);
+    public Task<FictionPhaseResult> RunWorldBibleManagerAsync(
+        Guid planId,
+        Guid agentId,
+        Guid conversationId,
+        Guid providerId,
+        Guid? modelId = null,
+        string branchSlug = "main",
+        IReadOnlyDictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default) =>
+        ExecutePhaseAsync(
+            FictionPhase.WorldBibleManager,
+            CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata),
+            cancellationToken);
 
-    public Task<FictionPhaseResult> RunIterativePlannerAsync(Guid planId, Guid agentId, Guid conversationId, int iterationIndex, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null, CancellationToken cancellationToken = default)
-        => ExecutePhaseAsync(FictionPhase.IterativePlanner, CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, iterationIndex: iterationIndex), cancellationToken);
+    public Task<FictionPhaseResult> RunIterativePlannerAsync(
+        Guid planId,
+        Guid agentId,
+        Guid conversationId,
+        int iterationIndex,
+        Guid providerId,
+        Guid? modelId = null,
+        string branchSlug = "main",
+        IReadOnlyDictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default) =>
+        ExecutePhaseAsync(
+            FictionPhase.IterativePlanner,
+            CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, iterationIndex: iterationIndex),
+            cancellationToken);
 
-    public Task<FictionPhaseResult> RunChapterArchitectAsync(Guid planId, Guid agentId, Guid conversationId, Guid chapterBlueprintId, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null, CancellationToken cancellationToken = default)
-        => ExecutePhaseAsync(FictionPhase.ChapterArchitect, CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, chapterBlueprintId: chapterBlueprintId), cancellationToken);
+    public Task<FictionPhaseResult> RunChapterArchitectAsync(
+        Guid planId,
+        Guid agentId,
+        Guid conversationId,
+        Guid chapterBlueprintId,
+        Guid providerId,
+        Guid? modelId = null,
+        string branchSlug = "main",
+        IReadOnlyDictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default) =>
+        ExecutePhaseAsync(
+            FictionPhase.ChapterArchitect,
+            CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, chapterBlueprintId: chapterBlueprintId),
+            cancellationToken);
 
-    public Task<FictionPhaseResult> RunScrollRefinerAsync(Guid planId, Guid agentId, Guid conversationId, Guid chapterScrollId, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null, CancellationToken cancellationToken = default)
-        => ExecutePhaseAsync(FictionPhase.ScrollRefiner, CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, chapterScrollId: chapterScrollId), cancellationToken);
+    public Task<FictionPhaseResult> RunScrollRefinerAsync(
+        Guid planId,
+        Guid agentId,
+        Guid conversationId,
+        Guid chapterScrollId,
+        Guid providerId,
+        Guid? modelId = null,
+        string branchSlug = "main",
+        IReadOnlyDictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default) =>
+        ExecutePhaseAsync(
+            FictionPhase.ScrollRefiner,
+            CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, chapterScrollId: chapterScrollId),
+            cancellationToken);
 
-    public Task<FictionPhaseResult> RunSceneWeaverAsync(Guid planId, Guid agentId, Guid conversationId, Guid chapterSceneId, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null, CancellationToken cancellationToken = default)
-        => ExecutePhaseAsync(FictionPhase.SceneWeaver, CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, chapterSceneId: chapterSceneId), cancellationToken);
+    public Task<FictionPhaseResult> RunSceneWeaverAsync(
+        Guid planId,
+        Guid agentId,
+        Guid conversationId,
+        Guid chapterSceneId,
+        Guid providerId,
+        Guid? modelId = null,
+        string branchSlug = "main",
+        IReadOnlyDictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default) =>
+        ExecutePhaseAsync(
+            FictionPhase.SceneWeaver,
+            CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, chapterSceneId: chapterSceneId),
+            cancellationToken);
 
     private static FictionPhaseExecutionContext CreateContext(
         Guid planId,
@@ -99,6 +169,7 @@ public class FictionWeaverJobs
             invokedByJobId,
             merged);
     }
+
     private async Task<FictionPhaseResult> ExecutePhaseAsync(FictionPhase phase, FictionPhaseExecutionContext context, CancellationToken cancellationToken)
     {
         if (!_runnerLookup.TryGetValue(phase, out var runner))
@@ -106,16 +177,18 @@ public class FictionWeaverJobs
             throw new InvalidOperationException($"No runner registered for phase {phase}.");
         }
 
-        var plan = await _db.Set<FictionPlan>().FirstOrDefaultAsync(p => p.Id == context.PlanId, cancellationToken).ConfigureAwait(false);
+        var plan = await _db.Set<FictionPlan>()
+            .FirstOrDefaultAsync(p => p.Id == context.PlanId, cancellationToken)
+            .ConfigureAwait(false);
         if (plan is null)
         {
             throw new InvalidOperationException($"Fiction plan {context.PlanId} was not found.");
         }
 
         var effectiveContext = NormalizeContext(context, plan.PrimaryBranchSlug);
+        var backlogItemId = GetBacklogItemId(effectiveContext);
 
-                var backlogItemId = GetBacklogItemId(effectiveContext);
-if (plan.Status == FictionPlanStatus.Draft)
+        if (plan.Status == FictionPlanStatus.Draft)
         {
             plan.Status = FictionPlanStatus.InProgress;
             plan.UpdatedAtUtc = DateTime.UtcNow;
@@ -127,6 +200,11 @@ if (plan.Status == FictionPlanStatus.Draft)
         if (IsMetadataFlagSet(effectiveContext, "cancel"))
         {
             CancelCheckpoint(phase, checkpoint, effectiveContext);
+            if (!string.IsNullOrEmpty(backlogItemId))
+            {
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "cancel-requested", cancellationToken).ConfigureAwait(false);
+            }
+
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "cancelled", "Cancellation requested prior to execution.", null, null, null, cancellationToken).ConfigureAwait(false);
             return FictionPhaseResult.Cancelled(phase, "Cancellation requested.");
@@ -134,6 +212,11 @@ if (plan.Status == FictionPlanStatus.Draft)
 
         if (checkpoint.Status == FictionPlanCheckpointStatus.Cancelled && !IsMetadataFlagSet(effectiveContext, "resume"))
         {
+            if (!string.IsNullOrEmpty(backlogItemId))
+            {
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "cancelled-checkpoint", cancellationToken).ConfigureAwait(false);
+            }
+
             await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "cancelled", "Phase remains cancelled; skipping execution.", null, null, null, cancellationToken).ConfigureAwait(false);
             return FictionPhaseResult.Cancelled(phase, "Phase cancelled for this branch.");
         }
@@ -145,11 +228,12 @@ if (plan.Status == FictionPlanStatus.Draft)
             checkpoint.LockedByConversationId = null;
             checkpoint.LockedAtUtc = null;
             checkpoint.Progress = BuildProgressSnapshot(phase, effectiveContext, "resumed", "Branch resumed.");
-            checkpoint.UpdatedAtUtc = DateTime.UtcNow;            if (!string.IsNullOrEmpty(backlogItemId))
-            {
-                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, cancellationToken).ConfigureAwait(false);
-            }
+            checkpoint.UpdatedAtUtc = DateTime.UtcNow;
 
+            if (!string.IsNullOrEmpty(backlogItemId))
+            {
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "resume", cancellationToken).ConfigureAwait(false);
+            }
 
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "resumed", "Branch resumed.", null, null, null, cancellationToken).ConfigureAwait(false);
@@ -168,28 +252,33 @@ if (plan.Status == FictionPlanStatus.Draft)
         var startedAtUtc = DateTime.UtcNow;
         await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "started", "Phase execution started.", null, null, startedAtUtc, cancellationToken).ConfigureAwait(false);
 
-                if (!string.IsNullOrEmpty(backlogItemId))
+        if (!string.IsNullOrEmpty(backlogItemId))
         {
-            await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.InProgress, cancellationToken).ConfigureAwait(false);
+            await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.InProgress, phase, effectiveContext, "phase-start", cancellationToken).ConfigureAwait(false);
         }
 
-try
+        try
         {
             _logger.LogInformation("Running fiction phase {Phase} for plan {PlanId} (branch {Branch}).", phase, plan.Id, effectiveContext.BranchSlug);
 
             var result = await runner.RunAsync(effectiveContext, cancellationToken).ConfigureAwait(false);
 
-                        if (phase == FictionPhase.VisionPlanner)
+            if (!string.IsNullOrEmpty(backlogItemId))
             {
-                await ApplyVisionPlannerBacklogAsync(plan.Id, result, cancellationToken).ConfigureAwait(false);
+                result = AnnotateBacklogResult(result, backlogItemId!);
+            }
+
+            if (phase == FictionPhase.VisionPlanner)
+            {
+                await ApplyVisionPlannerBacklogAsync(plan.Id, result, effectiveContext, cancellationToken).ConfigureAwait(false);
             }
             else if (!string.IsNullOrEmpty(backlogItemId))
             {
                 var finalStatus = MapPhaseStatusToBacklog(result.Status);
-                await SetBacklogStatusAsync(plan.Id, backlogItemId!, finalStatus, cancellationToken).ConfigureAwait(false);
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, finalStatus, phase, effectiveContext, "phase-complete", cancellationToken).ConfigureAwait(false);
             }
 
-await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancellationToken).ConfigureAwait(false);
+            await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancellationToken).ConfigureAwait(false);
 
             checkpoint.LockedByAgentId = null;
             checkpoint.LockedByConversationId = null;
@@ -205,16 +294,10 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
                     checkpoint.Status = FictionPlanCheckpointStatus.Complete;
                     checkpoint.CompletedCount = checkpoint.TargetCount ?? 1;
                     break;
-                case FictionPhaseStatus.Skipped:
-                case FictionPhaseStatus.Pending:
-                case FictionPhaseStatus.NotImplemented:
-                    checkpoint.Status = FictionPlanCheckpointStatus.Pending;
-                    break;
                 case FictionPhaseStatus.Cancelled:
                     checkpoint.Status = FictionPlanCheckpointStatus.Cancelled;
                     break;
-                case FictionPhaseStatus.Blocked:
-                case FictionPhaseStatus.Failed:
+                default:
                     checkpoint.Status = FictionPlanCheckpointStatus.Pending;
                     break;
             }
@@ -231,6 +314,11 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
         {
             _logger.LogError(ex, "Phase {Phase} failed for plan {PlanId}.", phase, plan.Id);
 
+            if (!string.IsNullOrEmpty(backlogItemId))
+            {
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "phase-failed", cancellationToken).ConfigureAwait(false);
+            }
+
             checkpoint.Status = FictionPlanCheckpointStatus.Pending;
             checkpoint.LockedByAgentId = null;
             checkpoint.LockedByConversationId = null;
@@ -246,39 +334,61 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
 
     private static FictionPhaseExecutionContext NormalizeContext(FictionPhaseExecutionContext context, string? defaultBranch)
     {
-        var branch = string.IsNullOrWhiteSpace(context.BranchSlug) ? (string.IsNullOrWhiteSpace(defaultBranch) ? "main" : defaultBranch) : context.BranchSlug;
-        if (branch == context.BranchSlug)
-        {
-            return context;
-        }
+        var branch = string.IsNullOrWhiteSpace(context.BranchSlug)
+            ? (string.IsNullOrWhiteSpace(defaultBranch) ? "main" : defaultBranch)
+            : context.BranchSlug;
 
-        return new FictionPhaseExecutionContext(
-            context.PlanId,
-            context.AgentId,
-            context.ConversationId,
-            branch,
-            context.ChapterBlueprintId,
-            context.ChapterScrollId,
-            context.ChapterSceneId,
-            context.IterationIndex,
-            context.InvokedByJobId,
-            context.Metadata);
+        return branch == context.BranchSlug
+            ? context
+            : new FictionPhaseExecutionContext(
+                context.PlanId,
+                context.AgentId,
+                context.ConversationId,
+                branch,
+                context.ChapterBlueprintId,
+                context.ChapterScrollId,
+                context.ChapterSceneId,
+                context.IterationIndex,
+                context.InvokedByJobId,
+                context.Metadata);
     }
 
     private static bool IsMetadataFlagSet(FictionPhaseExecutionContext context, string key)
     {
-        if (context.Metadata is null) return false;
-        if (!context.Metadata.TryGetValue(key, out var raw) || raw is null) return false;
-        return raw.Equals("true", StringComparison.OrdinalIgnoreCase) || raw.Equals("1") || raw.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        if (context.Metadata is null)
+        {
+            return false;
+        }
+
+        if (!context.Metadata.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        return raw.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("1", StringComparison.OrdinalIgnoreCase)
+            || raw.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task ApplyVisionPlannerBacklogAsync(Guid planId, FictionPhaseResult result, CancellationToken cancellationToken)
+    private static string? GetBacklogItemId(FictionPhaseExecutionContext context)
+    {
+        if (context.Metadata is null)
+        {
+            return null;
+        }
+
+        return context.Metadata.TryGetValue("backlogItemId", out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
+    }
+
+    private async Task ApplyVisionPlannerBacklogAsync(Guid planId, FictionPhaseResult result, FictionPhaseExecutionContext context, CancellationToken cancellationToken)
     {
         var backlog = ExtractPlannerBacklog(result);
-        await UpsertBacklogAsync(planId, backlog, cancellationToken).ConfigureAwait(false);
+        await UpsertBacklogAsync(planId, FictionPhase.VisionPlanner, context, backlog, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task UpsertBacklogAsync(Guid planId, IReadOnlyList<PlannerBacklogItem> backlog, CancellationToken cancellationToken)
+    private async Task UpsertBacklogAsync(Guid planId, FictionPhase phase, FictionPhaseExecutionContext context, IReadOnlyList<PlannerBacklogItem> backlog, CancellationToken cancellationToken)
     {
         var existing = await _db.FictionPlanBacklogItems
             .Where(x => x.FictionPlanId == planId)
@@ -299,6 +409,7 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
         foreach (var item in backlog)
         {
             var existingItem = existing.FirstOrDefault(x => string.Equals(x.BacklogId, item.Id, StringComparison.OrdinalIgnoreCase));
+            var previousStatus = existingItem?.Status;
             if (existingItem is null)
             {
                 existingItem = new FictionPlanBacklogItem
@@ -314,8 +425,12 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
 
             existingItem.Description = item.Description;
             existingItem.Status = MapPlannerStatus(item.Status);
-            existingItem.Inputs = item.Inputs.Count == 0 ? null : item.Inputs.Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
-            existingItem.Outputs = item.Outputs.Count == 0 ? null : item.Outputs.Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+            existingItem.Inputs = item.Inputs.Count == 0
+                ? null
+                : item.Inputs.Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+            existingItem.Outputs = item.Outputs.Count == 0
+                ? null
+                : item.Outputs.Select(s => s.Trim()).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
             existingItem.UpdatedAtUtc = now;
 
             switch (existingItem.Status)
@@ -333,12 +448,24 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
                     existingItem.CompletedAtUtc = null;
                     break;
             }
+
+            if (previousStatus is null || previousStatus != existingItem.Status)
+            {
+                RecordBacklogTelemetry(planId, existingItem.BacklogId, phase, existingItem.Status, context, "vision-sync", previousStatus);
+            }
         }
 
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task SetBacklogStatusAsync(Guid planId, string backlogId, FictionPlanBacklogStatus status, CancellationToken cancellationToken)
+    private async Task SetBacklogStatusAsync(
+        Guid planId,
+        string backlogId,
+        FictionPlanBacklogStatus status,
+        FictionPhase phase,
+        FictionPhaseExecutionContext context,
+        string reason,
+        CancellationToken cancellationToken)
     {
         var entity = (await _db.FictionPlanBacklogItems
             .Where(x => x.FictionPlanId == planId)
@@ -352,14 +479,12 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
             return;
         }
 
-        if (entity.Status == status && status != FictionPlanBacklogStatus.InProgress)
-        {
-            return;
-        }
-
+        var previousStatus = entity.Status;
         var now = DateTime.UtcNow;
-        entity.Status = status;
-        entity.UpdatedAtUtc = now;
+        if (entity.Status != status || status == FictionPlanBacklogStatus.InProgress)
+        {
+            entity.Status = status;
+        }
 
         switch (status)
         {
@@ -377,7 +502,11 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
                 break;
         }
 
+        entity.UpdatedAtUtc = now;
+
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        RecordBacklogTelemetry(planId, backlogId, phase, status, context, reason, previousStatus);
     }
 
     private static FictionPlanBacklogStatus MapPlannerStatus(PlannerBacklogStatus status) => status switch
@@ -392,13 +521,6 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
         FictionPhaseStatus.Completed => FictionPlanBacklogStatus.Complete,
         _ => FictionPlanBacklogStatus.Pending
     };
-
-    private static string? GetBacklogItemId(FictionPhaseExecutionContext context)
-    {
-        if (context.Metadata is null) return null;
-        if (!context.Metadata.TryGetValue("backlogItemId", out var value)) return null;
-        return string.IsNullOrWhiteSpace(value) ? null : value;
-    }
 
     private static IReadOnlyList<PlannerBacklogItem> ExtractPlannerBacklog(FictionPhaseResult result)
     {
@@ -438,7 +560,7 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
 
             return list;
         }
-        catch (Newtonsoft.Json.JsonException)
+        catch (JsonException)
         {
             return Array.Empty<PlannerBacklogItem>();
         }
@@ -451,6 +573,65 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
         public string? Status { get; init; }
         public string[]? Inputs { get; init; }
         public string[]? Outputs { get; init; }
+    }
+
+    private void RecordBacklogTelemetry(
+        Guid planId,
+        string backlogId,
+        FictionPhase phase,
+        FictionPlanBacklogStatus status,
+        FictionPhaseExecutionContext context,
+        string reason,
+        FictionPlanBacklogStatus? previousStatus)
+    {
+        _logger.LogInformation(
+            "BacklogTelemetry plan={PlanId} backlog={BacklogId} phase={Phase} status={Status} previousStatus={PreviousStatus} reason={Reason} branch={Branch} iteration={Iteration} blueprint={BlueprintId} scroll={ScrollId} scene={SceneId}",
+            planId,
+            backlogId,
+            phase.ToString(),
+            status.ToString(),
+            previousStatus?.ToString() ?? "unknown",
+            reason,
+            context.BranchSlug ?? "main",
+            context.IterationIndex,
+            context.ChapterBlueprintId,
+            context.ChapterScrollId,
+            context.ChapterSceneId);
+    }
+
+    private static FictionPhaseResult AnnotateBacklogResult(FictionPhaseResult result, string backlogItemId)
+    {
+        if (string.IsNullOrEmpty(backlogItemId))
+        {
+            return result;
+        }
+
+        var data = result.Data is null
+            ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, object?>(result.Data, StringComparer.OrdinalIgnoreCase);
+
+        if (!data.ContainsKey("backlogItemId"))
+        {
+            data["backlogItemId"] = backlogItemId;
+            result = result with { Data = data };
+        }
+
+        if (result.Transcripts is not null && result.Transcripts.Count > 0)
+        {
+            var transcripts = new List<FictionPhaseTranscript>(result.Transcripts.Count);
+            foreach (var transcript in result.Transcripts)
+            {
+                var metadata = transcript.Metadata is null
+                    ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, object?>(transcript.Metadata, StringComparer.OrdinalIgnoreCase);
+                metadata["backlogItemId"] = backlogItemId;
+                transcripts.Add(transcript with { Metadata = metadata });
+            }
+
+            result = result with { Transcripts = transcripts };
+        }
+
+        return result;
     }
 
     private async Task PublishProgressAsync(
@@ -470,9 +651,10 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
         snapshot["checkpointId"] = checkpoint.Id;
         snapshot["checkpointStatus"] = checkpoint.Status.ToString();
         snapshot["jobId"] = context.InvokedByJobId;
+        var backlogItemId = snapshot.TryGetValue("backlogItemId", out var backlogObj) ? backlogObj?.ToString() : null;
 
         var payload = snapshot.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-        var evt = new FictionPhaseProgressed(plan.Id, context.ConversationId, context.AgentId, context.BranchSlug ?? "main", phase.ToString(), status, summary, payload);
+        var evt = new FictionPhaseProgressed(plan.Id, context.ConversationId, context.AgentId, context.BranchSlug ?? "main", phase.ToString(), status, summary, payload, backlogItemId);
         await _bus.Publish(evt).ConfigureAwait(false);
 
         await _workflowLogger.LogAsync(context.ConversationId, nameof(FictionPhaseProgressed), JObject.FromObject(new
@@ -484,7 +666,8 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
             evt.Phase,
             evt.Status,
             evt.Summary,
-            evt.Payload
+            evt.Payload,
+            evt.BacklogItemId
         })).ConfigureAwait(false);
 
         var signalPayload = new
@@ -498,6 +681,7 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
             summary,
             checkpointId = checkpoint.Id,
             checkpointStatus = checkpoint.Status.ToString(),
+            backlogItemId,
             payload,
             timestampUtc = DateTime.UtcNow
         };
@@ -644,6 +828,12 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
             ["conversationId"] = context.ConversationId,
         };
 
+        var backlogItemId = GetBacklogItemId(context);
+        if (!string.IsNullOrEmpty(backlogItemId))
+        {
+            snapshot["backlogItemId"] = backlogItemId;
+        }
+
         if (startedAtUtc.HasValue)
         {
             snapshot["startedAtUtc"] = startedAtUtc.Value;
@@ -703,10 +893,3 @@ await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancel
         _ => status.ToString().ToLowerInvariant()
     };
 }
-
-
-
-
-
-
-

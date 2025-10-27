@@ -214,6 +214,76 @@ Rebus contracts (`src/Cognition.Contracts/Events.cs`) define the event flow.
 
 ---
 
+### Scope Identity & Search
+
+Canonical scope identity is required for every planner, tool, and search surface. The `IScopePathBuilder` (`src/Cognition.Clients/Scope/ScopePathBuilder.cs`) owns the logic, so callers never hand-roll principals or segments.
+
+- Always request an `IScopePathBuilder` from DI (API controllers, tools, jobs). Build from a `ScopeToken` when you already have one, or call the GUID overload to infer it from agent/persona/conversation ids.
+- When invoking planners, pass the built `ScopePath` into `PlannerContext.FromToolContext` so transcripts, telemetry, and backlog metadata all log the same canonical path.
+- Background jobs should attach the same path to phase execution contexts so backlog transitions, `FictionPhaseProgressed`, and OpenSearch writes remain consistent.
+- Query surfaces (`QueryDslBuilder`) automatically duplicate `ScopePath`, `ScopePrincipal*`, and `ScopeSegments.*` filters into both top-level vector fields and `metadata.*`, enabling canonical searches even during dual-write windows. Provide the canonical path string you receive from the builder; it already encodes the principal and sorted segments.
+
+Example: injecting the builder inside a tool.
+
+```csharp
+public sealed class OutlinePlannerTool : PlannerBase<OutlineParameters>
+{
+    private readonly IScopePathBuilder _scopePaths;
+
+    public OutlinePlannerTool(
+        ILoggerFactory loggerFactory,
+        IPlannerTelemetry telemetry,
+        IPlannerTranscriptStore transcripts,
+        IPlannerTemplateRepository templates,
+        IOptions<PlannerCritiqueOptions> critique,
+        IScopePathBuilder scopePaths)
+        : base(loggerFactory, telemetry, transcripts, templates, critique, scopePaths)
+    {
+        _scopePaths = scopePaths;
+    }
+
+    protected override PlannerContext BuildPlannerContext(ToolContext ctx, IDictionary<string, object?> args)
+    {
+        if (args.TryGetValue("ScopeToken", out var raw) && raw is ScopeToken token &&
+            _scopePaths.TryBuild(token, out var scopePath))
+        {
+            return PlannerContext.FromToolContext(ctx, scopePath, supportsSelfCritique: true);
+        }
+
+        if (_scopePaths.TryBuild(null, null, ctx.PersonaId, ctx.AgentId, ctx.ConversationId, null, null, out var inferred))
+        {
+            return PlannerContext.FromToolContext(ctx, inferred, supportsSelfCritique: true);
+        }
+
+        return base.BuildPlannerContext(ctx, args);
+    }
+}
+```
+
+Job runners follow the same pattern: call `_scopePaths.TryBuild` when preparing a `FictionPhaseExecutionContext`, store the canonical `ScopePath` string on phase metadata, and forward it through telemetry so OpenSearch queries can reuse the same filter set.
+
+---
+
+### Planner Health & Telemetry
+
+- GET `/api/diagnostics/planner` returns a `PlannerHealthReport` that enumerates registered planners, template health, backlog freshness, telemetry outcomes, critique budget warnings, and recent failures in a single payload.
+- `PlannerHealthService` inspects planner metadata via `IToolRegistry`, template repository state, `FictionPlanBacklog`, and the new `planner_executions` table. When a required template is missing/inactive, the report status escalates to `Critical`.
+- Planner execution telemetry is standardized around `planner.started`, `planner.completed`, and `planner.failed` events emitted by `LoggerPlannerTelemetry`. Pipe those logs into your observability stack for dashboards or alerting (e.g., watch for non-success outcomes per planner).
+- `PlannerHealthReport.Alerts` surfaces the server-evaluated heuristics (stale/orphaned items, backlog flapping, critique exhaustion, planner failures, template gaps) so both the dashboard and Ops paging receive the same contextual payload.
+- Console operators can open **Operations → Backlog Telemetry** in the Cognition Console to visualize planner health, backlog coverage, stale/orphaned items, alert heuristics, and OpenSearch diagnostics without leaving the UI (the dashboard calls the two diagnostics endpoints above).
+- Self-critique remains opt-in: configure `PlannerCritique:PlannerSettings` in appsettings to enable specific planners/personas and override token/attempt budgets without recompiling.
+- `StartupDataSeeder` seeds the default planner templates (`planner.fiction.vision`, `planner.fiction.iterative`, `planner.fiction.chapterArchitect`, and `planner.fiction.scrollRefiner`) so migrations to `PlannerBase` don't trip the health checks.
+
+### Ops Alerting
+
+- Configure the `OpsAlerting` section in `appsettings.*` to forward backlog/telemetry alerts to your paging or incident channel. Provide a `WebhookUrl`, optional `RoutingKey`, `Environment`, and `Source`; alerts are debounced by default (5 minutes) and can be severity-filtered via `SeverityFilter`. Use `Routes` (e.g., `alert:backlog:stale`, `severity:error`) to override webhook/routing on a per-alert basis, and `AlertSloThresholds` to publish SLO metadata when a condition persists. The payload mirrors the `PlannerHealthReport.Alerts` collection, so dashboards and Ops notifications share the same context.
+
+### OpenSearch Diagnostics
+
+- GET `/api/diagnostics/opensearch` summarizes cluster health, index/pipeline existence, and embedding model state based on the configured `OpenSearchVectorsOptions`/`OpenSearchModelOptions`.
+- POST `/api/diagnostics/opensearch/bootstrap` re-runs the bootstrapper (register model, deploy, ensure pipeline/index) when standing up a new environment.
+- Scope diagnostics remain available via `/api/diagnostics/scope`, exposing feature flags plus collision/backfill telemetry from `ScopePathDiagnostics`.
+
 ---
 
 ### Testing & Coverage

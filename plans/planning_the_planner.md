@@ -9,6 +9,8 @@ Current Status (2025-10-13)
 - Planner contracts and base class are implemented; Vision planner runs through `PlannerBase` with transcript/metric capture.
 - Planner executions now persist via `PlannerTranscriptStore` using the new `planner_executions` table, and the startup seeder provisions the canonical vision planner prompt template.
 - Vision planner prompt now yields a dynamic `planningBacklog` (rather than a finished outline) so downstream phases can iteratively fill gaps, matching the iterative flow captured in `reference/iterate-book.py`.
+- Iterative planner now runs on `PlannerBase`, including template-driven prompts, transcript capture, and metrics reuse.
+- Fiction weaver jobs promote backlog metadata end-to-end, automatically flipping backlog item status to in-progress/completed (or back to pending on failure) with new regression coverage, and non-vision phases now echo `backlogItemId` through phase results, transcripts, and progress snapshots for telemetry.
 - Planner-focused tests cover capability lookup, Vision planner orchestration, transcript persistence, template resolution, and telemetry redaction.
 - Outstanding work includes rolling the migration/template seeding through lower environments, migrating the next planner, and documenting rollout guidance.
 - Third-party review (2025-10-14) highlighted three priorities: (1) guard rails for template availability and self-critique budgets, (2) a planner health/diagnostics surface, and (3) backlog metadata plumbing through the dispatcher + fiction runners.
@@ -181,10 +183,26 @@ Open Questions
 - How to present transcripts in the UI? (Coordinate with API team once telemetry sinks confirm.)
 
 Next Steps
-1. Deploy `20251013181358_PlannerExecutions`/`AddFictionPlanBacklog` migrations and run the seeder in lower environments; verify transcripts and backlog entries persist, and archive screenshots in the rollout log.
-2. Wire planner health/diagnostics endpoint surfacing planner registrations, template availability, backlog counts, last failures, and token metrics; expose `planner.*` telemetry streams for dashboards.
-3. Enforce template availability: make `PlannerBase` throw when a declared `StepDescriptor` template is missing, and add tests that resolve every template id through `IPlannerTemplateRepository`.
-4. Add self-critique budget controls (metadata + runtime guard) and record critique token usage in planner telemetry; default to disabled unless explicitly enabled per planner/persona.
-5. Automate backlog metadata plumbing: dispatcher must always propagate `backlogItemId`, and fiction phase runners should consume/update statuses without manual args.
-6. Migrate the next fiction planner (iterative/story) onto `PlannerBase`, capture parity results with ScriptedLLM, and update the dev recipe before broader rollout.
-7. Publish planner rollout guidance covering telemetry expectations, prompt layout, backlog usage, and QA signoff requirements once the above foundations are in place.
+1. Implement the planner health endpoint and telemetry surface: add the API controller/service, expose planner registrations/template availability/backlog counts, and emit `planner.*` events for dashboards (blocks telemetry + pilot readiness).
+2. Introduce self-critique budget controls by extending `PlannerMetadata` defaults, guarding execution in `PlannerBase`, and logging critique token metrics; ensure defaults stay disabled unless a planner/persona opts in.
+3. Harden the planner pipeline automation by exercising `FictionPlannerPipelineTests`, closing any backlog gaps across iterators/architect/scroll/scene runners, and expanding regression coverage where the harness flags holes.
+4. Migrate the next fiction planner (e.g., `ScriptedScenePlanner`) onto `PlannerBase` with template-backed prompts and deterministic fakes, capturing parity transcripts/results for review.
+5. Publish planner rollout guidance and refresh README/developer docs once the above code changes land, covering prompt templates, backlog usage, telemetry expectations, and QA sign-off.
+
+Planner Migration Guidance (Updated 2025-10-21)
+- `FictionPlannerPipelineTests` now assert backlog state, checkpoint completion, and transcript metadata across the vision → scene flow. Update the scripted responses/templates in that harness before migrating any new planner so we keep parity evidence in CI.
+- Every migrated planner must build its `ScopePath` via `IScopePathBuilder` and thread backlog metadata (`backlogItemId`) through `PlannerResult`, transcripts, and telemetry so the jobs layer can flip statuses automatically.
+- Record a rollout note that captures: (a) scripts/fakes used for parity, (b) critique budget defaults, and (c) required backlog inputs/outputs. These notes seed the README guidance and unblock downstream tooling.
+- Run the planner health endpoint after each migration to confirm template availability, backlog freshness, and `planner.*` telemetry.
+
+Pipeline Completeness Focus
+- Verify the end-to-end fiction planner flow (vision → iterative → architect → scroll → scene) produces actionable artifacts and automatically advances backlog state without manual intervention.
+- Shore up any missing runner integrations or persistence paths discovered during the audit before revisiting additional observability work.
+- DONE Added multi-phase regression (`FictionPlannerPipelineTests`) that scripts planner responses and asserts backlog items close as the pipeline progresses.
+
+Telemetry Updates (Backlog Signals)
+- DONE Confirm ingestion: `FictionPhaseProgressed` events, plan notifier payloads, and stored transcripts now surface `backlogItemId`, enabling backlog-centric analytics.
+- DONE Add counters: backlog transitions are logged per phase and exposed through planner health `RecentTransitions` for dashboard aggregation.
+- DONE Planner health report now exposes per-plan backlog coverage plus transcript snippets/message ids for recent planner failures, giving dashboards/linkouts without digging through storage.
+- Surface dashboards: update the planner health view to display backlog coverage per phase, highlight stuck items (no completion within SLO), and expose most-recent transcript links for failed backlog executions.
+- Alerting outline: wire a lightweight monitor that pages when a backlog item flips back to pending more than N times within 24h, signalling persistent execution failure.

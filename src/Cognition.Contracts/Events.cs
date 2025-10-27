@@ -64,7 +64,8 @@ namespace Cognition.Contracts.Events
         string Phase,
         string Status,
         string? Summary,
-        Dictionary<string, object?>? Payload);
+        Dictionary<string, object?>? Payload,
+        string? BacklogItemId = null);
 
     public record AssistantMessageAppended(Guid ConversationId, Guid PersonaId, string Content);
 

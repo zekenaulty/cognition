@@ -1,6 +1,11 @@
+using System;
 using Cognition.Data.Relational;
 using Cognition.Clients;
 using Cognition.Api.Infrastructure;
+using Cognition.Api.Infrastructure.Alerts;
+using Cognition.Api.Infrastructure.OpenSearch;
+using Cognition.Api.Infrastructure.Planning;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -17,6 +22,8 @@ using Rebus.ServiceProvider;
 using Rebus.Config;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch;
 using Cognition.Clients.Configuration;
+using Cognition.Clients.Tools.Planning;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,9 +39,22 @@ builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddOpenApi();
 builder.Services.AddCognitionClients();
 builder.Services.AddCognitionOpenSearchVectors(builder.Configuration);
+builder.Services.AddHttpClient("opensearch-bootstrap", (sp, client) =>
+{
+    var options = sp.GetRequiredService<IOptions<OpenSearchVectorsOptions>>().Value;
+    client.BaseAddress = new Uri(options.Url);
+});
+builder.Services.AddHttpClient("ops-alerts");
 builder.Services.AddCognitionTools();
+builder.Services.AddScoped<IPlannerHealthService, PlannerHealthService>();
+builder.Services.AddScoped<IOpenSearchBootstrapper, OpenSearchBootstrapper>();
+builder.Services.AddScoped<IOpenSearchDiagnosticsService, OpenSearchDiagnosticsService>();
 builder.Services.AddOptions<ScopePathOptions>()
     .Bind(builder.Configuration.GetSection(ScopePathOptions.SectionName));
+builder.Services.AddOptions<PlannerCritiqueOptions>()
+    .Bind(builder.Configuration.GetSection(PlannerCritiqueOptions.SectionName));
+builder.Services.AddOptions<OpsAlertingOptions>()
+    .Bind(builder.Configuration.GetSection(OpsAlertingOptions.SectionName));
 builder.Services.AddScoped<Cognition.Api.Infrastructure.ScopePath.ScopePathBackfillService>();
 // Background knowledge indexer is disabled for now; use the API endpoint to trigger indexing on-demand.
 // Wire AgentService DI for API controllers
@@ -42,6 +62,7 @@ builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Cli
 // Retrieval service (scope-enforcing RAG entrypoint)
 builder.Services.AddScoped<Cognition.Clients.Retrieval.IRetrievalService, Cognition.Clients.Retrieval.RetrievalService>();
 builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
+builder.Services.AddSingleton<IPlannerAlertPublisher, OpsWebhookAlertPublisher>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>

@@ -1,3 +1,5 @@
+import { OpenSearchDiagnosticsReport, PlannerHealthReport } from '../types/diagnostics';
+
 export async function fetchImageStyles(accessToken: string): Promise<any[]> {
   const headers: HeadersInit = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
   const res = await fetch('/api/image-styles', { headers });
@@ -208,6 +210,13 @@ export const api = {
       { method: 'PATCH', body: JSON.stringify({ PersonaId: personaId }) },
       accessToken
     )
+}
+
+export const diagnosticsApi = {
+  plannerHealth: (accessToken?: string) =>
+    request<PlannerHealthReport>('/api/diagnostics/planner', {}, accessToken),
+  openSearch: (accessToken?: string) =>
+    request<OpenSearchDiagnosticsReport>('/api/diagnostics/opensearch', {}, accessToken)
 }
 
 export async function fetchImageMessages(accessToken: string, conversationId: string): Promise<any[]> {

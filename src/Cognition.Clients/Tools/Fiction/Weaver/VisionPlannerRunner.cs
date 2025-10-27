@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Clients.Tools.Planning.Fiction;
@@ -26,8 +27,9 @@ public class VisionPlannerRunner : FictionPhaseRunnerBase
         IAgentService agentService,
         IServiceProvider serviceProvider,
         VisionPlannerTool planner,
-        ILogger<VisionPlannerRunner> logger)
-        : base(db, agentService, logger, FictionPhase.VisionPlanner)
+        ILogger<VisionPlannerRunner> logger,
+        IScopePathBuilder scopePathBuilder)
+        : base(db, agentService, logger, FictionPhase.VisionPlanner, scopePathBuilder)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
@@ -52,10 +54,9 @@ public class VisionPlannerRunner : FictionPhaseRunnerBase
             cancellationToken);
 
         ScopePath? scopePath = null;
-        if (context.AgentId != Guid.Empty || context.ConversationId != Guid.Empty)
+        if (ScopePathBuilder.TryBuild(new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null), out var builtPath))
         {
-            var scopeToken = new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null);
-            scopePath = scopeToken.ToScopePath();
+            scopePath = builtPath;
         }
 
         var plannerContext = PlannerContext.FromToolContext(

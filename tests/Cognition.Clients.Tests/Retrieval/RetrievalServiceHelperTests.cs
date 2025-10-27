@@ -3,9 +3,19 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
+using Cognition.Clients.Configuration;
+using Cognition.Clients.LLM;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Retrieval;
 using Cognition.Contracts;
+using Cognition.Contracts.Scopes;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch.Models;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch.Store;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Cognition.Clients.Tests.Retrieval;
@@ -106,16 +116,51 @@ public class RetrievalServiceHelperTests
 
         var hash = Invoke<string>(ComputeContentHashMethod, "content", scope, metadata, true);
 
+        var builder = new ScopePathBuilder();
+        var path = builder.Build(scope);
         var expectedInput = new StringBuilder()
             .AppendLine("content")
-            .Append("|principal=agent:").Append(agentId.ToString("D"))
-            .Append("|conversation=").Append(conversationId.ToString("D"))
-            .Append("|tenant=").Append(tenantId.ToString("D"))
-            .Append("|Source=path-aware")
-            .ToString();
+            .Append("|principal=").Append(path.Principal.Canonical);
 
-        var expectedHash = Sha(expectedInput);
+        foreach (var segment in path.Segments)
+        {
+            expectedInput.Append('|').Append(segment.Canonical);
+        }
+
+        if (metadata.TryGetValue("Source", out var sourceValue) && sourceValue is not null)
+        {
+            expectedInput.Append("|Source=").Append(sourceValue);
+        }
+
+        var expectedHash = Sha(expectedInput.ToString());
         hash.Should().Be(expectedHash);
+    }
+
+    [Fact]
+    public void ComputeContentHash_InvokesScopePathBuilder_WhenPathAwareEnabled()
+    {
+        var builder = new RecordingScopePathBuilder();
+        var service = CreateService(builder);
+        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), Guid.NewGuid(), null, null);
+        var metadata = new Dictionary<string, object>();
+
+        var hash = (string)ComputeContentHashMethod.Invoke(service, new object[] { "payload", scope, metadata, true })!;
+
+        hash.Should().NotBeNullOrEmpty();
+        builder.BuildCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public void ComputeContentHash_DoesNotInvokeScopePathBuilder_WhenPathAwareDisabled()
+    {
+        var builder = new RecordingScopePathBuilder();
+        var service = CreateService(builder);
+        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), null, null, null);
+        var metadata = new Dictionary<string, object>();
+
+        _ = (string)ComputeContentHashMethod.Invoke(service, new object[] { "payload", scope, metadata, false })!;
+
+        builder.BuildCalls.Should().Be(0);
     }
 
     private static string ExpectedHashLegacy(string content, ScopeToken scope, Dictionary<string, object> meta)
@@ -152,13 +197,90 @@ public class RetrievalServiceHelperTests
 
     private static MethodInfo GetMethod(string name)
     {
-        return typeof(RetrievalService).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)
+        return typeof(RetrievalService).GetMethod(
+                   name,
+                   BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
                ?? throw new InvalidOperationException($"Method {name} not found on RetrievalService");
     }
 
     private static T Invoke<T>(MethodInfo method, params object?[] args)
     {
-        return (T)method.Invoke(null, args)!;
+        var target = method.IsStatic ? null : CreateService();
+        return (T)method.Invoke(target, args)!;
+    }
+
+    private static RetrievalService CreateService(IScopePathBuilder? builder = null)
+    {
+        var store = new NullVectorStore();
+        var options = Options.Create(new OpenSearchVectorsOptions { UseEmbeddingPipeline = true });
+        var scopeOptions = Options.Create(new ScopePathOptions());
+        var diagnostics = new ScopePathDiagnostics();
+        var scopePathBuilder = builder ?? new ScopePathBuilder();
+        var logger = NullLogger<RetrievalService>.Instance;
+        var embeddings = new NullEmbeddingsClient();
+        return new RetrievalService(store, options, scopeOptions, diagnostics, scopePathBuilder, logger, embeddings);
+    }
+
+    private sealed class NullVectorStore : IVectorStore
+    {
+        public Task EnsureProvisionedAsync(CancellationToken ct) => Task.CompletedTask;
+        public Task UpsertAsync(VectorItem item, CancellationToken ct) => Task.CompletedTask;
+        public Task UpsertManyAsync(IEnumerable<VectorItem> items, CancellationToken ct) => Task.CompletedTask;
+        public Task DeleteAsync(string id, string tenantKey, string? kind, CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<SearchResult>> SimilaritySearchAsync(
+            float[] queryEmbedding,
+            int topK,
+            string tenantKey,
+            IDictionary<string, object>? filters,
+            string? kind,
+            CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+    }
+
+    private sealed class NullEmbeddingsClient : IEmbeddingsClient
+    {
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<float>());
+    }
+
+    private sealed class RecordingScopePathBuilder : IScopePathBuilder
+    {
+        private readonly ScopePathBuilder _inner = new();
+
+        public int BuildCalls { get; private set; }
+        public int TryBuildCalls { get; private set; }
+
+        public ScopePath Build(ScopeToken scopeToken)
+        {
+            BuildCalls++;
+            return _inner.Build(scopeToken);
+        }
+
+        public bool TryBuild(ScopeToken scopeToken, out ScopePath scopePath)
+        {
+            TryBuildCalls++;
+            return _inner.TryBuild(scopeToken, out scopePath);
+        }
+
+        public bool TryBuild(
+            Guid? tenantId,
+            Guid? appId,
+            Guid? personaId,
+            Guid? agentId,
+            Guid? conversationId,
+            Guid? projectId,
+            Guid? worldId,
+            out ScopePath scopePath)
+        {
+            TryBuildCalls++;
+            return _inner.TryBuild(tenantId, appId, personaId, agentId, conversationId, projectId, worldId, out scopePath);
+        }
+
+        public ScopePath AppendSegment(ScopePath scopePath, ScopeSegment segment)
+            => _inner.AppendSegment(scopePath, segment);
+
+        public ScopePath AppendSegment(ScopePath scopePath, string key, Guid value)
+            => _inner.AppendSegment(scopePath, key, value);
     }
 }
 

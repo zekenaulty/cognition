@@ -401,6 +401,100 @@ Ensure backlog entries capture still-needed planner passes rather than a finishe
 Respond with JSON only.
 """;
 
+        const string iterativeTemplate = """
+You are running an iterative planning pass (iteration {{iterationIndex}}) for the fiction project "{{planName}}" on branch "{{branch}}".
+
+Existing planning passes:
+{{existingPasses}}
+
+Project description:
+{{description}}
+
+Produce minified JSON with keys:
+{
+  "storyAdjustments": ["string"],
+  "characterPriorities": ["string"],
+  "locationNotes": ["string"],
+  "systemsConsiderations": ["string"],
+  "risks": ["string"]
+}
+
+Each array should contain concrete, actionable items. Respond with JSON only.
+""";
+
+        const string chapterArchitectTemplate = """
+You are the chapter architect for the fiction project "{{planName}}" on branch "{{branch}}".
+
+Project description:
+{{description}}
+
+Planning passes:
+{{passesSummary}}
+
+Existing blueprint context:
+{{existingBlueprintSummary}}
+
+Produce minified JSON with the following structure:
+{
+  "title": "string",
+  "synopsis": "string",
+  "structure": [
+    {
+      "slug": "string",
+      "summary": "string",
+      "goal": "string",
+      "obstacle": "string",
+      "turn": "string",
+      "fallout": "string",
+      "carryForward": ["string"]
+    }
+  ]
+}
+
+Each structure entry should capture a major beat for the chapter. Respond with JSON only.
+""";
+
+        const string scrollRefinerTemplate = """
+You are refining the chapter scroll for project "{{planName}}" on branch "{{branch}}".
+
+Blueprint synopsis:
+{{blueprintSynopsis}}
+
+Blueprint structure (JSON):
+{{blueprintStructure}}
+
+Existing scroll snapshot:
+{{scrollSummary}}
+
+Produce minified JSON with the following structure:
+{
+  "scrollSlug": "string",
+  "title": "string",
+  "synopsis": "string",
+  "sections": [
+    {
+      "sectionSlug": "string",
+      "title": "string",
+      "summary": "string",
+      "transitions": ["string"],
+      "scenes": [
+        {
+          "sceneSlug": "string",
+          "title": "string",
+          "goal": "string",
+          "conflict": "string",
+          "turn": "string",
+          "fallout": "string",
+          "carryForward": ["string"]
+        }
+      ]
+    }
+  ]
+}
+
+Ensure the scroll aligns with the blueprint beats and that continuity notes flag canonical obligations. Respond with JSON only.
+""";
+
         var templates = new List<PromptTemplate>
         {
             new()
@@ -409,13 +503,37 @@ Respond with JSON only.
                 Name = "planner.fiction.vision",
                 PromptType = PromptType.SystemInstruction,
                 Template = visionTemplate,
-                Tokens = new Dictionary<string, object?>
-                {
-                    ["projectTitle"] = "string",
-                    ["branch"] = "string",
-                    ["description"] = "string",
-                    ["logline"] = "string"
-                },
+                Tokens = null,
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow
+            },
+            new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "planner.fiction.iterative",
+                PromptType = PromptType.SystemInstruction,
+                Template = iterativeTemplate,
+                Tokens = null,
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow
+            },
+            new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "planner.fiction.chapterArchitect",
+                PromptType = PromptType.SystemInstruction,
+                Template = chapterArchitectTemplate,
+                Tokens = null,
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow
+            },
+            new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "planner.fiction.scrollRefiner",
+                PromptType = PromptType.SystemInstruction,
+                Template = scrollRefinerTemplate,
+                Tokens = null,
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow
             }
@@ -466,7 +584,7 @@ Respond with JSON only.
         }
     }
 
-    private static bool DictionaryEquals(Dictionary<string, object?>? left, Dictionary<string, object?>? right)
+    private static bool DictionaryEquals(Dictionary<string, JsonElement>? left, Dictionary<string, JsonElement>? right)
     {
         if (ReferenceEquals(left, right))
         {
@@ -490,7 +608,7 @@ Respond with JSON only.
                 return false;
             }
 
-            if (!Equals(value, otherValue))
+            if (!JsonElement.DeepEquals(value, otherValue))
             {
                 return false;
             }

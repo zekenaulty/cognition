@@ -61,7 +61,7 @@ namespace Cognition.Jobs
                 }
             }
 
-            var metadata = BuildMetadata(message.Metadata, task, branchSlug);
+            var metadata = BuildMetadata(message.Metadata, task, branchSlug, args);
 
             bool success;
             string? error;
@@ -188,7 +188,7 @@ namespace Cognition.Jobs
             return (ok, result, error);
         }
 
-        private static Dictionary<string, object?> BuildMetadata(Dictionary<string, object?>? source, ConversationTask? task, string branchSlug)
+        private static Dictionary<string, object?> BuildMetadata(Dictionary<string, object?>? source, ConversationTask? task, string branchSlug, IDictionary<string, object?> args)
         {
             var metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
@@ -210,6 +210,11 @@ namespace Cognition.Jobs
                 {
                     metadata[kvp.Key] = kvp.Value;
                 }
+            }
+
+            if (args.TryGetValue("backlogItemId", out var backlogId) && backlogId is not null)
+            {
+                metadata["backlogItemId"] = backlogId.ToString();
             }
 
             return metadata;

@@ -8,6 +8,7 @@ using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Jobs;
+using Cognition.Contracts.Events;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Newtonsoft.Json;
 using FluentAssertions;
@@ -108,7 +109,15 @@ public class FictionPlanBacklogTests
                 FictionPhase.ChapterArchitect,
                 "Blueprint generated.")));
 
-        var jobs = CreateJobs(db, runner);
+        var bus = Substitute.For<IBus>();
+        var notifier = Substitute.For<IPlanProgressNotifier>();
+        var jobs = new FictionWeaverJobs(
+            db,
+            new[] { runner },
+            bus,
+            notifier,
+            new WorkflowEventLogger(db, enabled: false),
+            NullLogger<FictionWeaverJobs>.Instance);
         var metadata = new Dictionary<string, string>
         {
             ["backlogItemId"] = "outline-core-conflicts"
@@ -120,6 +129,13 @@ public class FictionPlanBacklogTests
         backlogItem.Status.Should().Be(FictionPlanBacklogStatus.Complete);
         backlogItem.InProgressAtUtc.Should().NotBeNull();
         backlogItem.CompletedAtUtc.Should().NotBeNull();
+
+        await bus.Received().Publish(Arg.Is<FictionPhaseProgressed>(evt =>
+            string.Equals(evt.BacklogItemId, "outline-core-conflicts", StringComparison.OrdinalIgnoreCase)));
+
+        await notifier.Received().NotifyPlanProgressAsync(
+            Arg.Any<Guid>(),
+            Arg.Is<object>(payload => string.Equals(ReadBacklogId(payload), "outline-core-conflicts", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
@@ -166,6 +182,117 @@ public class FictionPlanBacklogTests
         backlogItem.CompletedAtUtc.Should().BeNull();
     }
 
+    [Fact]
+    public async Task ChapterArchitect_ContextIncludesBacklogMetadata()
+    {
+        await using var db = CreateDbContext();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Backlog Test Plan"
+        };
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var backlogId = "outline-core-conflicts";
+        string? capturedBacklogId = null;
+
+        var runner = new StubPhaseRunner(
+            FictionPhase.ChapterArchitect,
+            (context, ct) =>
+            {
+                context.Metadata.Should().NotBeNull();
+                context.Metadata!.TryGetValue("backlogItemId", out capturedBacklogId).Should().BeTrue();
+                return Task.FromResult(FictionPhaseResult.Success(FictionPhase.ChapterArchitect, "ok"));
+            });
+
+        var jobs = CreateJobs(db, runner);
+        var metadata = new Dictionary<string, string>
+        {
+            ["backlogItemId"] = backlogId
+        };
+
+        var result = await jobs.RunChapterArchitectAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+
+        capturedBacklogId.Should().Be(backlogId);
+        result.Data.Should().NotBeNull().And.ContainKey("backlogItemId").WhoseValue.Should().Be(backlogId);
+    }
+
+    [Fact]
+    public async Task ScrollRefiner_ContextIncludesBacklogMetadata()
+    {
+        await using var db = CreateDbContext();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Backlog Scroll Plan"
+        };
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var backlogId = "refine-scroll";
+        string? capturedBacklogId = null;
+
+        var runner = new StubPhaseRunner(
+            FictionPhase.ScrollRefiner,
+            (context, ct) =>
+            {
+                context.Metadata.Should().NotBeNull();
+                context.Metadata!.TryGetValue("backlogItemId", out capturedBacklogId).Should().BeTrue();
+                return Task.FromResult(FictionPhaseResult.Success(FictionPhase.ScrollRefiner, "ok"));
+            });
+
+        var jobs = CreateJobs(db, runner);
+        var metadata = new Dictionary<string, string>
+        {
+            ["backlogItemId"] = backlogId
+        };
+
+        var result = await jobs.RunScrollRefinerAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+
+        capturedBacklogId.Should().Be(backlogId);
+        result.Data.Should().NotBeNull().And.ContainKey("backlogItemId").WhoseValue.Should().Be(backlogId);
+    }
+
+    [Fact]
+    public async Task SceneWeaver_ContextIncludesBacklogMetadata()
+    {
+        await using var db = CreateDbContext();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Backlog Scene Plan"
+        };
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var backlogId = "draft-first-scene";
+        string? capturedBacklogId = null;
+
+        var runner = new StubPhaseRunner(
+            FictionPhase.SceneWeaver,
+            (context, ct) =>
+            {
+                context.Metadata.Should().NotBeNull();
+                context.Metadata!.TryGetValue("backlogItemId", out capturedBacklogId).Should().BeTrue();
+                return Task.FromResult(FictionPhaseResult.Success(FictionPhase.SceneWeaver, "ok"));
+            });
+
+        var jobs = CreateJobs(db, runner);
+        var metadata = new Dictionary<string, string>
+        {
+            ["backlogItemId"] = backlogId
+        };
+
+        var result = await jobs.RunSceneWeaverAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+
+        capturedBacklogId.Should().Be(backlogId);
+        result.Data.Should().NotBeNull().And.ContainKey("backlogItemId").WhoseValue.Should().Be(backlogId);
+    }
+
     private static FictionWeaverJobs CreateJobs(CognitionDbContext db, params IFictionPhaseRunner[] runners)
     {
         var bus = Substitute.For<IBus>();
@@ -173,6 +300,12 @@ public class FictionPlanBacklogTests
         var workflowLogger = new WorkflowEventLogger(db, enabled: false);
         var logger = NullLogger<FictionWeaverJobs>.Instance;
         return new FictionWeaverJobs(db, runners, bus, notifier, workflowLogger, logger);
+    }
+
+    private static string? ReadBacklogId(object payload)
+    {
+        var property = payload.GetType().GetProperty("backlogItemId");
+        return property?.GetValue(payload)?.ToString();
     }
 
     private static CognitionDbContext CreateDbContext()

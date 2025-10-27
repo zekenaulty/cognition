@@ -21,12 +21,14 @@ public sealed class RetrievalService : IRetrievalService
     private readonly Cognition.Clients.LLM.IEmbeddingsClient _emb;
     private readonly ScopePathOptions _scopeOptions;
     private readonly IScopePathDiagnostics _diagnostics;
+    private readonly IScopePathBuilder _scopePathBuilder;
 
     public RetrievalService(
         IVectorStore store,
         IOptions<OpenSearchVectorsOptions> options,
         IOptions<ScopePathOptions> scopeOptions,
         IScopePathDiagnostics diagnostics,
+        IScopePathBuilder scopePathBuilder,
         ILogger<RetrievalService> logger,
         Cognition.Clients.LLM.IEmbeddingsClient emb)
     {
@@ -35,6 +37,7 @@ public sealed class RetrievalService : IRetrievalService
         _options = options.Value;
         _scopeOptions = scopeOptions.Value;
         _diagnostics = diagnostics;
+        _scopePathBuilder = scopePathBuilder ?? throw new ArgumentNullException(nameof(scopePathBuilder));
         _emb = emb;
     }
 
@@ -210,14 +213,14 @@ public sealed class RetrievalService : IRetrievalService
         return m;
     }
 
-    private static string ComputeContentHash(string content, ScopeToken scope, IReadOnlyDictionary<string, object> meta, bool pathAwareHashingEnabled)
+    private string ComputeContentHash(string content, ScopeToken scope, IReadOnlyDictionary<string, object> meta, bool pathAwareHashingEnabled)
     {
         var sb = new StringBuilder();
         sb.AppendLine(content.Trim());
 
         if (pathAwareHashingEnabled)
         {
-            var path = scope.ToScopePath();
+            var path = _scopePathBuilder.Build(scope);
             sb.Append("|principal=").Append(path.Principal.Canonical);
             foreach (var segment in path.Segments)
             {

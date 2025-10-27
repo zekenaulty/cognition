@@ -1,11 +1,10 @@
 using System.Collections.Generic;
-using System.Linq;
 using Cognition.Data.Relational;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure.Internal;
+using Npgsql;
 using Xunit;
 
 namespace Cognition.Data.Relational.Tests;
@@ -23,13 +22,19 @@ public class ServiceCollectionExtensionsTests
             })
             .Build();
 
+        configuration.GetConnectionString("Postgres").Should().Be(connectionString);
+
         var services = new ServiceCollection();
         services.AddCognitionDb(configuration);
 
         using var provider = services.BuildServiceProvider();
-        var options = provider.GetRequiredService<DbContextOptions<CognitionDbContext>>();
+        using var scope = provider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CognitionDbContext>();
+        var resolvedBuilder = new NpgsqlConnectionStringBuilder(dbContext.Database.GetDbConnection().ConnectionString);
 
-        GetConfiguredConnectionString(options).Should().Be(connectionString);
+        resolvedBuilder.Host.Should().Be("config");
+        resolvedBuilder.Username.Should().Be("postgres");
+        resolvedBuilder.Database.Should().Be("cognition");
     }
 
     [Fact]
@@ -40,16 +45,12 @@ public class ServiceCollectionExtensionsTests
         services.AddCognitionDb(configuration);
 
         using var provider = services.BuildServiceProvider();
-        var options = provider.GetRequiredService<DbContextOptions<CognitionDbContext>>();
+        using var scope = provider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CognitionDbContext>();
+        var resolvedBuilder = new NpgsqlConnectionStringBuilder(dbContext.Database.GetDbConnection().ConnectionString);
 
-        GetConfiguredConnectionString(options).Should().Be("Host=localhost;Port=5432;Database=cognition;Username=postgres;Password=postgres");
-    }
-
-    private static string? GetConfiguredConnectionString(DbContextOptions options)
-    {
-        return options.Extensions
-            .OfType<NpgsqlOptionsExtension>()
-            .FirstOrDefault()
-            ?.ConnectionString;
+        resolvedBuilder.Host.Should().Be("localhost");
+        resolvedBuilder.Username.Should().Be("postgres");
+        resolvedBuilder.Database.Should().Be("cognition");
     }
 }

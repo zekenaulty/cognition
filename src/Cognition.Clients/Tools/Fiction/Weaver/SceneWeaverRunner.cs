@@ -1,10 +1,11 @@
-using System.Collections.Generic;
+ï»¿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Scope;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -15,8 +16,12 @@ namespace Cognition.Clients.Tools.Fiction.Weaver;
 
 public class SceneWeaverRunner : FictionPhaseRunnerBase
 {
-    public SceneWeaverRunner(CognitionDbContext db, IAgentService agentService, ILogger<SceneWeaverRunner> logger)
-        : base(db, agentService, logger, FictionPhase.SceneWeaver)
+    public SceneWeaverRunner(
+        CognitionDbContext db,
+        IAgentService agentService,
+        ILogger<SceneWeaverRunner> logger,
+        IScopePathBuilder scopePathBuilder)
+        : base(db, agentService, logger, FictionPhase.SceneWeaver, scopePathBuilder)
     {
     }
 
@@ -90,7 +95,7 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
 
         var scrollSynopsis = scroll is null
             ? "(scroll synopsis unavailable)"
-            : $"Scroll {scroll.ScrollSlug}: {scroll.Title} — {scroll.Synopsis}";
+            : $"Scroll {scroll.ScrollSlug}: {scroll.Title} â€” {scroll.Synopsis}";
 
         var blueprintStructure = blueprint?.Structure is null
             ? "(blueprint structure unavailable)"
@@ -101,7 +106,7 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
         return $@"You are writing the full narrative scene ""{scene.Title}"" (slug {scene.SceneSlug}) for branch ""{branch}"".
 
 Section context:
-Section {section.SectionIndex} ({section.SectionSlug}): {section.Title} — {section.Description ?? "(no description)"}
+Section {section.SectionIndex} ({section.SectionSlug}): {section.Title} â€” {section.Description ?? "(no description)"}
 
 Scroll synopsis:
 {scrollSynopsis}

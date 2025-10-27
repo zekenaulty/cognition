@@ -96,7 +96,8 @@ public class RetrievalServiceSearchTests
         var logger = LoggerFactory.Create(b => { }).CreateLogger<RetrievalService>();
         var scopeOptions = Options.Create(new ScopePathOptions { PathAwareHashingEnabled = false, DualWriteEnabled = false });
         var diagnostics = new ScopePathDiagnostics();
-        return new RetrievalService(store, options, scopeOptions, diagnostics, logger, embeddings);
+        var scopePathBuilder = new ScopePathBuilder();
+        return new RetrievalService(store, options, scopeOptions, diagnostics, scopePathBuilder, logger, embeddings);
     }
 
     private sealed class EmbeddingsClientStub : IEmbeddingsClient

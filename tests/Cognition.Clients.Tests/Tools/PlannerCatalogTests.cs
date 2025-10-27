@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Planning.Fiction;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +24,7 @@ public class PlannerCatalogTests
             .AddSingleton<IPlannerTranscriptStore, NullPlannerTranscriptStore>()
             .AddSingleton<IPlannerTemplateRepository, NullPlannerTemplateRepository>()
             .AddSingleton<IAgentService, FakeAgentService>()
+            .AddSingleton<IScopePathBuilder, ScopePathBuilder>()
             .AddSingleton<VisionPlannerTool>()
             .BuildServiceProvider();
 
@@ -46,6 +48,7 @@ public class PlannerCatalogTests
             .AddSingleton<IPlannerTranscriptStore, NullPlannerTranscriptStore>()
             .AddSingleton<IPlannerTemplateRepository, NullPlannerTemplateRepository>()
             .AddSingleton<IAgentService, FakeAgentService>()
+            .AddSingleton<IScopePathBuilder, ScopePathBuilder>()
             .AddSingleton<VisionPlannerTool>()
             .BuildServiceProvider();
 

@@ -42,6 +42,7 @@ _Current status: EF POCOs drafted for plan graph/world bible tables; configurati
 3. Draft EF Core migrations, indexes, and constraints (slug uniqueness, lineage references, branch versioning metadata). _(ðŸš§ `20250928173755_AddFictionPlanGraph` covers core tables; checkpoint resume/cancel migration still pending rollout.)_
 4. Specify storage for LLM call transcripts and schema validation errors (for audit and replay). (All agent/tool LLM calls will be treated as conversations and traced we will need audit/xref metadata table to link the agent conversations to the phase/step data of the plan/process.)
 5. Author importer spec for `_context` artifacts -> relational tables (idempotent, resumable, produces discrepancy logs). (Nice-to-have; parity fallback, lowest priority.)
+6. ✅ **Template guard rail:** `PlannerBase` now validates each step's `TemplateId` before execution (unit-tested in `PlannerInfrastructureTests`).
 6. Generate seed data for a sample project and validate referential integrity + branching metadata.
 7. Reconcile existing fiction tables (PlotOutline, Draft, WorldAsset, etc.) and tool scaffolding with the plan graph; capture keep/polish vs retire decisions in the legacy action list.
 
@@ -128,6 +129,7 @@ _Current status: EF POCOs drafted for plan graph/world bible tables; configurati
 - [ ] Rewriting/consolidation phase eliminates duplicate beats in generated manuscripts.
 - [ ] Address ASP0023 route conflicts in `ClientProfilesController` (run API analyzers and align route templates).
 - [ ] Resolve CS8619/CS8620 nullability warnings in RetrievalService/KnowledgeIndexingService (decide harden vs suppression).
+- [x] Planner template guard rails enforced in PlannerBase (2025-10-18) with regression coverage.
 - [ ] Baseline Python prompts, schemas, checkpoints, metrics, and sample artifacts documented.
 - [ ] ERD + migrations for multi-tier plan, world bible, checkpoints, transcripts authored.
 - [ ] Weaver service scaffolding with phase runners, checkpoints, and transcript logging implemented.

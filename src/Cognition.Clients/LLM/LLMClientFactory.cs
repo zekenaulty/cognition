@@ -68,7 +68,8 @@ public class LLMClientFactory : ILLMClientFactory
                 return new OllamaTextClient(
                     http,
                     baseUrlOverride ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL") ?? "http://localhost:11434",
-                    model?.Name ?? "llama3.2:3b");
+                    model?.Name ?? "llama3.2:3b",
+                    OllamaTextClient.OllamaOptions.FromEnvironment());
             case "gemini":
                 return new GeminiTextClient(
                     http,

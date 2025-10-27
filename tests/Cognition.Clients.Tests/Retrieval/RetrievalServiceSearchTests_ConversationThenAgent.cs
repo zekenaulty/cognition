@@ -98,6 +98,7 @@ public class RetrievalServiceSearchTests_ConversationThenAgent
 
         var scopeOptions = Options.Create(new ScopePathOptions { PathAwareHashingEnabled = false, DualWriteEnabled = false });
         var diagnostics = new ScopePathDiagnostics();
-        return new RetrievalService(store, options, scopeOptions, diagnostics, NullLogger<RetrievalService>.Instance, embeddings);
+        var scopePathBuilder = new ScopePathBuilder();
+        return new RetrievalService(store, options, scopeOptions, diagnostics, scopePathBuilder, NullLogger<RetrievalService>.Instance, embeddings);
     }
 }

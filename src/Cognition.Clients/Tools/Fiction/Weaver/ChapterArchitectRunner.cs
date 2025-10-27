@@ -1,10 +1,14 @@
+using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Text;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Scope;
+using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Tools.Planning.Fiction;
+using Cognition.Contracts;
+using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -15,9 +19,20 @@ namespace Cognition.Clients.Tools.Fiction.Weaver;
 
 public class ChapterArchitectRunner : FictionPhaseRunnerBase
 {
-    public ChapterArchitectRunner(CognitionDbContext db, IAgentService agentService, ILogger<ChapterArchitectRunner> logger)
-        : base(db, agentService, logger, FictionPhase.ChapterArchitect)
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ChapterArchitectPlannerTool _planner;
+
+    public ChapterArchitectRunner(
+        CognitionDbContext db,
+        IAgentService agentService,
+        IServiceProvider serviceProvider,
+        ChapterArchitectPlannerTool planner,
+        ILogger<ChapterArchitectRunner> logger,
+        IScopePathBuilder scopePathBuilder)
+        : base(db, agentService, logger, FictionPhase.ChapterArchitect, scopePathBuilder)
     {
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _planner = planner ?? throw new ArgumentNullException(nameof(planner));
     }
 
     protected override async Task<FictionPhaseResult> ExecuteCoreAsync(
@@ -26,7 +41,7 @@ public class ChapterArchitectRunner : FictionPhaseRunnerBase
         FictionPhaseExecutionContext context,
         CancellationToken cancellationToken)
     {
-        Logger.LogDebug("ChapterArchitect runner invoked for plan {PlanId} on branch {Branch}.", plan.Id, context.BranchSlug);
+        Logger.LogInformation("ChapterArchitect runner invoked for plan {PlanId} on branch {Branch}.", plan.Id, context.BranchSlug);
 
         var (providerId, modelId) = ResolveProviderAndModel(context);
 
@@ -43,105 +58,157 @@ public class ChapterArchitectRunner : FictionPhaseRunnerBase
             .AsNoTracking()
             .Where(p => p.FictionPlanId == plan.Id)
             .OrderBy(p => p.PassIndex)
-            .Select(p => new PlanPassSummary(p.PassIndex, p.Title ?? $"Pass {p.PassIndex}", p.Summary))
+            .Select(p => new ChapterArchitectPlanPassSummary(p.PassIndex, p.Title ?? $"Pass {p.PassIndex}", p.Summary))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var prompt = BuildChapterBlueprintPrompt(plan, context, passes, existingBlueprint);
-
-        var stopwatch = Stopwatch.StartNew();
-        var (reply, messageId) = await AgentService.ChatAsync(
-            context.ConversationId,
-            context.AgentId,
+        var parameters = ChapterArchitectPlannerParameters.Create(
+            plan,
+            conversation,
+            context,
             providerId,
             modelId,
-            prompt,
-            cancellationToken).ConfigureAwait(false);
-        stopwatch.Stop();
+            passes,
+            existingBlueprint);
 
-        var validation = FictionResponseValidator.ValidateBlueprintPayload(reply, plan, context);
-        if (!validation.IsValid)
+        var toolContext = new ToolContext(
+            context.AgentId,
+            context.ConversationId,
+            PersonaId: null,
+            _serviceProvider,
+            cancellationToken);
+
+        ScopePath? scopePath = null;
+        if (ScopePathBuilder.TryBuild(new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null), out var builtPath))
         {
-            throw new FictionResponseValidationException(validation);
+            scopePath = builtPath;
         }
 
-        var data = BuildResponseData(reply, "chapterBlueprint");
-        var transcriptMetadata = new Dictionary<string, object?>
+        var plannerContext = PlannerContext.FromToolContext(
+            toolContext,
+            scopePath,
+            primaryAgentId: context.AgentId,
+            conversationState: new Dictionary<string, object?>
+            {
+                ["planId"] = plan.Id,
+                ["branch"] = context.BranchSlug,
+                ["chapterBlueprintId"] = context.ChapterBlueprintId
+            });
+
+        var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        return ToPhaseResult(plannerResult, context);
+    }
+
+    private static FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)
+    {
+        var summary = result.Diagnostics.TryGetValue("validationSummary", out var validationSummary)
+            ? validationSummary
+            : $"Planner completed with outcome {result.Outcome}.";
+
+        var data = result.ToDictionary();
+        var transcripts = BuildTranscripts(result, context);
+
+        var status = result.Outcome switch
         {
-            ["promptType"] = "chapter-architect",
+            PlannerOutcome.Success => FictionPhaseStatus.Completed,
+            PlannerOutcome.Partial => FictionPhaseStatus.Blocked,
+            PlannerOutcome.Cancelled => FictionPhaseStatus.Cancelled,
+            _ => FictionPhaseStatus.Failed
+        };
+
+        return new FictionPhaseResult(
+            FictionPhase.ChapterArchitect,
+            status,
+            summary,
+            data,
+            Exception: null,
+            Transcripts: transcripts);
+    }
+
+    private static IReadOnlyList<FictionPhaseTranscript> BuildTranscripts(PlannerResult result, FictionPhaseExecutionContext context)
+    {
+        var step = result.Steps.LastOrDefault();
+        var prompt = TryGetString(step?.Output, "prompt");
+        var response = TryGetString(step?.Output, "response");
+        var messageId = TryGetGuid(step?.Output, "messageId");
+
+        var assistantEntry = result.Transcript.LastOrDefault(t => string.Equals(t.Role, "assistant", StringComparison.OrdinalIgnoreCase));
+        var transcriptMetadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["plannerOutcome"] = result.Outcome.ToString(),
             ["chapterBlueprintId"] = context.ChapterBlueprintId
         };
 
-        return BuildResult(
-            FictionPhaseStatus.Completed,
-            "Chapter blueprint response recorded.",
-            context,
-            prompt,
-            reply,
-            messageId,
-            data,
-            latencyMs: stopwatch.Elapsed.TotalMilliseconds,
-            validationStatus: validation.Status,
-            validationDetails: validation.Details,
-            transcriptMetadata: transcriptMetadata);
+        if (assistantEntry?.Metadata is not null)
+        {
+            foreach (var kv in assistantEntry.Metadata)
+            {
+                transcriptMetadata[kv.Key] = kv.Value;
+            }
+        }
+
+        foreach (var diagnostic in result.Diagnostics)
+        {
+            transcriptMetadata[$"diagnostic:{diagnostic.Key}"] = diagnostic.Value;
+        }
+
+        var latency = result.Metrics.TryGetValue("latencyMs", out var latencyMs) ? latencyMs : (double?)null;
+        var validationStatus = transcriptMetadata.TryGetValue("validationStatus", out var statusObj)
+            ? ParseValidationStatus(statusObj?.ToString())
+            : FictionTranscriptValidationStatus.Unknown;
+        var validationSummary = transcriptMetadata.TryGetValue("validationSummary", out var validationObj) ? validationObj?.ToString() : null;
+
+        return new List<FictionPhaseTranscript>(1)
+        {
+            new FictionPhaseTranscript(
+                AgentId: context.AgentId,
+                ConversationId: context.ConversationId,
+                ConversationMessageId: messageId,
+                ChapterBlueprintId: context.ChapterBlueprintId,
+                ChapterScrollId: context.ChapterScrollId,
+                ChapterSceneId: context.ChapterSceneId,
+                Attempt: 1,
+                IsRetry: false,
+                RequestPayload: prompt,
+                ResponsePayload: response,
+                PromptTokens: null,
+                CompletionTokens: null,
+                LatencyMs: latency,
+                ValidationStatus: validationStatus,
+                ValidationDetails: validationSummary,
+                Metadata: transcriptMetadata)
+        };
     }
 
-    private static string BuildChapterBlueprintPrompt(
-        FictionPlan plan,
-        FictionPhaseExecutionContext context,
-        IReadOnlyCollection<PlanPassSummary> passes,
-        FictionChapterBlueprint? existing)
+    private static string? TryGetString(IReadOnlyDictionary<string, object?>? dictionary, string key)
     {
-        var branch = string.IsNullOrWhiteSpace(context.BranchSlug) ? "main" : context.BranchSlug;
-        var description = string.IsNullOrWhiteSpace(plan.Description) ? "(no long-form description captured yet)" : plan.Description!;
-        var passesSummary = passes.Count == 0
-            ? "No iterative planning passes recorded yet."
-            : string.Join("\n", passes.Select(p => $"Pass {p.PassIndex}: {p.Title} - {p.Summary ?? "(no summary)"}"));
-
-        var existingBlueprintSummary = existing is null
-            ? "No existing blueprint for this chapter."
-            : $"Existing blueprint (index {existing.ChapterIndex}, slug {existing.ChapterSlug}): {existing.Title} - {existing.Synopsis}";
-
-        var builder = new StringBuilder();
-        builder.AppendLine($"You are the chapter architect for the fiction project \"{plan.Name}\" on branch \"{branch}\".");
-        builder.AppendLine();
-        builder.AppendLine("Project description:");
-        builder.AppendLine(description);
-        builder.AppendLine();
-        builder.AppendLine("Planning context:");
-        builder.AppendLine(passesSummary);
-        builder.AppendLine();
-        builder.AppendLine("Existing blueprint context:");
-        builder.AppendLine(existingBlueprintSummary);
-        builder.AppendLine();
-        builder.AppendLine("Produce minified JSON with the following structure:");
-        builder.AppendLine("{");
-        builder.AppendLine("  \"title\": \"string\",");
-        builder.AppendLine("  \"synopsis\": \"string\",");
-        builder.AppendLine("  \"structure\": [");
-        builder.AppendLine("    {");
-        builder.AppendLine("      \"slug\": \"string\",");
-        builder.AppendLine("      \"summary\": \"string\",");
-        builder.AppendLine("      \"goal\": \"string\",");
-        builder.AppendLine("      \"obstacle\": \"string\",");
-        builder.AppendLine("      \"turn\": \"string\",");
-        builder.AppendLine("      \"fallout\": \"string\",");
-        builder.AppendLine("      \"carryForward\": [\"string\"]");
-        builder.AppendLine("    }");
-        builder.AppendLine("  ]");
-        builder.AppendLine("}");
-        builder.AppendLine();
-        builder.AppendLine("Each structure entry should capture a major beat for the chapter. Respond with JSON only.");
-        return builder.ToString();
+        if (dictionary is null) return null;
+        if (!dictionary.TryGetValue(key, out var value) || value is null) return null;
+        return value.ToString();
     }
 
-    private sealed record PlanPassSummary(int PassIndex, string Title, string? Summary);
+    private static Guid? TryGetGuid(IReadOnlyDictionary<string, object?>? dictionary, string key)
+    {
+        if (dictionary is null) return null;
+        if (!dictionary.TryGetValue(key, out var value) || value is null) return null;
+
+        return value switch
+        {
+            Guid g => g,
+            string s when Guid.TryParse(s, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static FictionTranscriptValidationStatus ParseValidationStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return FictionTranscriptValidationStatus.Unknown;
+        }
+
+        return Enum.TryParse<FictionTranscriptValidationStatus>(status, ignoreCase: true, out var parsed)
+            ? parsed
+            : FictionTranscriptValidationStatus.Unknown;
+    }
 }
-
-
-
-
-
-
-
-

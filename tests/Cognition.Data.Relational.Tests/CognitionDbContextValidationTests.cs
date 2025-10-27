@@ -142,6 +142,10 @@ public class CognitionDbContextValidationTests
             b.HasKey(x => x.Id);
             b.Ignore(x => x.Metadata);
             b.Property(x => x.Vector);
+            b.Ignore(x => x.ScopeSegments);
+            b.Ignore(x => x.ScopePrincipalId);
+            b.Ignore(x => x.ScopePrincipalType);
+            b.Ignore(x => x.ScopePath);
             b.HasOne(x => x.KnowledgeItem)
                 .WithMany()
                 .HasForeignKey(x => x.KnowledgeItemId);

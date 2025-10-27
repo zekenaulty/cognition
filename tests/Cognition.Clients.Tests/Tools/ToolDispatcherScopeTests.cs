@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Retrieval;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Contracts;
@@ -15,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Cognition.Clients.Tests.Tools;
@@ -64,7 +66,8 @@ public class ToolDispatcherScopeTests
             .BuildServiceProvider();
 
         var registry = new SingleToolRegistry(classPath, typeof(TestScopeTool));
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance);
+        var scopePathBuilder = new ScopePathBuilder();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
 
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
@@ -155,7 +158,8 @@ public class ToolDispatcherScopeTests
             .BuildServiceProvider();
 
         var registry = new SingleToolRegistry(classPath, typeof(RememberDispatchTool));
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance);
+        var scopePathBuilder = new ScopePathBuilder();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
 
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
@@ -233,14 +237,19 @@ public class ToolDispatcherScopeTests
             .AddSingleton<IPlannerTelemetry>(telemetry)
             .AddSingleton<IPlannerTranscriptStore, NullPlannerTranscriptStore>()
             .AddSingleton<IPlannerTemplateRepository, NullPlannerTemplateRepository>()
+            .AddSingleton<IOptions<PlannerCritiqueOptions>>(Options.Create(new PlannerCritiqueOptions()))
+            .AddSingleton<IScopePathBuilder, ScopePathBuilder>()
             .AddSingleton<TestPlannerTool>()
             .BuildServiceProvider();
 
         var planner = services.GetRequiredService<TestPlannerTool>();
         var registry = new SingleToolRegistry(classPath, typeof(TestPlannerTool));
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance);
+        var scopePathBuilder = services.GetRequiredService<IScopePathBuilder>();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
 
-        var toolContext = new ToolContext(null, Guid.NewGuid(), Guid.NewGuid(), services, CancellationToken.None);
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var toolContext = new ToolContext(null, conversationId, personaId, services, CancellationToken.None);
         var plannerContext = PlannerContext.FromToolContext(toolContext, toolId: toolId);
         var parameters = new PlannerParameters(new Dictionary<string, object?>
         {
@@ -256,6 +265,10 @@ public class ToolDispatcherScopeTests
         result.Should().NotBeNull();
 
         planner.Contexts.Should().HaveCount(1);
+        var recordedContext = planner.Contexts.Single();
+        recordedContext.ScopePath.Should().NotBeNull();
+        var expectedScope = new ScopeToken(null, null, personaId, null, conversationId, null, null).ToScopePath().Canonical;
+        recordedContext.ScopePath!.Canonical.Should().Be(expectedScope);
         telemetry.Started.Should().HaveCount(1);
         telemetry.Completed.Should().HaveCount(1);
         telemetry.Failed.Should().BeEmpty();
@@ -320,6 +333,8 @@ public class ToolDispatcherScopeTests
             .AddSingleton<IPlannerTelemetry>(telemetry)
             .AddSingleton<IPlannerTranscriptStore, NullPlannerTranscriptStore>()
             .AddSingleton<IPlannerTemplateRepository, NullPlannerTemplateRepository>()
+            .AddSingleton<IOptions<PlannerCritiqueOptions>>(Options.Create(new PlannerCritiqueOptions()))
+            .AddSingleton<IScopePathBuilder, ScopePathBuilder>()
             .AddSingleton<TestPlannerTool>()
             .BuildServiceProvider();
 
@@ -327,9 +342,12 @@ public class ToolDispatcherScopeTests
         planner.ShouldFail = true;
 
         var registry = new SingleToolRegistry(classPath, typeof(TestPlannerTool));
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance);
+        var scopePathBuilder = services.GetRequiredService<IScopePathBuilder>();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
 
-        var toolContext = new ToolContext(null, Guid.NewGuid(), Guid.NewGuid(), services, CancellationToken.None);
+        var conversationId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+        var toolContext = new ToolContext(null, conversationId, personaId, services, CancellationToken.None);
         var plannerContext = PlannerContext.FromToolContext(toolContext, toolId: toolId);
         var parameters = new PlannerParameters(new Dictionary<string, object?>
         {
@@ -345,6 +363,10 @@ public class ToolDispatcherScopeTests
         error.Should().NotBeNull("dispatcher error: {0}", error);
 
         planner.Contexts.Should().HaveCount(1);
+        var recordedContext = planner.Contexts.Single();
+        recordedContext.ScopePath.Should().NotBeNull();
+        var expectedScope = new ScopeToken(null, null, personaId, null, conversationId, null, null).ToScopePath().Canonical;
+        recordedContext.ScopePath!.Canonical.Should().Be(expectedScope);
         telemetry.Started.Should().HaveCount(1);
         telemetry.Completed.Should().BeEmpty();
         telemetry.Failed.Should().HaveCount(1);
@@ -454,8 +476,10 @@ public class ToolDispatcherScopeTests
             ILoggerFactory loggerFactory,
             IPlannerTelemetry telemetry,
             IPlannerTranscriptStore transcriptStore,
-            IPlannerTemplateRepository templateRepository)
-            : base(loggerFactory, telemetry, transcriptStore, templateRepository)
+            IPlannerTemplateRepository templateRepository,
+            IOptions<PlannerCritiqueOptions> critiqueOptions,
+            IScopePathBuilder scopePathBuilder)
+            : base(loggerFactory, telemetry, transcriptStore, templateRepository, critiqueOptions, scopePathBuilder)
         {
         }
 
@@ -501,13 +525,23 @@ public class ToolDispatcherScopeTests
         public List<(PlannerTelemetryContext Context, PlannerResult Result)> Completed { get; } = new();
         public List<(PlannerTelemetryContext Context, Exception Exception)> Failed { get; } = new();
 
-        public void PlanStarted(PlannerTelemetryContext context) => Started.Add(context);
+        public Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct)
+        {
+            Started.Add(context);
+            return Task.CompletedTask;
+        }
 
-        public void PlanCompleted(PlannerTelemetryContext context, PlannerResult result)
-            => Completed.Add((context, result));
+        public Task PlanCompletedAsync(PlannerTelemetryContext context, PlannerResult result, CancellationToken ct)
+        {
+            Completed.Add((context, result));
+            return Task.CompletedTask;
+        }
 
-        public void PlanFailed(PlannerTelemetryContext context, Exception exception)
-            => Failed.Add((context, exception));
+        public Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct)
+        {
+            Failed.Add((context, exception));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class RecordingRetrievalService : IRetrievalService

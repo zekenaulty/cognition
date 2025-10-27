@@ -131,6 +131,11 @@ Checklist
 - [ ] Add Phase 5 API regression nets or document rationale if deferred.
 - [ ] Update README/Developer docs with testing instructions.
 
+## Immediate Next Tasks (2025-10-21)
+- Bake the builder-backed scope tests into CI (retrieval + tool dispatcher suites) and add documentation snippets summarizing the canonical ScopePath patterns for future contributors.
+- Expand vector-query coverage in `tests/Cognition.Data.Vectors.Tests/` to assert canonical path filters across `QueryDslBuilder` + OpenSearch vector store helpers before enabling the flags broader.
+- Set deterministic fakes (ScriptedLLM, ScriptedEmbeddingsClient, InMemoryVectorStore) as defaults via `tests/Directory.Build.props` so planner/unit suites run without live dependencies.
+- Capture ongoing regression gaps from `FictionPlannerPipelineTests` and add targeted planner/jobbing tests around backlog telemetry + diagnostics endpoints once implemented.
 
 
 

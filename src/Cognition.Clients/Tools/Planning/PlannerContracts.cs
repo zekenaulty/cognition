@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Tools;
@@ -44,7 +46,8 @@ public sealed record PlannerStepDescriptor(
     string DisplayName,
     string? Purpose = null,
     IReadOnlyList<string>? InputKeys = null,
-    IReadOnlyList<string>? OutputKeys = null);
+    IReadOnlyList<string>? OutputKeys = null,
+    string? TemplateId = null);
 
 public sealed record PlannerMetadata(
     string Name,
@@ -52,7 +55,8 @@ public sealed record PlannerMetadata(
     IReadOnlyList<string> Capabilities,
     IReadOnlyList<PlannerStepDescriptor> Steps,
     IReadOnlyDictionary<string, object?>? DefaultSettings = null,
-    IReadOnlyDictionary<string, string>? TelemetryTags = null)
+    IReadOnlyDictionary<string, string>? TelemetryTags = null,
+    PlannerCritiqueProfile? CritiqueProfile = null)
 {
     public static PlannerMetadata Create(
         string name,
@@ -60,7 +64,8 @@ public sealed record PlannerMetadata(
         IEnumerable<string>? capabilities = null,
         IEnumerable<PlannerStepDescriptor>? steps = null,
         IReadOnlyDictionary<string, object?>? defaultSettings = null,
-        IReadOnlyDictionary<string, string>? telemetryTags = null)
+        IReadOnlyDictionary<string, string>? telemetryTags = null,
+        PlannerCritiqueProfile? critiqueProfile = null)
     {
         return new PlannerMetadata(
             name,
@@ -68,7 +73,31 @@ public sealed record PlannerMetadata(
             capabilities is null ? Array.Empty<string>() : new ReadOnlyCollection<string>(capabilities.ToList()),
             steps is null ? Array.Empty<PlannerStepDescriptor>() : new ReadOnlyCollection<PlannerStepDescriptor>(steps.ToList()),
             defaultSettings,
-            telemetryTags);
+            telemetryTags,
+            critiqueProfile ?? PlannerCritiqueProfile.Disabled);
+    }
+}
+
+public sealed record PlannerCritiqueProfile(
+    bool Enabled,
+    PlannerCritiqueBudget Budget,
+    IReadOnlyCollection<Guid>? PersonaAllowList = null)
+{
+    public static PlannerCritiqueProfile Disabled { get; } = new(false, new PlannerCritiqueBudget(), Array.Empty<Guid>());
+
+    public bool AllowsPersona(Guid? personaId)
+    {
+        if (!Enabled)
+        {
+            return false;
+        }
+
+        if (PersonaAllowList is null || PersonaAllowList.Count == 0)
+        {
+            return true;
+        }
+
+        return personaId.HasValue && PersonaAllowList.Contains(personaId.Value);
     }
 }
 
@@ -228,13 +257,17 @@ public sealed record PlannerTelemetryContext(
     IReadOnlyList<string> Capabilities,
     Guid? AgentId,
     Guid? ConversationId,
-    string? Environment);
+    Guid? PrimaryAgentId,
+    string? Environment,
+    string? ScopePath,
+    bool SupportsSelfCritique,
+    IReadOnlyDictionary<string, string>? TelemetryTags);
 
 public interface IPlannerTelemetry
 {
-    void PlanStarted(PlannerTelemetryContext context);
-    void PlanCompleted(PlannerTelemetryContext context, PlannerResult result);
-    void PlanFailed(PlannerTelemetryContext context, Exception exception);
+    Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct);
+    Task PlanCompletedAsync(PlannerTelemetryContext context, PlannerResult result, CancellationToken ct);
+    Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct);
 }
 
 public sealed class LoggerPlannerTelemetry : IPlannerTelemetry
@@ -243,23 +276,61 @@ public sealed class LoggerPlannerTelemetry : IPlannerTelemetry
 
     public LoggerPlannerTelemetry(ILogger<LoggerPlannerTelemetry> logger)
     {
-        _logger = logger;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public void PlanStarted(PlannerTelemetryContext context)
+    public Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct)
     {
-        _logger.LogInformation("Planner {Planner} started (toolId={ToolId}, agent={AgentId}, conversation={ConversationId}).",
-            context.PlannerName, context.ToolId, context.AgentId, context.ConversationId);
+        LogEvent("planner.started", context, payload => { });
+        return Task.CompletedTask;
     }
 
-    public void PlanCompleted(PlannerTelemetryContext context, PlannerResult result)
+    public Task PlanCompletedAsync(PlannerTelemetryContext context, PlannerResult result, CancellationToken ct)
     {
-        _logger.LogInformation("Planner {Planner} completed with outcome {Outcome}.", context.PlannerName, result.Outcome);
+        LogEvent("planner.completed", context, payload =>
+        {
+            payload["outcome"] = result.Outcome.ToString();
+            payload["durationMs"] = result.Metrics.TryGetValue("durationMs", out var duration) ? duration : 0d;
+            payload["metrics"] = result.Metrics;
+            payload["diagnostics"] = result.Diagnostics;
+            payload["steps"] = result.Steps.Select(s => new Dictionary<string, object?>
+            {
+                ["id"] = s.StepId,
+                ["status"] = s.Status.ToString(),
+                ["durationMs"] = s.Duration.TotalMilliseconds
+            }).ToList();
+        });
+        return Task.CompletedTask;
     }
 
-    public void PlanFailed(PlannerTelemetryContext context, Exception exception)
+    public Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct)
     {
-        _logger.LogError(exception, "Planner {Planner} failed.", context.PlannerName);
+        LogEvent("planner.failed", context, payload =>
+        {
+            payload["error"] = exception.Message;
+            payload["exceptionType"] = exception.GetType().FullName;
+        });
+        return Task.CompletedTask;
+    }
+
+    private void LogEvent(string name, PlannerTelemetryContext context, Action<Dictionary<string, object?>> enrich)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["planner"] = context.PlannerName,
+            ["event"] = name,
+            ["toolId"] = context.ToolId,
+            ["agentId"] = context.AgentId,
+            ["conversationId"] = context.ConversationId,
+            ["primaryAgentId"] = context.PrimaryAgentId,
+            ["environment"] = context.Environment,
+            ["scopePath"] = context.ScopePath,
+            ["supportsSelfCritique"] = context.SupportsSelfCritique,
+            ["capabilities"] = context.Capabilities,
+            ["tags"] = context.TelemetryTags
+        };
+        enrich(payload);
+        _logger.LogInformation("{EventName} {@Payload}", name, payload);
     }
 }
 
