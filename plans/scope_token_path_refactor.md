@@ -105,9 +105,11 @@ Checklist
 - [ ] Update documentation & developer guidance.
 - [ ] WILL NOT DO Apply `ScopePathDualWrite` migration + OpenSearch mapping updates in each environment.
 - [ ] WILL NOT DO Run scoped backfill + monitoring playbook before flipping `PathAwareHashing`.
+- [ ] Enforce ScopePath factory usage via analyzer/CI rule and repository audit.
 
-## Immediate Next Tasks (2025-10-21)
-- DONE Document the ScopePath builder usage in developer guides and add samples for tools/jobs to prevent regressions.
+## Immediate Next Tasks (2025-10-27)
+- Lock ScopePath construction behind `IScopePathBuilder`/factory APIs (make constructors internal, disallow direct instantiation) and add CI/analyzer guard rails.
 - Wire the diagnostics endpoint so ops can inspect dual-write/path hashing flag state alongside collision metrics.
+- DONE Document the ScopePath builder usage in developer guides and add samples for tools/jobs to prevent regressions.
 - DONE Finish the OpenSearch query helper alignment (ensure `QueryDslBuilder`/vector stores expose canonical path filters) and add tests guarding the new LINQ extensions.
 - DONE Capture the remaining doc updates + rollout guidance as part of the shared README refresh.

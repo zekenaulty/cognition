@@ -1,17 +1,18 @@
 # Planning the Planner Framework
 
 Objective
-- Design a reusable planner framework that standardises the lifecycle (context → plan → evaluate → execute → finalise) for fiction tooling and future orchestrators.
+- Design a reusable planner framework that standardises the lifecycle (context -> plan -> evaluate -> execute -> finalise) for fiction tooling and future orchestrators.
 - Define `IPlannerTool`, `PlannerBase`, and supporting contracts so planners are metadata-driven, testable, and compose cleanly with existing tool infrastructure.
 - Outline migration steps to refactor in-flight fiction planners onto the shared foundation without stalling feature work.
 
 Current Status (2025-10-26)
 - PlannerBase plus shared telemetry/transcript infrastructure are stable; vision, iterative, chapter architect, scroll refiner, and scene weaver planners now derive from the base class with seeded templates (`planner.fiction.vision`, `planner.fiction.iterative`, `planner.fiction.chapterArchitect`, `planner.fiction.scrollRefiner`, `planner.fiction.sceneWeaver`).
-- `FictionPlannerPipelineTests` exercises the scripted vision → iterative → architect → scroll → scene flow and verifies backlog checkpoints, transcripts, and metadata end-to-end.
+- `FictionPlannerPipelineTests` exercises the scripted vision -> iterative -> architect -> scroll -> scene flow and verifies backlog checkpoints, transcripts, and metadata end-to-end.
 - Planner health diagnostics fuse telemetry/backlog heuristics into `PlannerHealthReport.Alerts`, and the Ops webhook publisher routes alerts per ID/severity with optional SLO thresholds and fails fast if no webhook is configured.
 - The console backlog telemetry view consumes the richer alert payloads, and Ops configuration (`OpsAlerting`) now exposes routing + debounce knobs for internal alpha validation; configuration validation guards common misconfigurations (missing webhook, non-positive SLO thresholds).
 - We remain in alpha with only seed data; no production rollout or lower-environment choreography is required. Remaining effort concentrates on future planner migrations, non-fiction coverage, and tightening developer guidance rather than environment cutovers.
 - Third-party review items (template guard rails, planner health endpoint, backlog instrumentation) are closed; focus shifts to completing migrations and codifying rollout recipes.
+- External security/observability review (2025-10-27) scored overall alpha readiness at 7.7/10 and introduced P0 blockers (rate limiting, ScopePath factory lock, authorization policies, planner budgets/quotas, correlation IDs); see `plans/alpha_security_observability_hardening.md` for remediation sequencing.
 
 Scope
 - Interfaces, base classes, and metadata DSL for planner-oriented tools living under `Cognition.Clients.Tools`.
@@ -58,8 +59,8 @@ Planner Base Class
   - Provides final implementation of `PlanAsync`.
   - Workflow:
     1. `ValidateInputs(TParams parameters)` (abstract/protected virtual).
-    2. `PrepareContextAsync(PlannerContext ctx, TParams parameters)` → loads required scope data, persona traits, prior outputs.
-    3. `DraftPlanAsync` (virtual) → optional LLM call creating plan skeleton (`IEnumerable<PlannerStepInstance>`).
+    2. `PrepareContextAsync(PlannerContext ctx, TParams parameters)` -> loads required scope data, persona traits, prior outputs.
+    3. `DraftPlanAsync` (virtual) -> optional LLM call creating plan skeleton (`IEnumerable<PlannerStepInstance>`).
     4. `ExecutePlanAsync` loops steps:
        - `BeforeStepAsync` (virtual hook).
        - `ExecuteStepAsync` (abstract or requires derived class to wire into tool/LLM).
@@ -106,7 +107,7 @@ Registry updates
 
 Scope Integration
 - Planner context uses new `ScopePath` helpers to guarantee consistent identity across plan steps and down-stream tool calls.
-- `PlannerContext` exposes `ScopePath ForAgent(Guid agentId)` methods to produce child scopes (e.g., `agent → scene`).
+- `PlannerContext` exposes `ScopePath ForAgent(Guid agentId)` methods to produce child scopes (e.g., `agent -> scene`).
 - Planner base ensures every tool invocation in the plan inherits the correct `ScopeToken`, preventing context bleed.
 - Retrieval helpers (vector store, memory recall) accept canonical scope so plan steps resolve deterministic data.
 
@@ -170,10 +171,10 @@ Refactor Strategy
    - Document new extension patterns (self-critique, fallback).
 
 Risk & Mitigation
-- Divergent behaviours across planners → start with pilot migration and retrofit base class as needed before broad rollout.
-- Self-critique or evaluation loops increasing token cost → add configuration to disable or adjust per planner/per persona.
-- Feature gap between base and bespoke logic → maintain extension hooks (virtual methods, delegates) to allow unique behaviour without forking base class.
-- Adoption risk across teams → provide developer guide and recipe; pair program first migration to share knowledge.
+- Divergent behaviours across planners -> start with pilot migration and retrofit base class as needed before broad rollout.
+- Self-critique or evaluation loops increasing token cost -> add configuration to disable or adjust per planner/per persona.
+- Feature gap between base and bespoke logic -> maintain extension hooks (virtual methods, delegates) to allow unique behaviour without forking base class.
+- Adoption risk across teams -> provide developer guide and recipe; pair program first migration to share knowledge.
 
 Open Questions
 - Should planner metadata live in code (attributes/fluent builder) or external JSON for hot reload? (Initial recommendation: code-first for type safety; revisit once stable.)
@@ -186,15 +187,22 @@ Next Steps
 3. Explore multi-channel Ops publishing (e.g., Slack + PagerDuty) and acknowledgement workflows once webhook payloads stabilise under alpha usage.
 4. Extend planner health dashboards with additional alert drill-downs/SLA visualisations to support upcoming planner additions.
 
+Alpha Hardening Requirements (2025-10-27)
+- Enforce API rate limits, per-principal quotas, request size caps, and correlation logging to cover planner/job workflows (plans/alpha_security_observability_hardening.md).
+- Lock ScopePath construction to shared factories and add analyzers/tests guarding against ad-hoc instantiation (plans/scope_token_path_refactor.md, plans/alpha_security_observability_hardening.md).
+- Introduce planner token budgets, throttle-aware Hangfire scheduling, and telemetry (`planner.throttled`, `planner.rejected`) so Ops dashboards can surface quota hits.
+- Validate planner templates at startup (metadata -> seeded template), gate DTO input with FluentValidation/DataAnnotations, and extend PlannerHealth to track latency percentiles, retries, and critique usage.
+- Guard OpenSearch mapping/schema drift at boot; refuse to start when the pipeline schema diverges from expected shape.
+
 Planner Migration Guidance (Updated 2025-10-21)
 - Full rollout recipe: `plans/planning_the_planner_rollout_recipe.md` (source of truth for checklist + lower-env runbook).
-- `FictionPlannerPipelineTests` now assert backlog state, checkpoint completion, and transcript metadata across the vision → scene flow. Update the scripted responses/templates in that harness before migrating any new planner so we keep parity evidence in CI.
+- `FictionPlannerPipelineTests` now assert backlog state, checkpoint completion, and transcript metadata across the vision -> scene flow. Update the scripted responses/templates in that harness before migrating any new planner so we keep parity evidence in CI.
 - Every migrated planner must build its `ScopePath` via `IScopePathBuilder` and thread backlog metadata (`backlogItemId`) through `PlannerResult`, transcripts, and telemetry so the jobs layer can flip statuses automatically.
 - Record a rollout note that captures: (a) scripts/fakes used for parity, (b) critique budget defaults, and (c) required backlog inputs/outputs. These notes seed the README guidance and unblock downstream tooling.
 - Run the planner health endpoint after each migration to confirm template availability, backlog freshness, and `planner.*` telemetry.
 
 Pipeline Completeness Focus
-- Verify the end-to-end fiction planner flow (vision → iterative → architect → scroll → scene) produces actionable artifacts and automatically advances backlog state without manual intervention.
+- Verify the end-to-end fiction planner flow (vision -> iterative -> architect -> scroll -> scene) produces actionable artifacts and automatically advances backlog state without manual intervention.
 - Shore up any missing runner integrations or persistence paths discovered during the audit before revisiting additional observability work.
 - DONE Added multi-phase regression (`FictionPlannerPipelineTests`) that scripts planner responses and asserts backlog items close as the pipeline progresses.
 

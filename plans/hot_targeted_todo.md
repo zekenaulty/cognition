@@ -1,44 +1,30 @@
 # Hot Targeted TODO
 
 ## Cross-Plan Backbone
-- **Order of execution:** finish scope principal/path refactor -> stand up planner framework skeleton -> pilot migration -> expand unit tests guarding the new surfaces. This dependency chain lives across the scope token, planner, and unit testing plans and remains the critical path (plans/scope_token_path_refactor.md, plans/planning_the_planner.md, plans/unit_testing_expansion.md, plans/scope_testing_planner_notes.md).
+- **Alpha focus:** work remains seed-data only; no production rollout choreography is required (plans/planning_the_planner.md:8-13).
+- **Execution chain:** 1) land alpha security/observability hardening P0s -> 2) catalogue non-fiction planners/orchestrators for PlannerBase -> 3) retire legacy runner scaffolding and harden CI/lint gates -> 4) prototype multi-channel Ops routing/ack flows -> 5) deepen planner health dashboards for SLA drill-downs (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:184-187, plans/_next_session_prompt.md:4-19).
 
 ## Active Blockers
-- WILL NOT DO **Dual-write rollout** - migrations/backfill tooling will not be pursued; record kept for historical context (plans/scope_token_path_refactor.md, plans/scope_testing_planner_notes.md).
-- **Planner base contracts** - `IPlannerTool`, `PlannerBase`, telemetry contracts, and template repository hooks are still design-only; fiction tooling cannot migrate until they exist (plans/planning_the_planner.md, plans/scope_testing_planner_notes.md).
-- **Template & telemetry infrastructure** - shared template repo + planner telemetry events need implementation ahead of pilots to avoid rework (plans/planning_the_planner.md, plans/scope_testing_planner_notes.md).
+- None currently. Re-evaluate after the non-fiction inventory surfaces migration gaps or CI debt.
 
 ## Priority Action Stack
-1. DONE **Define canonical schema + hashing flag** - landed canonical scope primitives and feature flag support (scope_token_path_refactor_step_20251009_01).
-2. DONE **Dual-write persistence + diagnostics** - scope metadata now dual-written with diagnostics/backfill tooling (scope_token_path_refactor_step_20251009_02).
-3. DONE **Guarding tests for scope & retrieval** - regression tests cover canonicalisation, fallback, and dispatcher propagation (`plans/completed/unit_testing_expansion/unit_testing_expansion_step_20251009_03_scope_retrieval_and_dispatcher_guards.md`).
-4. WILL NOT DO **Apply dual-write schema + reindex vectors** - deferred permanently; leave doc references for posterity (plans/scope_token_path_refactor.md, plans/scope_testing_planner_notes.md).
-5. DONE **Planner contracts + transcript logger** - landed `IPlannerTool`, `PlannerBase<TParams>`, `PlannerContext`, logging hooks; Vision planner now routes through the base (planning_the_planner_step_20251012_04).
-6. DONE **ToolRegistry capability index + PlanAsync helper** - catalog + dispatcher telemetry wired for planner discovery (planning_the_planner_step_20251012_05).
-7. DONE **Vectors/OpenSearch regression tests** - scoped KNN filters asserted, Query DSL promoted to path metadata (`plans/completed/unit_testing_expansion/unit_testing_expansion_step_20251012_07_knn_scope_filters.md`).
-8. WILL NOT DO **Flip path hashing flag (lower env)** - no further action; hash flip and associated soak/backfill steps are abandoned (scope_token_path_refactor_step_20251009_08).
-9. DONE **ScopePath retrieval/tooling adoption** - retrieval helpers, ToolDispatcher, and fiction runners now consume the shared builders; regression tests cover planner + dispatcher propagation (plans/scope_token_path_refactor.md, plans/scope_testing_planner_notes.md, plans/unit_testing_expansion.md).
-10. DONE **Planner backlog plumbing** - dispatcher + fiction jobs propagate/consume `backlogItemId`, non-vision runners echo it into results/telemetry, and regression coverage exercises chapter/scroll/scene flows; next follow-up shifts to backlog telemetry surfacing (plans/planning_the_planner.md, plans/fiction/phase-001_step_20250926_2327_inventory.md).
-11. DONE **Planner migrations & seeding rollout** - Scene Weaver now rides `PlannerBase`, templates are seeded, and rollout evidence lives in `plans/completed/planning_the_planner/planning_the_planner_step_20251026_09_scene_weaver_planner_ops_validation_and_rollout_recipe.md`.
-12. DONE **Planner health & critique guard rails** - shipped `/api/diagnostics/planner`, structured `planner.*` telemetry, and persona-aware critique budgets defaulting to off per planner/persona (plans/planning_the_planner.md, plans/scope_testing_planner_notes.md).
-13. DONE **Planner telemetry + diagnostics surfaces** - console route `Operations → Backlog Telemetry` now renders planner health + OpenSearch diagnostics with backlog coverage, stale/orphaned alerts, critique budget warnings, and flapping detection powered by the new endpoints (plans/planning_the_planner.md, plans/scope_testing_planner_notes.md, plans/planning_the_planner_step_20251026_06_backlog_dashboards_and_chapter_architect_prep.md).
-14. DONE **Planner pipeline audit/fixes** - harness now scripts the full vision -> scene flow via `FictionPlannerPipelineTests`, asserting backlog transitions, transcripts, and checkpoints (plans/planning_the_planner.md, plans/fiction/phase-001_step_20250926_2327_inventory.md).
-15. DONE **Planner pilot migration** - Chapter Architect now rides `PlannerBase`, scripted parity is covered by `FictionPlannerPipelineTests`, and backlog/telemetry alerts feed the Ops webhook so flapping/stale items page automatically (`plans/completed/planning_the_planner/planning_the_planner_step_20251026_07_chapter_architect_planner_and_ops_alerting.md`, plans/scope_testing_planner_notes.md).
-16. DONE **Planner rollout guidance & README refresh** - developer recipe plus README updates captured in `plans/completed/planning_the_planner/planning_the_planner_step_20251026_09_scene_weaver_planner_ops_validation_and_rollout_recipe.md`; shared checklist items reflect the alpha-only rollout reality.
+1. Implement API rate limiting, per-persona/agent quotas, request size caps, and cancellation propagation (plans/alpha_security_observability_hardening.md, src/Cognition.Api/*).
+2. Lock ScopePath construction behind the shared factory and block direct `new ScopePath` usage (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
+3. Define and test authorization policies + planner token budgets; emit throttling telemetry and wire structured correlation logging (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
+4. Catalogue non-fiction planners and adjacent orchestrators that should adopt PlannerBase; capture template prerequisites and scope expectations (plans/planning_the_planner.md:184, plans/_next_session_prompt.md:10-13, plans/scope_token_path_refactor.md:25-45).
+5. Draft the non-fiction migration matrix and seed checklist updates in plans/planning_the_planner_rollout_recipe.md to cover non-fiction specifics (plans/planning_the_planner_rollout_recipe.md, plans/planning_the_planner.md:189-195).
+6. Identify and remove remaining legacy runner scaffolding/tests that duplicate PlannerBase functionality; update CI/lint gates to enforce scripted pipeline coverage (plans/_next_session_prompt.md:11-13, plans/planning_the_planner.md:185).
+7. Prototype multi-channel Ops routing (Slack, PagerDuty) using the validated webhook payloads; define acknowledgement semantics and Ops override metadata (plans/_next_session_prompt.md:14-16, plans/planning_the_planner.md:186).
+8. Extend planner health dashboards with alert drill-downs, SLA visualisations, and recent transcript surfacing for upcoming planners (plans/_next_session_prompt.md:17-19, plans/planning_the_planner.md:187, plans/planning_the_planner.md:205-206).
 
 ## Fast Follow Improvements
-- Centralised `ScopePath` builders shared across services to ban ad-hoc path construction (plans/scope_testing_planner_notes.md, plans/scope_token_path_refactor.md).
-- Planner telemetry contract + exposure (planner.* events, transcript repository surfacing) before wider adoption (plans/planning_the_planner.md, plans/scope_testing_planner_notes.md).
-- Template repository for planner prompts keyed by `StepDescriptor` ids (plans/planning_the_planner.md, plans/scope_testing_planner_notes.md).
-- Health/diagnostics endpoint exposing scope feature flags + metrics (plans/scope_testing_planner_notes.md, plans/scope_token_path_refactor.md).
-- Ensure deterministic fakes (ScriptedLLM, ScriptedEmbeddingsClient, InMemoryVectorStore) are default in tests to unblock planner pilots (plans/unit_testing_expansion.md, plans/scope_testing_planner_notes.md).
-- Backlog telemetry & dashboards for fiction runners (Vision â†’ Iterative â†’ Architect â†’ Scroll â†’ Scene) now power the console view and Ops webhook; next layers focus on additional planner migrations and downstream consumers (plans/fiction/phase-001_step_20250926_2327_inventory.md, plans/planning_the_planner.md).
+- Capture alpha-only simplifications in the scope refactor docs to guide future data migrations once real data arrives (plans/scope_token_path_refactor.md:66-90).
+- Produce a standing non-fiction planner adoption cadence review in plans/planning_the_planner.md once the migration matrix is drafted (plans/planning_the_planner.md:189-195).
+- Keep backlog telemetry guidance current as dashboard work evolves; align console widgets with planner health SLA instrumentation (plans/planning_the_planner.md:197-205).
+- Refresh developer onboarding/write-ups when non-fiction migrations begin so new planners inherit the rollout recipe without drift (plans/planning_the_planner_rollout_recipe.md).
 
 ## Watch Items / Risks
-- Token cost blow-ups if self-critique defaults stay on; make it opt-in per planner/persona (plans/planning_the_planner.md, plans/scope_testing_planner_notes.md).
-- Performance hit from new principal/path indexes; benchmark before production flag flip (plans/scope_token_path_refactor.md, plans/scope_testing_planner_notes.md).
-- Persona-only assets (Image Lab) remain intentionally persona-scoped; document exception to avoid accidental refactors (plans/scope_testing_planner_notes.md, plans/scope_token_path_refactor.md).
-- Enforce step-note + snapshot workflow via PR template to prevent drift (plans/README.md referenced in plans/scope_testing_planner_notes.md).
-
-
-
+- Token cost blow-ups if self-critique defaults stay on; keep it opt-in per planner/persona (plans/planning_the_planner.md:203-205, plans/scope_testing_planner_notes.md).
+- Performance ripple from path indexes once real workloads arrive; benchmark before broad rollout (plans/scope_token_path_refactor.md:41-52).
+- Ensure persona-only assets (Image Lab) remain intentionally persona-scoped to avoid accidental refactors (plans/scope_testing_planner_notes.md, plans/scope_token_path_refactor.md).
+- Stay aligned with the step-note + snapshot workflow so completed work lands under plans/completed/... promptly (plans/README.md via plans/scope_testing_planner_notes.md).
