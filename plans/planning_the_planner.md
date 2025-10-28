@@ -5,15 +5,13 @@ Objective
 - Define `IPlannerTool`, `PlannerBase`, and supporting contracts so planners are metadata-driven, testable, and compose cleanly with existing tool infrastructure.
 - Outline migration steps to refactor in-flight fiction planners onto the shared foundation without stalling feature work.
 
-Current Status (2025-10-13)
-- Planner contracts and base class are implemented; Vision planner runs through `PlannerBase` with transcript/metric capture.
-- Planner executions now persist via `PlannerTranscriptStore` using the new `planner_executions` table, and the startup seeder provisions the canonical vision planner prompt template.
-- Vision planner prompt now yields a dynamic `planningBacklog` (rather than a finished outline) so downstream phases can iteratively fill gaps, matching the iterative flow captured in `reference/iterate-book.py`.
-- Iterative planner now runs on `PlannerBase`, including template-driven prompts, transcript capture, and metrics reuse.
-- Fiction weaver jobs promote backlog metadata end-to-end, automatically flipping backlog item status to in-progress/completed (or back to pending on failure) with new regression coverage, and non-vision phases now echo `backlogItemId` through phase results, transcripts, and progress snapshots for telemetry.
-- Planner-focused tests cover capability lookup, Vision planner orchestration, transcript persistence, template resolution, and telemetry redaction.
-- Outstanding work includes rolling the migration/template seeding through lower environments, migrating the next planner, and documenting rollout guidance.
-- Third-party review (2025-10-14) highlighted three priorities: (1) guard rails for template availability and self-critique budgets, (2) a planner health/diagnostics surface, and (3) backlog metadata plumbing through the dispatcher + fiction runners.
+Current Status (2025-10-26)
+- PlannerBase plus shared telemetry/transcript infrastructure are stable; vision, iterative, chapter architect, scroll refiner, and scene weaver planners now derive from the base class with seeded templates (`planner.fiction.vision`, `planner.fiction.iterative`, `planner.fiction.chapterArchitect`, `planner.fiction.scrollRefiner`, `planner.fiction.sceneWeaver`).
+- `FictionPlannerPipelineTests` exercises the scripted vision → iterative → architect → scroll → scene flow and verifies backlog checkpoints, transcripts, and metadata end-to-end.
+- Planner health diagnostics fuse telemetry/backlog heuristics into `PlannerHealthReport.Alerts`, and the Ops webhook publisher routes alerts per ID/severity with optional SLO thresholds and fails fast if no webhook is configured.
+- The console backlog telemetry view consumes the richer alert payloads, and Ops configuration (`OpsAlerting`) now exposes routing + debounce knobs for internal alpha validation; configuration validation guards common misconfigurations (missing webhook, non-positive SLO thresholds).
+- We remain in alpha with only seed data; no production rollout or lower-environment choreography is required. Remaining effort concentrates on future planner migrations, non-fiction coverage, and tightening developer guidance rather than environment cutovers.
+- Third-party review items (template guard rails, planner health endpoint, backlog instrumentation) are closed; focus shifts to completing migrations and codifying rollout recipes.
 
 Scope
 - Interfaces, base classes, and metadata DSL for planner-oriented tools living under `Cognition.Clients.Tools`.
@@ -183,13 +181,13 @@ Open Questions
 - How to present transcripts in the UI? (Coordinate with API team once telemetry sinks confirm.)
 
 Next Steps
-1. Implement the planner health endpoint and telemetry surface: add the API controller/service, expose planner registrations/template availability/backlog counts, and emit `planner.*` events for dashboards (blocks telemetry + pilot readiness).
-2. Introduce self-critique budget controls by extending `PlannerMetadata` defaults, guarding execution in `PlannerBase`, and logging critique token metrics; ensure defaults stay disabled unless a planner/persona opts in.
-3. Harden the planner pipeline automation by exercising `FictionPlannerPipelineTests`, closing any backlog gaps across iterators/architect/scroll/scene runners, and expanding regression coverage where the harness flags holes.
-4. Migrate the next fiction planner (e.g., `ScriptedScenePlanner`) onto `PlannerBase` with template-backed prompts and deterministic fakes, capturing parity transcripts/results for review.
-5. Publish planner rollout guidance and refresh README/developer docs once the above code changes land, covering prompt templates, backlog usage, telemetry expectations, and QA sign-off.
+1. Catalogue non-fiction planners (and adjacent orchestrators) that should adopt `PlannerBase`, outlining migration prerequisites and expected template inputs.
+2. Deprecate legacy runner scaffolding now that fiction planners have migrated; tighten CI/lint gates around planner template configuration and scripted pipeline coverage.
+3. Explore multi-channel Ops publishing (e.g., Slack + PagerDuty) and acknowledgement workflows once webhook payloads stabilise under alpha usage.
+4. Extend planner health dashboards with additional alert drill-downs/SLA visualisations to support upcoming planner additions.
 
 Planner Migration Guidance (Updated 2025-10-21)
+- Full rollout recipe: `plans/planning_the_planner_rollout_recipe.md` (source of truth for checklist + lower-env runbook).
 - `FictionPlannerPipelineTests` now assert backlog state, checkpoint completion, and transcript metadata across the vision → scene flow. Update the scripted responses/templates in that harness before migrating any new planner so we keep parity evidence in CI.
 - Every migrated planner must build its `ScopePath` via `IScopePathBuilder` and thread backlog metadata (`backlogItemId`) through `PlannerResult`, transcripts, and telemetry so the jobs layer can flip statuses automatically.
 - Record a rollout note that captures: (a) scripts/fakes used for parity, (b) critique budget defaults, and (c) required backlog inputs/outputs. These notes seed the README guidance and unblock downstream tooling.

@@ -272,11 +272,38 @@ Job runners follow the same pattern: call `_scopePaths.TryBuild` when preparing 
 - `PlannerHealthReport.Alerts` surfaces the server-evaluated heuristics (stale/orphaned items, backlog flapping, critique exhaustion, planner failures, template gaps) so both the dashboard and Ops paging receive the same contextual payload.
 - Console operators can open **Operations → Backlog Telemetry** in the Cognition Console to visualize planner health, backlog coverage, stale/orphaned items, alert heuristics, and OpenSearch diagnostics without leaving the UI (the dashboard calls the two diagnostics endpoints above).
 - Self-critique remains opt-in: configure `PlannerCritique:PlannerSettings` in appsettings to enable specific planners/personas and override token/attempt budgets without recompiling.
-- `StartupDataSeeder` seeds the default planner templates (`planner.fiction.vision`, `planner.fiction.iterative`, `planner.fiction.chapterArchitect`, and `planner.fiction.scrollRefiner`) so migrations to `PlannerBase` don't trip the health checks.
+- `StartupDataSeeder` seeds the default planner templates (`planner.fiction.vision`, `planner.fiction.iterative`, `planner.fiction.chapterArchitect`, `planner.fiction.scrollRefiner`, and `planner.fiction.sceneWeaver`) so migrations to `PlannerBase` don't trip the health checks.
+- The planner rollout recipe (`plans/planning_the_planner_rollout_recipe.md`) captures the migration checklist and lower-environment verification steps for future planners.
 
 ### Ops Alerting
 
-- Configure the `OpsAlerting` section in `appsettings.*` to forward backlog/telemetry alerts to your paging or incident channel. Provide a `WebhookUrl`, optional `RoutingKey`, `Environment`, and `Source`; alerts are debounced by default (5 minutes) and can be severity-filtered via `SeverityFilter`. Use `Routes` (e.g., `alert:backlog:stale`, `severity:error`) to override webhook/routing on a per-alert basis, and `AlertSloThresholds` to publish SLO metadata when a condition persists. The payload mirrors the `PlannerHealthReport.Alerts` collection, so dashboards and Ops notifications share the same context.
+- Configure the `OpsAlerting` section in `appsettings.*` to forward backlog/telemetry alerts to your paging or incident channel. Provide a `WebhookUrl`, optional `RoutingKey`, `Environment`, and `Source`; alerts are debounced by default (5 minutes) and can be severity-filtered via `SeverityFilter`. Use `Routes` (e.g., `alert:backlog:stale`, `severity:error`) to override webhook/routing on a per-alert basis, and `AlertSloThresholds` to publish SLO metadata when a condition persists. The payload mirrors the `PlannerHealthReport.Alerts` collection, so dashboards and Ops notifications share the same context. Example configuration:
+
+```jsonc
+"OpsAlerting": {
+  "Enabled": true,
+  "WebhookUrl": "https://pagerduty.example/webhook",
+  "RoutingKey": "planner-default",
+  "Environment": "production",
+  "DebounceWindow": "00:05:00",
+  "SeverityFilter": [ "Warning", "Error" ],
+  "Routes": {
+    "alert:planner:recent-failures": {
+      "WebhookUrl": "https://pagerduty.example/high-priority",
+      "RoutingKey": "planner-critical"
+    },
+    "severity:error": {
+      "RoutingKey": "planner-errors"
+    }
+  },
+  "AlertSloThresholds": {
+    "alert:planner:recent-failures": "00:15:00",
+    "severity:warning": "01:00:00"
+  }
+}
+```
+
+- Configuration is validated at startup; when `OpsAlerting.Enabled` is `true`, at least one webhook must be configured (either the root `WebhookUrl` or a route override) and SLO thresholds must be greater than zero.
 
 ### OpenSearch Diagnostics
 

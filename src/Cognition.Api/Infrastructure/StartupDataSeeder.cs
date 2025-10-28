@@ -495,6 +495,27 @@ Produce minified JSON with the following structure:
 Ensure the scroll aligns with the blueprint beats and that continuity notes flag canonical obligations. Respond with JSON only.
 """;
 
+        const string sceneWeaverTemplate = """
+You are writing the full narrative scene "{{sceneTitle}}" (slug {{sceneSlug}}) for branch "{{branch}}" in project "{{planName}}".
+
+Scene description:
+{{sceneDescription}}
+
+Section context:
+{{sectionSummary}}
+
+Scroll synopsis:
+{{scrollSynopsis}}
+
+Blueprint structure (JSON):
+{{blueprintStructure}}
+
+Scene metadata (JSON):
+{{sceneMetadata}}
+
+Write the complete scene in rich Markdown. Include dialogue, action, and interiority. Target 900-1300 words. Return Markdown only.
+""";
+
         var templates = new List<PromptTemplate>
         {
             new()
@@ -533,6 +554,16 @@ Ensure the scroll aligns with the blueprint beats and that continuity notes flag
                 Name = "planner.fiction.scrollRefiner",
                 PromptType = PromptType.SystemInstruction,
                 Template = scrollRefinerTemplate,
+                Tokens = null,
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow
+            },
+            new()
+            {
+                Id = Guid.NewGuid(),
+                Name = "planner.fiction.sceneWeaver",
+                PromptType = PromptType.SystemInstruction,
+                Template = sceneWeaverTemplate,
                 Tokens = null,
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow

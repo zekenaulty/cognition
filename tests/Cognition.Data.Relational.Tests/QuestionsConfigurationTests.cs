@@ -23,16 +23,16 @@ public class QuestionsConfigurationTests
 
         var tableName = entity!.GetTableName();
         tableName.Should().Be("question_categories");
-        entity.GetSchema().Should().BeNull();
+        entity!.GetSchema().Should().BeNull();
 
-        AssertColumn(entity, nameof(QuestionCategory.Id), "id", isNullable: false);
-        AssertColumn(entity, nameof(QuestionCategory.Key), "key", isNullable: false, maxLength: 128);
-        AssertColumn(entity, nameof(QuestionCategory.Name), "name", isNullable: false, maxLength: 128);
-        AssertColumn(entity, nameof(QuestionCategory.Description), "description", isNullable: true);
-        AssertColumn(entity, nameof(QuestionCategory.CreatedAtUtc), "created_at_utc", isNullable: false);
-        AssertColumn(entity, nameof(QuestionCategory.UpdatedAtUtc), "updated_at_utc", isNullable: true);
+        AssertColumn(entity!, nameof(QuestionCategory.Id), "id", isNullable: false);
+        AssertColumn(entity!, nameof(QuestionCategory.Key), "key", isNullable: false, maxLength: 128);
+        AssertColumn(entity!, nameof(QuestionCategory.Name), "name", isNullable: false, maxLength: 128);
+        AssertColumn(entity!, nameof(QuestionCategory.Description), "description", isNullable: true);
+        AssertColumn(entity!, nameof(QuestionCategory.CreatedAtUtc), "created_at_utc", isNullable: false);
+        AssertColumn(entity!, nameof(QuestionCategory.UpdatedAtUtc), "updated_at_utc", isNullable: true);
 
-        var index = entity.GetIndexes().Should().ContainSingle().Subject;
+        var index = entity!.GetIndexes().Should().ContainSingle().Subject;
         index.Properties.Select(p => p.Name).Should().Equal(new[] { nameof(QuestionCategory.Key) });
         index.IsUnique.Should().BeTrue();
         GetRelationalName(index).Should().Be("ux_question_categories_key");
@@ -48,22 +48,22 @@ public class QuestionsConfigurationTests
 
         var tableName = entity!.GetTableName();
         tableName.Should().Be("questions");
-        entity.GetSchema().Should().BeNull();
+        entity!.GetSchema().Should().BeNull();
 
-        AssertColumn(entity, nameof(Question.Id), "id", isNullable: false);
-        AssertColumn(entity, nameof(Question.CategoryId), "category_id", isNullable: false);
-        AssertColumn(entity, nameof(Question.Text), "text", isNullable: false);
-        AssertColumn(entity, nameof(Question.Tags), "tags", isNullable: true);
-        AssertColumn(entity, nameof(Question.Difficulty), "difficulty", isNullable: true);
-        AssertColumn(entity, nameof(Question.CreatedAtUtc), "created_at_utc", isNullable: false);
-        AssertColumn(entity, nameof(Question.UpdatedAtUtc), "updated_at_utc", isNullable: true);
+        AssertColumn(entity!, nameof(Question.Id), "id", isNullable: false);
+        AssertColumn(entity!, nameof(Question.CategoryId), "category_id", isNullable: false);
+        AssertColumn(entity!, nameof(Question.Text), "text", isNullable: false);
+        AssertColumn(entity!, nameof(Question.Tags), "tags", isNullable: true);
+        AssertColumn(entity!, nameof(Question.Difficulty), "difficulty", isNullable: true);
+        AssertColumn(entity!, nameof(Question.CreatedAtUtc), "created_at_utc", isNullable: false);
+        AssertColumn(entity!, nameof(Question.UpdatedAtUtc), "updated_at_utc", isNullable: true);
 
-        var index = entity.GetIndexes().Should().ContainSingle().Subject;
+        var index = entity!.GetIndexes().Should().ContainSingle().Subject;
         index.Properties.Select(p => p.Name).Should().Equal(new[] { nameof(Question.CategoryId) });
         index.IsUnique.Should().BeFalse();
         GetRelationalName(index).Should().Be("ix_questions_category");
 
-        var foreignKey = entity.GetForeignKeys().Should().ContainSingle().Subject;
+        var foreignKey = entity!.GetForeignKeys().Should().ContainSingle().Subject;
         foreignKey.PrincipalEntityType.ClrType.Should().Be(typeof(QuestionCategory));
         foreignKey.Properties.Select(p => p.Name).Should().Equal(new[] { nameof(Question.CategoryId) });
         GetRelationalName(foreignKey).Should().Be("fk_questions_categories");

@@ -54,7 +54,8 @@ public class FictionPlannerPipelineTests
             ["planner.fiction.vision"] = Templates.Vision,
             ["planner.fiction.iterative"] = Templates.Iterative,
             ["planner.fiction.chapterArchitect"] = Templates.ChapterArchitect,
-            ["planner.fiction.scrollRefiner"] = Templates.ScrollRefiner
+            ["planner.fiction.scrollRefiner"] = Templates.ScrollRefiner,
+            ["planner.fiction.sceneWeaver"] = Templates.Scene
         });
         var critiqueOptions = Options.Create(new PlannerCritiqueOptions());
         var scopePathBuilder = new ScopePathBuilder();
@@ -99,13 +100,22 @@ public class FictionPlannerPipelineTests
             critiqueOptions,
             scopePathBuilder);
 
+        var sceneTool = new SceneWeaverPlannerTool(
+            agentService,
+            NullLoggerFactory.Instance,
+            telemetry,
+            transcriptStore,
+            templateRepo,
+            critiqueOptions,
+            scopePathBuilder);
+
         var runners = new IFictionPhaseRunner[]
         {
             new VisionPlannerRunner(db, agentService, services, visionTool, NullLogger<VisionPlannerRunner>.Instance, scopePathBuilder),
             new IterativePlannerRunner(db, agentService, services, iterativeTool, NullLogger<IterativePlannerRunner>.Instance, scopePathBuilder),
             new ChapterArchitectRunner(db, agentService, services, chapterTool, NullLogger<ChapterArchitectRunner>.Instance, scopePathBuilder),
             new ScrollRefinerRunner(db, agentService, services, scrollTool, NullLogger<ScrollRefinerRunner>.Instance, scopePathBuilder),
-            new SceneWeaverRunner(db, agentService, NullLogger<SceneWeaverRunner>.Instance, scopePathBuilder)
+            new SceneWeaverRunner(db, agentService, services, sceneTool, NullLogger<SceneWeaverRunner>.Instance, scopePathBuilder)
         };
 
         var jobs = new FictionWeaverJobs(
@@ -175,7 +185,7 @@ public class FictionPlannerPipelineTests
         {
             ["backlogItemId"] = "draft-scene"
         };
-        await jobs.RunSceneWeaverAsync(
+        var sceneResult = await jobs.RunSceneWeaverAsync(
             graph.PlanId,
             graph.AgentId,
             graph.ConversationId,
@@ -184,6 +194,9 @@ public class FictionPlannerPipelineTests
             modelId,
             metadata: sceneMetadata,
             cancellationToken: CancellationToken.None);
+
+        sceneResult.Transcripts.Should().NotBeNull();
+        sceneResult.Transcripts.Should().HaveCountGreaterThan(0);
 
         agentService.TotalCalls.Should().Be(5);
         agentService.RemainingResponses.Should().Be(0);
@@ -217,6 +230,12 @@ public class FictionPlannerPipelineTests
             .Where(t => t.Metadata?.ContainsKey("backlogItemId") == true)
             .Select(t => t.Metadata!["backlogItemId"]?.ToString())
             .Should().Contain(new[] { "outline-core-conflicts", "refine-scroll", "draft-scene" });
+        transcripts.Should().Contain(t => t.Phase.StartsWith(FictionPhase.SceneWeaver.ToString(), StringComparison.OrdinalIgnoreCase), "SceneWeaver should persist a transcript entry.");
+        var sceneTranscript = transcripts.First(t => t.Phase.StartsWith(FictionPhase.SceneWeaver.ToString(), StringComparison.OrdinalIgnoreCase));
+        sceneTranscript.Metadata.Should().NotBeNull();
+        sceneTranscript.Metadata!.Should().ContainKey("plannerOutcome").WhoseValue.Should().Be("Success");
+        sceneTranscript.Metadata!.Should().ContainKey("sceneSlug").WhoseValue.Should().Be("scene-1");
+        sceneTranscript.FictionChapterSceneId.Should().Be(graph.SceneId);
     }
 
     private static async Task<PlanGraph> SeedPlanGraphAsync(CognitionDbContext db)
@@ -462,6 +481,9 @@ public class FictionPlannerPipelineTests
 
         public const string ScrollRefiner =
             "You are refining the chapter scroll for {{planName}} on branch {{branch}}. Blueprint: {{blueprintSynopsis}}. Structure: {{blueprintStructure}}. Existing scroll: {{scrollSummary}}. Respond with the required JSON.";
+
+        public const string Scene =
+            "You are writing the full narrative scene \"{{sceneTitle}}\" (slug {{sceneSlug}}) for branch \"{{branch}}\" in project \"{{planName}}\".\\n\\nScene description:\\n{{sceneDescription}}\\n\\nSection context:\\n{{sectionSummary}}\\n\\nScroll synopsis:\\n{{scrollSynopsis}}\\n\\nBlueprint structure (JSON):\\n{{blueprintStructure}}\\n\\nScene metadata (JSON):\\n{{sceneMetadata}}\\n\\nWrite the complete scene in rich Markdown. Include dialogue, action, and interiority. Target 900-1300 words. Return Markdown only.";
     }
 
     private static class Responses
@@ -540,6 +562,6 @@ public class FictionPlannerPipelineTests
             """;
 
         public const string Scene =
-            "The team glides through the rally, hands signaling every shift as the jammer hums overhead.";
+            "In the Opening Scene of Pipeline Plan, the team glides through the rally described in the Opening Section as scroll-1 surveillance intensifies. Existing scene description beats surface while the jammer hums overhead, forcing them to whisper Pipeline Project code phrases.";
     }
 }

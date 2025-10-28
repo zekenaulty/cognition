@@ -29,9 +29,10 @@ public class EntityConfigurationReflectionTests
             var tableName = entity!.GetTableName();
             tableName.Should().NotBeNullOrEmpty($"Entity {entityType.FullName} configured by {configType.FullName} should map to a table");
 
-            var storeObject = StoreObjectIdentifier.Table(tableName!, entity.GetSchema());
+            var schema = entity!.GetSchema();
+            var storeObject = StoreObjectIdentifier.Table(tableName!, schema);
 
-            foreach (var property in entity.GetProperties())
+            foreach (var property in entity!.GetProperties())
             {
                 property.GetColumnName(storeObject)
                     .Should().NotBeNullOrEmpty($"Property {entityType.Name}.{property.Name} should have a column mapping");

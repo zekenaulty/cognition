@@ -54,7 +54,9 @@ builder.Services.AddOptions<ScopePathOptions>()
 builder.Services.AddOptions<PlannerCritiqueOptions>()
     .Bind(builder.Configuration.GetSection(PlannerCritiqueOptions.SectionName));
 builder.Services.AddOptions<OpsAlertingOptions>()
-    .Bind(builder.Configuration.GetSection(OpsAlertingOptions.SectionName));
+    .Bind(builder.Configuration.GetSection(OpsAlertingOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<OpsAlertingOptions>, OpsAlertingOptionsValidator>();
 builder.Services.AddScoped<Cognition.Api.Infrastructure.ScopePath.ScopePathBackfillService>();
 // Background knowledge indexer is disabled for now; use the API endpoint to trigger indexing on-demand.
 // Wire AgentService DI for API controllers

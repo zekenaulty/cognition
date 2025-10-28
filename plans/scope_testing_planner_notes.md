@@ -98,13 +98,13 @@ Actionable checklist (create these step notes before coding)
 
 Create step notes per Plans README pattern; below are the exact titles to add under plans/:
 
-scope_token_path_refactor_step_20251009_01_canonical_schema_and_hash_flag.md
+plans/completed/scope_token_path_refactor/scope_token_path_refactor_step_20251009_01_canonical_schema_and_hash_flag.md
 Goal: Define canonical segment schema; land ScopePath structs; add hashing flag; unit tests for normalization/hash. Blocks: PlannerBase. 
 
-scope_token_path_refactor_step_20251009_02_dual_write_persistence_and_backfill_runner.md
+plans/completed/scope_token_path_refactor/scope_token_path_refactor_step_20251009_02_dual_write_persistence_and_backfill_runner.md
 Goal: EF + vector dual fields; opportunistic backfill; add metrics + diagnostics endpoint. 
 
-unit_testing_expansion_step_20251009_03_scope_retrieval_and_dispatcher_guards.md
+plans/completed/unit_testing_expansion/unit_testing_expansion_step_20251009_03_scope_retrieval_and_dispatcher_guards.md
 Goal: Tests for conversation→agent fallback, ScopePath canonicalization, ToolDispatcher scope propagation. Make blocking. 
 
 planning_the_planner_step_20251009_04_contracts_and_transcript_logger.md
@@ -116,7 +116,7 @@ Goal: Capability index + DI helper; integrate with existing ToolDispatcher.
 planning_the_planner_step_20251009_06_pilot_migration_scripted_scene_planner.md
 Goal: Adapter → derived class; templates referenced by StepDescriptor ID; parity via ScriptedLLM. 
 
-unit_testing_expansion_step_20251009_07_vectors_ql_dsl_and_upsert_guards.md
+plans/completed/unit_testing_expansion/unit_testing_expansion_step_20251012_07_knn_scope_filters.md
 Goal: KNN scoped filters + UpsertAsync dimension guard tests; fake client. 
 
 scope_token_path_refactor_step_20251009_08_flip_path_hashing_flag_and_monitor.md

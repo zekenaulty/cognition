@@ -23,12 +23,12 @@ Deliverables
 - `ScopePrincipal`, `ScopeSegment`, `ScopePath` value objects plus normalization helpers.
 - Updated `ScopeToken` (or successor) requiring exactly one principal segment (RootId + PrincipalType) and ordered context segments.
 - Path-aware hashing (`ComputeContentHash` replacement) including canonical path input and principal fingerprint.
-- Dual-write persistence (legacy columns + new principal/path fields), with migration scripts/read models documented.
+- Dual-write persistence (legacy columns + new principal/path fields), with migration scripts/read models documented (optional for alpha; we can cut over directly because only seed data exists).
 - Fluent query extensions (`ForPrincipal`, `ForPersona`, `ForAgent`, `WithContext`, `UnderPath`, `WalkUp`) for EF/OpenSearch/Cosmos consumers.
 - Updated tooling docs + developer guidance for constructing scopes with principals.
 - Regression tests: hashing, persistence, LINQ helpers, dispatcher integration, retrieval fallbacks.
 
-Strategy
+ Strategy
 - Phase 0 - Discovery & Design
   - Inventory current scope usage (clients, data, jobs, API) and confirm steward requirements.
   - Finalize canonical principal + segment schema, allowed keys, normalization rules, and validation guardrails.
@@ -43,6 +43,7 @@ Strategy
   - Add principal/path columns or JSON fields to relational/vector stores; update EF models.
   - Implement dual-write (legacy fields + new principal/path metadata) behind toggle.
   - Backfill writer logic to populate principal/path data and `Source` fallbacks for old records.
+  - Alpha note: with only seed data, we can skip dual-write/backfill and ship the new schema directly; keep the toggle scaffolding for future migrations.
 
 - Phase 3 - Query & Retrieval Surface
   - Build LINQ/EF helpers and query extensions (exact, prefix, ancestor walk-up) keyed off `ScopePrincipal`.
@@ -50,7 +51,7 @@ Strategy
   - Provide path-aware filters in vector/OpenSearch builders.
 
 - Phase 4 - Migration & Cutover
-  - Run backfill scripts or opportunistic updates; verify coverage.
+  - Run backfill scripts or opportunistic updates; verify coverage (not required in alpha).
   - Flip hashing to path-aware mode; monitor collisions.
   - Remove legacy-only code paths once adoption verified; document cleanup.
 
@@ -83,13 +84,18 @@ Risks & Mitigations
 - Migration drift -> dry-run backfills in lower environments with detailed runbooks.
 - Consumer misuse of segments -> guard APIs, validation errors, and developer documentation.
 
+Alpha Simplifications
+- No customer data exists beyond seed fixtures, so direct schema/hash cutover is acceptable for alpha builds.
+- Dual-write/backfill tooling remains in the plan for future migrations, but the corresponding tasks are marked `WILL NOT DO (alpha)` in the checklist.
+- Lower-environment rollout choreography is unnecessary; instead we prioritise diagnostics and regression coverage so a future migration can proceed safely.
+
 Worklog Protocol
 - Snapshot via `arc.py` + git tag before major code changes; record in step note.
 - Each discrete task logs to `plans/scope_token_path_refactor_step_YYYYMMDD_HHMM_<slug>.md` using standard template (Goal, Commands, Files, Tests, Issues, Decision, Completion, Next Actions).
 - Use `plans/_scratchpad.md` for quick research or TODOs between formal steps.
 
 Checklist
-- [ ] Capture pre-change snapshot + tag.
+- [ ] Capture pre-change snapshot + tag (optional during alpha; keep tooling ready for future environments).
 - [x] Finalize canonical path schema & validation rules.
 - [x] Implement path-aware model + hashing (behind flag).
 - [x] Add persistence dual-write paths and migrations.
