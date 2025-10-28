@@ -8,7 +8,7 @@
 - None currently. Re-evaluate after the non-fiction inventory surfaces migration gaps or CI debt.
 
 ## Priority Action Stack
-1. Implement API rate limiting, per-persona/agent quotas, request size caps, and cancellation propagation (plans/alpha_security_observability_hardening.md, src/Cognition.Api/*).
+1. Implement API rate limiting, per-persona/agent quotas, request size caps, and cancellation propagation (global + principal limiters in place; audit remaining CT usage) (plans/alpha_security_observability_hardening.md, src/Cognition.Api/*).
 2. Lock ScopePath construction behind the shared factory and block direct `new ScopePath` usage (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
 3. Define and test authorization policies + planner token budgets; emit throttling telemetry and wire structured correlation logging (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
 4. Catalogue non-fiction planners and adjacent orchestrators that should adopt PlannerBase; capture template prerequisites and scope expectations (plans/planning_the_planner.md:184, plans/_next_session_prompt.md:10-13, plans/scope_token_path_refactor.md:25-45).

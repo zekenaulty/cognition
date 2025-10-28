@@ -52,7 +52,7 @@ See the solution file `Cognition.sln` for project references and build order.
   - Ask with tools (tool index + strict JSON tool call parsing)
   - Conversation chat with history window, optional summaries, and instruction sets
   - CoT v2-style plan-and-execute loop persisted as `ConversationPlan` + `ConversationTask`
-- Event-driven workflows via Rebus + Hangfire (e.g., UserMessageAppended → PlanRequested → ToolExecutionRequested → ToolExecutionCompleted)
+- Event-driven workflows via Rebus + Hangfire (e.g., UserMessageAppended -> PlanRequested -> ToolExecutionRequested -> ToolExecutionCompleted)
 - Image generation and asset persistence (OpenAI DALLE/GPT-Image with graceful fallback)
 - WebSocket-style updates via SignalR hub for assistant messages and token deltas
 
@@ -188,7 +188,7 @@ Agent service (`src/Cognition.Clients/Agents/AgentService.cs`) supports:
 
 Tools
 - Defined in DB (`Tool`, `ToolParameter`), resolved by fully-qualified `ClassPath` only (e.g., `Cognition.Clients.Tools.TextTransformTool, Cognition.Clients`)
-- `IToolRegistry` exposes a safe name→type map; plain type names are intentionally not supported
+- `IToolRegistry` exposes a safe name->type map; plain type names are intentionally not supported
 - `IToolDispatcher` validates inputs against parameter schema, performs light type coercion, redacts sensitive values in logs, and writes `ToolExecutionLog`
 - Example tools: TextTransform, MemoryWrite (persists a summary), KnowledgeQuery (stub)
 
@@ -208,7 +208,7 @@ Provider support
 ### Events and Background Jobs
 
 Rebus contracts (`src/Cognition.Contracts/Events.cs`) define the event flow.
-- Example flow: `UserMessageAppended` → `PlanRequested` → `PlanReady` → `ToolExecutionRequested` → `ToolExecutionCompleted` → `AssistantMessageAppended`
+- Example flow: `UserMessageAppended` -> `PlanRequested` -> `PlanReady` -> `ToolExecutionRequested` -> `ToolExecutionCompleted` -> `AssistantMessageAppended`
 - Job handlers (`src/Cognition.Jobs/*Handler.cs`) persist workflow events and forward assistant updates to the SignalR hub
 - Hangfire server is configured with PostgreSQL storage; dashboard is reachable via the API
 
@@ -270,10 +270,17 @@ Job runners follow the same pattern: call `_scopePaths.TryBuild` when preparing 
 - `PlannerHealthService` inspects planner metadata via `IToolRegistry`, template repository state, `FictionPlanBacklog`, and the new `planner_executions` table. When a required template is missing/inactive, the report status escalates to `Critical`.
 - Planner execution telemetry is standardized around `planner.started`, `planner.completed`, and `planner.failed` events emitted by `LoggerPlannerTelemetry`. Pipe those logs into your observability stack for dashboards or alerting (e.g., watch for non-success outcomes per planner).
 - `PlannerHealthReport.Alerts` surfaces the server-evaluated heuristics (stale/orphaned items, backlog flapping, critique exhaustion, planner failures, template gaps) so both the dashboard and Ops paging receive the same contextual payload.
-- Console operators can open **Operations → Backlog Telemetry** in the Cognition Console to visualize planner health, backlog coverage, stale/orphaned items, alert heuristics, and OpenSearch diagnostics without leaving the UI (the dashboard calls the two diagnostics endpoints above).
+- Console operators can open **Operations -> Backlog Telemetry** in the Cognition Console to visualize planner health, backlog coverage, stale/orphaned items, alert heuristics, and OpenSearch diagnostics without leaving the UI (the dashboard calls the two diagnostics endpoints above).
 - Self-critique remains opt-in: configure `PlannerCritique:PlannerSettings` in appsettings to enable specific planners/personas and override token/attempt budgets without recompiling.
 - `StartupDataSeeder` seeds the default planner templates (`planner.fiction.vision`, `planner.fiction.iterative`, `planner.fiction.chapterArchitect`, `planner.fiction.scrollRefiner`, and `planner.fiction.sceneWeaver`) so migrations to `PlannerBase` don't trip the health checks.
 - The planner rollout recipe (`plans/planning_the_planner_rollout_recipe.md`) captures the migration checklist and lower-environment verification steps for future planners.
+
+### API Rate Limiting & Quotas
+
+- Configure the `ApiRateLimiting` block in `appsettings.*` to enforce global, per-user, per-persona, and per-agent fixed-window quotas. Each limiter is expressed as permit/window/queue triples; set any `PermitLimit` to `0` to disable that tier.
+- Requests inherit the user id from JWT claims and optional persona/agent keys via the `X-Persona-Id` / `X-Agent-Id` headers or `personaId`/`agentId` query parameters. Partition keys are normalized to GUIDs to keep quotas stable across retries.
+- The same section exposes `MaxRequestBodyBytes` to cap payload sizes (applied via Kestrel/IIS); increase the value explicitly if planner payloads exceed 1 MB.
+- `RequestCorrelationMiddleware` now emits/propagates `X-Correlation-Id` for every call, and the rate limiter logs rejection events with that identifier so API, Jobs, and Ops tooling can join traces end-to-end.
 
 ### Ops Alerting
 
@@ -372,5 +379,8 @@ README.md
 ```
 
 For a full tree, run the snapshot helper `arc.py` (optional) to generate a Markdown directory listing that honors `.gitignore`.
+
+
+
 
 

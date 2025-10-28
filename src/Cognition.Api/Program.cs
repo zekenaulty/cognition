@@ -2,9 +2,11 @@ using System;
 using Cognition.Data.Relational;
 using Cognition.Clients;
 using Cognition.Api.Infrastructure;
+using Cognition.Api.Infrastructure.Diagnostics;
 using Cognition.Api.Infrastructure.Alerts;
 using Cognition.Api.Infrastructure.OpenSearch;
 using Cognition.Api.Infrastructure.Planning;
+using Cognition.Api.Infrastructure.Security;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -24,6 +26,9 @@ using Cognition.Data.Vectors.OpenSearch.OpenSearch;
 using Cognition.Clients.Configuration;
 using Cognition.Clients.Tools.Planning;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using System.Globalization;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -58,6 +63,105 @@ builder.Services.AddOptions<OpsAlertingOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<OpsAlertingOptions>, OpsAlertingOptionsValidator>();
 builder.Services.AddScoped<Cognition.Api.Infrastructure.ScopePath.ScopePathBackfillService>();
+
+var rateLimitSection = builder.Configuration.GetSection(ApiRateLimitingOptions.SectionName);
+builder.Services.Configure<ApiRateLimitingOptions>(rateLimitSection);
+var apiRateLimitingOptions = rateLimitSection.Get<ApiRateLimitingOptions>() ?? new ApiRateLimitingOptions();
+
+if (apiRateLimitingOptions.MaxRequestBodyBytes is > 0)
+{
+    builder.Services.Configure<KestrelServerOptions>(opts =>
+    {
+        opts.Limits.MaxRequestBodySize = apiRateLimitingOptions.MaxRequestBodyBytes;
+    });
+    builder.Services.Configure<IISServerOptions>(opts =>
+    {
+        opts.MaxRequestBodySize = apiRateLimitingOptions.MaxRequestBodyBytes;
+    });
+}
+
+builder.Services.AddRateLimiter(options =>
+{
+    if (apiRateLimitingOptions.Global?.IsEnabled == true)
+    {
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
+            RateLimitPartition.GetFixedWindowLimiter("global", _ => apiRateLimitingOptions.Global!.ToLimiterOptions()));
+    }
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        var httpContext = context.HttpContext;
+        var logger = httpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("RateLimiting");
+        var correlationId = httpContext.GetCorrelationId();
+        if (!string.IsNullOrEmpty(correlationId) && !httpContext.Response.Headers.ContainsKey(CorrelationConstants.HeaderName))
+        {
+            httpContext.Response.Headers[CorrelationConstants.HeaderName] = correlationId;
+        }
+
+        logger?.LogWarning("Rate limit exceeded for {Path} (correlationId={CorrelationId})", httpContext.Request.Path, correlationId ?? string.Empty);
+
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            httpContext.Response.Headers.RetryAfter = Math.Ceiling(retryAfter.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+        }
+
+        var retrySeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retry)
+            ? (int?)Math.Ceiling(retry.TotalSeconds)
+            : null;
+
+        await httpContext.Response.WriteAsJsonAsync(new
+        {
+            code = "rate_limited",
+            message = "Request quota exceeded. Please retry later.",
+            retryAfterSeconds = retrySeconds,
+            correlationId
+        }, cancellationToken);
+    };
+
+    if (apiRateLimitingOptions.PerUser?.IsEnabled == true)
+    {
+        options.AddPolicy(ApiRateLimitingOptions.UserPolicyName, httpContext =>
+        {
+            var userId = ApiRateLimiterPartitionKeys.ResolveUserId(httpContext);
+            if (string.IsNullOrEmpty(userId))
+            {
+                return RateLimitPartition.GetNoLimiter("user:none");
+            }
+
+            return RateLimitPartition.GetFixedWindowLimiter($"user:{userId}", _ => apiRateLimitingOptions.PerUser!.ToLimiterOptions());
+        });
+    }
+
+    if (apiRateLimitingOptions.PerPersona?.IsEnabled == true)
+    {
+        options.AddPolicy(ApiRateLimitingOptions.PersonaPolicyName, httpContext =>
+        {
+            var personaId = ApiRateLimiterPartitionKeys.ResolvePersonaId(httpContext);
+            if (string.IsNullOrEmpty(personaId))
+            {
+                return RateLimitPartition.GetNoLimiter("persona:none");
+            }
+
+            return RateLimitPartition.GetFixedWindowLimiter($"persona:{personaId}", _ => apiRateLimitingOptions.PerPersona!.ToLimiterOptions());
+        });
+    }
+
+    if (apiRateLimitingOptions.PerAgent?.IsEnabled == true)
+    {
+        options.AddPolicy(ApiRateLimitingOptions.AgentPolicyName, httpContext =>
+        {
+            var agentId = ApiRateLimiterPartitionKeys.ResolveAgentId(httpContext);
+            if (string.IsNullOrEmpty(agentId))
+            {
+                return RateLimitPartition.GetNoLimiter("agent:none");
+            }
+
+            return RateLimitPartition.GetFixedWindowLimiter($"agent:{agentId}", _ => apiRateLimitingOptions.PerAgent!.ToLimiterOptions());
+        });
+    }
+});
+
 // Background knowledge indexer is disabled for now; use the API endpoint to trigger indexing on-demand.
 // Wire AgentService DI for API controllers
 builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Clients.Agents.AgentService>();
@@ -245,6 +349,9 @@ if (hasHttps)
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+app.UseRequestCorrelation();
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -254,8 +361,34 @@ if (app.Environment.IsDevelopment())
 }
 
 // Require auth for all API controllers, but allow SPA/static/Swagger/Hangfire/SignalR anonymously
-app.MapControllers().RequireAuthorization();
-app.MapHub<Cognition.Api.Controllers.ChatHub>("/hub/chat");
+var controllerEndpoints = app.MapControllers().RequireAuthorization();
+if (apiRateLimitingOptions.PerUser?.IsEnabled == true)
+{
+    controllerEndpoints = controllerEndpoints.RequireRateLimiting(ApiRateLimitingOptions.UserPolicyName);
+}
+if (apiRateLimitingOptions.PerPersona?.IsEnabled == true)
+{
+    controllerEndpoints = controllerEndpoints.RequireRateLimiting(ApiRateLimitingOptions.PersonaPolicyName);
+}
+if (apiRateLimitingOptions.PerAgent?.IsEnabled == true)
+{
+    controllerEndpoints = controllerEndpoints.RequireRateLimiting(ApiRateLimitingOptions.AgentPolicyName);
+}
+
+var chatHub = app.MapHub<Cognition.Api.Controllers.ChatHub>("/hub/chat");
+if (apiRateLimitingOptions.PerUser?.IsEnabled == true)
+{
+    chatHub = chatHub.RequireRateLimiting(ApiRateLimitingOptions.UserPolicyName);
+}
+if (apiRateLimitingOptions.PerPersona?.IsEnabled == true)
+{
+    chatHub = chatHub.RequireRateLimiting(ApiRateLimitingOptions.PersonaPolicyName);
+}
+if (apiRateLimitingOptions.PerAgent?.IsEnabled == true)
+{
+    chatHub = chatHub.RequireRateLimiting(ApiRateLimitingOptions.AgentPolicyName);
+}
+_ = chatHub;
 
 // Expose Hangfire Dashboard
 if (app.Environment.IsDevelopment())

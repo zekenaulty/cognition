@@ -9,8 +9,8 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 
 ## P0 Blockers (Pre-pilot)
 1. **Global & per-principal throttles**
-   - Add ASP.NET rate limiting middleware with persona/agent quotas.
-   - Enforce max request size and ensure CancellationToken propagation in API/service clients.
+   - DONE Add ASP.NET rate limiting middleware with persona/agent quotas (Program.cs:67, src/Cognition.Api/appsettings.json:12).
+   - TODO Audit CancellationToken propagation in downstream clients after tightening quotas.
 2. **ScopePath factory lockdown**
    - Make ScopePath builder the only construction path (internal constructors, DI-exposed factory).
    - Audit repository for `new ScopePath` usage and replace with factory.
@@ -22,8 +22,8 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
    - Configuration per planner/persona for max iterations, critique toggle, token caps.
    - Emit `planner.throttled` / `planner.rejected` telemetry and Hangfire circuit breaker to avoid requeue storms.
 5. **Correlation IDs & structured logging**
-   - Adopt Serilog (or MEL + Activity) to stamp correlation IDs across API -> Jobs -> LLM/vector/tool calls.
-   - Log ScopePath/backlog identifiers for every planner execution.
+   - DONE RequestCorrelationMiddleware stamps correlation IDs at the API edge (RequestCorrelationMiddleware.cs).
+   - TODO extend correlation scopes beyond API (Jobs, Clients, telemetry payloads).
 
 ## P1 Stabilisation Tasks
 - Fail-fast template seeding: validate every `PlannerMetadata.Step` template exists at startup (`StartupDataSeeder` self-test).
@@ -45,7 +45,7 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 - **Week 4:** Extend PlannerHealth dashboards (SLOs, p95s, drill-downs), add Console PlanTimeline links, and finalize Ops multi-channel routing.
 
 ## Checklist
-- [ ] Implement ASP.NET rate limiting + per-agent/persona quotas with configuration in `appsettings`.
+- [x] Implement ASP.NET rate limiting + per-agent/persona quotas with configuration in `appsettings`.
 - [ ] Enforce request body size limits and audit CancellationToken usage.
 - [ ] Refactor ScopePath construction to a locked factory; remove public constructors.
 - [ ] Introduce analyzer or CI check preventing direct `new ScopePath`.
