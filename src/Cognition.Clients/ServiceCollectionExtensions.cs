@@ -45,6 +45,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCognitionTools(this IServiceCollection services)
     {
         services.AddSingleton<IPlannerTelemetry, LoggerPlannerTelemetry>();
+        services.AddSingleton<IPlannerQuotaService, PlannerQuotaService>();
         services.AddScoped<IPlannerTranscriptStore, PlannerTranscriptStore>();
         services.AddScoped<IPlannerTemplateRepository, PlannerTemplateRepository>();
         services.AddSingleton<IPlannerCatalog, PlannerCatalog>();

@@ -450,6 +450,8 @@ public class FictionPlannerPipelineTests
         public Task PlanCompletedAsync(PlannerTelemetryContext context, PlannerResult result, CancellationToken ct) => Task.CompletedTask;
         public Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct) => Task.CompletedTask;
         public Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct) => Task.CompletedTask;
+        public Task PlanThrottledAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct) => Task.CompletedTask;
+        public Task PlanRejectedAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct) => Task.CompletedTask;
     }
 
     private sealed class InMemoryTemplateRepository : IPlannerTemplateRepository

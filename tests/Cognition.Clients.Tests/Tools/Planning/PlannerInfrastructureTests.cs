@@ -468,6 +468,8 @@ Project details:
         public List<PlannerTelemetryContext> Started { get; } = new();
         public List<(PlannerTelemetryContext Context, PlannerResult Result)> Completed { get; } = new();
         public List<(PlannerTelemetryContext Context, Exception Exception)> Failed { get; } = new();
+        public List<(PlannerTelemetryContext Context, PlannerQuotaDecision Decision)> Throttled { get; } = new();
+        public List<(PlannerTelemetryContext Context, PlannerQuotaDecision Decision)> Rejected { get; } = new();
 
         public Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct)
         {
@@ -484,6 +486,18 @@ Project details:
         public Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct)
         {
             Failed.Add((context, exception));
+            return Task.CompletedTask;
+        }
+
+        public Task PlanThrottledAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)
+        {
+            Throttled.Add((context, decision));
+            return Task.CompletedTask;
+        }
+
+        public Task PlanRejectedAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)
+        {
+            Rejected.Add((context, decision));
             return Task.CompletedTask;
         }
     }

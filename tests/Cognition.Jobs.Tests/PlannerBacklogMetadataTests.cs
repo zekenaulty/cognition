@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Contracts.Events;
 using Cognition.Data.Relational;
@@ -122,7 +123,10 @@ namespace Cognition.Jobs.Tests
                 Arg.Any<IReadOnlyDictionary<string, string>>())
                 .Returns("job-123");
             var bus = Substitute.For<IBus>();
-            ToolExecutionHandler handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false));
+            var quotaService = Substitute.For<IPlannerQuotaService>();
+            quotaService.Evaluate(Arg.Any<string>(), Arg.Any<PlannerQuotaContext>(), Arg.Any<Guid?>()).Returns(PlannerQuotaDecision.Allowed());
+            var telemetry = Substitute.For<IPlannerTelemetry>();
+            ToolExecutionHandler handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false), quotaService, telemetry);
 
             var metadata = new Dictionary<string, object?>
             {
@@ -195,7 +199,10 @@ namespace Cognition.Jobs.Tests
                 Arg.Any<IReadOnlyDictionary<string, string>>())
                 .Returns("job-456");
             var bus = Substitute.For<IBus>();
-            ToolExecutionHandler handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false));
+            var quotaService = Substitute.For<IPlannerQuotaService>();
+            quotaService.Evaluate(Arg.Any<string>(), Arg.Any<PlannerQuotaContext>(), Arg.Any<Guid?>()).Returns(PlannerQuotaDecision.Allowed());
+            var telemetry = Substitute.For<IPlannerTelemetry>();
+            ToolExecutionHandler handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false), quotaService, telemetry);
 
             var args = new Dictionary<string, object?>
             {
@@ -262,7 +269,10 @@ namespace Cognition.Jobs.Tests
                 Arg.Any<IReadOnlyDictionary<string, string>>())
                 .Returns("job-789");
             var bus = Substitute.For<IBus>();
-            var handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false));
+            var quotaService = Substitute.For<IPlannerQuotaService>();
+            quotaService.Evaluate(Arg.Any<string>(), Arg.Any<PlannerQuotaContext>(), Arg.Any<Guid?>()).Returns(PlannerQuotaDecision.Allowed());
+            var telemetry = Substitute.For<IPlannerTelemetry>();
+            var handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false), quotaService, telemetry);
 
             var metadata = new Dictionary<string, object?>
             {
@@ -332,7 +342,10 @@ namespace Cognition.Jobs.Tests
                 Arg.Any<IReadOnlyDictionary<string, string>>())
                 .Returns("job-987");
             var bus = Substitute.For<IBus>();
-            var handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false));
+            var quotaService = Substitute.For<IPlannerQuotaService>();
+            quotaService.Evaluate(Arg.Any<string>(), Arg.Any<PlannerQuotaContext>(), Arg.Any<Guid?>()).Returns(PlannerQuotaDecision.Allowed());
+            var telemetry = Substitute.For<IPlannerTelemetry>();
+            var handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false), quotaService, telemetry);
 
             var metadata = new Dictionary<string, object?>
             {
@@ -566,12 +579,99 @@ namespace Cognition.Jobs.Tests
                 modelBuilder.Entity<FictionPlanTranscript>().Ignore(x => x.FictionChapterScene);
                 modelBuilder.Entity<FictionPlanTranscript>().Ignore(x => x.Metadata);
             }
-        }
+    }
 
-        private sealed class StubPhaseRunner : IFictionPhaseRunner
+    [Fact]
+    public async Task ToolExecutionHandler_emits_quota_event_when_iteration_limit_exceeded()
+    {
+        await using var db = CreateDbContext();
+        var planId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var task = SeedConversationTask(db, planId, 1, "fiction.weaver.iterativePlanner", conversationId, new Dictionary<string, object?>
         {
-            private readonly FictionPhase _phase;
-            private readonly Func<FictionPhaseExecutionContext, CancellationToken, Task<FictionPhaseResult>> _handler;
+            ["planId"] = planId,
+            ["agentId"] = agentId,
+            ["conversationId"] = conversationId,
+            ["providerId"] = Guid.NewGuid(),
+            ["iterationIndex"] = 0
+        });
+
+        var dispatcher = Substitute.For<IToolDispatcher>();
+        var weaverJobs = Substitute.For<IFictionWeaverJobClient>();
+        var bus = Substitute.For<IBus>();
+        ToolExecutionCompleted? published = null;
+        bus.Publish(Arg.Any<object>()).Returns(Task.CompletedTask).AndDoes(ci =>
+        {
+            if (ci.Arg<object>() is ToolExecutionCompleted completed)
+            {
+                published = completed;
+            }
+        });
+
+        var decision = PlannerQuotaDecision.Blocked(PlannerQuotaLimit.MaxIterations, 1, "Max iterations reached");
+        var quotaService = Substitute.For<IPlannerQuotaService>();
+        quotaService.Evaluate(Arg.Any<string>(), Arg.Any<PlannerQuotaContext>(), Arg.Any<Guid?>()).Returns(decision);
+
+        var telemetry = Substitute.For<IPlannerTelemetry>();
+
+        var handler = new ToolExecutionHandler(
+            db,
+            dispatcher,
+            weaverJobs,
+            new ServiceCollection().BuildServiceProvider(),
+            bus,
+            new WorkflowEventLogger(db, false),
+            quotaService,
+            telemetry);
+
+        var metadata = new Dictionary<string, object?>
+        {
+            ["backlogItemId"] = "outline-core-conflicts"
+        };
+
+        var args = new Dictionary<string, object?>
+        {
+            ["planId"] = planId.ToString(),
+            ["agentId"] = agentId.ToString(),
+            ["conversationId"] = conversationId.ToString(),
+            ["providerId"] = Guid.NewGuid().ToString(),
+            ["iterationIndex"] = "1"
+        };
+
+        var request = new ToolExecutionRequested(
+            conversationId,
+            agentId,
+            Guid.NewGuid(),
+            "fiction.weaver.iterativePlanner",
+            args,
+            task.ConversationPlanId,
+            task.StepNumber,
+            Guid.NewGuid(),
+            "main",
+            metadata);
+
+        await handler.Handle(request);
+
+        weaverJobs.DidNotReceiveWithAnyArgs().EnqueueIterativePlanner(default, default, default, default, default, default, default!, default!);
+        await telemetry.Received(1).PlanThrottledAsync(Arg.Any<PlannerTelemetryContext>(), decision, Arg.Any<CancellationToken>());
+        _ = telemetry.DidNotReceive().PlanRejectedAsync(Arg.Any<PlannerTelemetryContext>(), Arg.Any<PlannerQuotaDecision>(), Arg.Any<CancellationToken>());
+
+        var updatedTask = await db.ConversationTasks.FindAsync(task.Id);
+        updatedTask!.Status.Should().Be("Throttled");
+        updatedTask.Error.Should().Contain("Max iterations");
+
+        published.Should().NotBeNull();
+        published!.Success.Should().BeFalse();
+        published.Error.Should().Contain("Max iterations");
+        published.Metadata.Should().ContainKey("quotaLimit");
+        published.Metadata!["quotaLimit"].Should().Be("MaxIterations");
+    }
+
+    private sealed class StubPhaseRunner : IFictionPhaseRunner
+    {
+        private readonly FictionPhase _phase;
+        private readonly Func<FictionPhaseExecutionContext, CancellationToken, Task<FictionPhaseResult>> _handler;
 
             public StubPhaseRunner(FictionPhase phase, Func<FictionPhaseExecutionContext, CancellationToken, Task<FictionPhaseResult>> handler)
             {
@@ -585,4 +685,5 @@ namespace Cognition.Jobs.Tests
                 => _handler(context, cancellationToken);
         }
     }
+
 }

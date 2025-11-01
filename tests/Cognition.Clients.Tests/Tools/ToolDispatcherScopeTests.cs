@@ -67,7 +67,9 @@ public class ToolDispatcherScopeTests
 
         var registry = new SingleToolRegistry(classPath, typeof(TestScopeTool));
         var scopePathBuilder = new ScopePathBuilder();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
+        var telemetry = new SpyPlannerTelemetry();
+        var quotaService = new AllowAllPlannerQuotaService();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
 
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
@@ -159,7 +161,9 @@ public class ToolDispatcherScopeTests
 
         var registry = new SingleToolRegistry(classPath, typeof(RememberDispatchTool));
         var scopePathBuilder = new ScopePathBuilder();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
+        var telemetry = new SpyPlannerTelemetry();
+        var quotaService = new AllowAllPlannerQuotaService();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
 
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
@@ -245,7 +249,8 @@ public class ToolDispatcherScopeTests
         var planner = services.GetRequiredService<TestPlannerTool>();
         var registry = new SingleToolRegistry(classPath, typeof(TestPlannerTool));
         var scopePathBuilder = services.GetRequiredService<IScopePathBuilder>();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
+        var quotaService = new AllowAllPlannerQuotaService();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
 
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
@@ -343,7 +348,8 @@ public class ToolDispatcherScopeTests
 
         var registry = new SingleToolRegistry(classPath, typeof(TestPlannerTool));
         var scopePathBuilder = services.GetRequiredService<IScopePathBuilder>();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder);
+        var quotaService = new AllowAllPlannerQuotaService();
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
 
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
@@ -519,11 +525,19 @@ public class ToolDispatcherScopeTests
         }
     }
 
+    private sealed class AllowAllPlannerQuotaService : IPlannerQuotaService
+    {
+        public PlannerQuotaDecision Evaluate(string plannerKey, PlannerQuotaContext context, Guid? personaId)
+            => PlannerQuotaDecision.Allowed();
+    }
+
     private sealed class SpyPlannerTelemetry : IPlannerTelemetry
     {
         public List<PlannerTelemetryContext> Started { get; } = new();
         public List<(PlannerTelemetryContext Context, PlannerResult Result)> Completed { get; } = new();
         public List<(PlannerTelemetryContext Context, Exception Exception)> Failed { get; } = new();
+        public List<(PlannerTelemetryContext Context, PlannerQuotaDecision Decision)> Throttled { get; } = new();
+        public List<(PlannerTelemetryContext Context, PlannerQuotaDecision Decision)> Rejected { get; } = new();
 
         public Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct)
         {
@@ -540,6 +554,18 @@ public class ToolDispatcherScopeTests
         public Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct)
         {
             Failed.Add((context, exception));
+            return Task.CompletedTask;
+        }
+
+        public Task PlanThrottledAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)
+        {
+            Throttled.Add((context, decision));
+            return Task.CompletedTask;
+        }
+
+        public Task PlanRejectedAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)
+        {
+            Rejected.Add((context, decision));
             return Task.CompletedTask;
         }
     }
@@ -630,3 +656,4 @@ public class ToolDispatcherScopeTests
         }
     }
 }
+

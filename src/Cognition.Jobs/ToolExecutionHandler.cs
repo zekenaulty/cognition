@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Tools;
+using Cognition.Clients.Tools.Planning;
 using Cognition.Contracts.Events;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
@@ -26,6 +27,8 @@ namespace Cognition.Jobs
         private readonly IServiceProvider _services;
         private readonly Rebus.Bus.IBus _bus;
         private readonly WorkflowEventLogger _logger;
+        private readonly IPlannerQuotaService _plannerQuotas;
+        private readonly IPlannerTelemetry _telemetry;
 
         public ToolExecutionHandler(
             CognitionDbContext db,
@@ -33,7 +36,9 @@ namespace Cognition.Jobs
             IFictionWeaverJobClient weaverJobs,
             IServiceProvider services,
             Rebus.Bus.IBus bus,
-            WorkflowEventLogger logger)
+            WorkflowEventLogger logger,
+            IPlannerQuotaService plannerQuotas,
+            IPlannerTelemetry telemetry)
         {
             _db = db;
             _dispatcher = dispatcher;
@@ -41,6 +46,8 @@ namespace Cognition.Jobs
             _services = services;
             _bus = bus;
             _logger = logger;
+            _plannerQuotas = plannerQuotas ?? throw new ArgumentNullException(nameof(plannerQuotas));
+            _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         }
 
         public async Task Handle(ToolExecutionRequested message)
@@ -54,11 +61,20 @@ namespace Cognition.Jobs
                 task = await _db.ConversationTasks
                     .FirstOrDefaultAsync(t => t.ConversationPlanId == message.ConversationPlanId.Value && t.StepNumber == message.StepNumber)
                     .ConfigureAwait(false);
-                if (task is not null)
-                {
-                    task.Status = "Running";
-                    await _db.SaveChangesAsync().ConfigureAwait(false);
-                }
+            }
+
+            var quotaDecision = EvaluatePlannerQuota(message, args);
+            if (!quotaDecision.IsAllowed)
+            {
+                var quotaMetadata = BuildMetadata(message.Metadata, task, branchSlug, args);
+                await HandlePlannerQuotaExceededAsync(message, args, branchSlug, task, quotaMetadata, quotaDecision).ConfigureAwait(false);
+                return;
+            }
+
+            if (task is not null)
+            {
+                task.Status = "Running";
+                await _db.SaveChangesAsync().ConfigureAwait(false);
             }
 
             var metadata = BuildMetadata(message.Metadata, task, branchSlug, args);
@@ -186,6 +202,173 @@ namespace Cognition.Jobs
             var (ok, result, error) = await _dispatcher.ExecuteAsync(toolId, context, args, log: true).ConfigureAwait(false);
 
             return (ok, result, error);
+        }
+
+        private PlannerQuotaDecision EvaluatePlannerQuota(ToolExecutionRequested message, IDictionary<string, object?> args)
+        {
+            if (!IsWeaverTool(message.Tool))
+            {
+                return PlannerQuotaDecision.Allowed();
+            }
+
+            var iterationIndex = TryReadIterationIndex(args);
+            var context = new PlannerQuotaContext(IterationIndex: iterationIndex);
+            return _plannerQuotas.Evaluate(message.Tool, context, message.PersonaId);
+        }
+
+        private async Task HandlePlannerQuotaExceededAsync(
+            ToolExecutionRequested message,
+            IDictionary<string, object?> args,
+            string branchSlug,
+            ConversationTask? task,
+            Dictionary<string, object?> metadata,
+            PlannerQuotaDecision decision)
+        {
+            var plannerKey = message.Tool;
+            var errorMessage = decision.Reason ?? $"Planner quota '{decision.Limit}' exceeded.";
+
+            if (task is not null)
+            {
+                task.Status = decision.Limit == PlannerQuotaLimit.MaxIterations ? "Throttled" : "Rejected";
+                task.Error = errorMessage;
+                await _db.SaveChangesAsync().ConfigureAwait(false);
+            }
+
+            AddQuotaMetadata(metadata, decision);
+            var telemetryTags = BuildTelemetryTags(metadata, plannerKey, decision);
+            var telemetryContext = BuildTelemetryContext(message, plannerKey, telemetryTags);
+
+            if (decision.Limit == PlannerQuotaLimit.MaxIterations)
+            {
+                await _telemetry.PlanThrottledAsync(telemetryContext, decision, CancellationToken.None).ConfigureAwait(false);
+            }
+            else
+            {
+                await _telemetry.PlanRejectedAsync(telemetryContext, decision, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            await _logger.LogAsync(message.ConversationId, nameof(ToolExecutionRequested), JObject.FromObject(new
+            {
+                message.ConversationId,
+                message.AgentId,
+                message.PersonaId,
+                message.Tool,
+                message.ConversationPlanId,
+                message.StepNumber,
+                message.FictionPlanId,
+                BranchSlug = branchSlug,
+                Success = false,
+                Error = errorMessage,
+                Args = args,
+                Quota = new
+                {
+                    decision.Limit,
+                    decision.LimitValue,
+                    decision.Reason
+                }
+            })).ConfigureAwait(false);
+
+            var resultPayload = new
+            {
+                code = "planner_quota_exceeded",
+                planner = plannerKey,
+                limit = decision.Limit?.ToString(),
+                limitValue = decision.LimitValue,
+                reason = decision.Reason
+            };
+
+            var toolCompleted = new ToolExecutionCompleted(
+                message.ConversationId,
+                message.AgentId,
+                message.PersonaId,
+                message.Tool,
+                resultPayload,
+                false,
+                errorMessage,
+                message.ConversationPlanId,
+                message.StepNumber,
+                message.FictionPlanId,
+                branchSlug,
+                metadata);
+
+            await _bus.Publish(toolCompleted).ConfigureAwait(false);
+        }
+
+        private static int? TryReadIterationIndex(IDictionary<string, object?> args)
+        {
+            if (!args.TryGetValue("iterationIndex", out var value) || value is null)
+            {
+                return null;
+            }
+
+            return value switch
+            {
+                int direct => direct,
+                long longValue => (int)longValue,
+                JsonElement element when element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var number) => number,
+                JsonElement element when element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var parsed) => parsed,
+                string text when int.TryParse(text, out var parsed) => parsed,
+                _ => null
+            };
+        }
+
+        private static PlannerTelemetryContext BuildTelemetryContext(ToolExecutionRequested message, string plannerKey, IReadOnlyDictionary<string, string>? tags)
+        {
+            return new PlannerTelemetryContext(
+                ToolId: null,
+                PlannerName: plannerKey,
+                Capabilities: Array.Empty<string>(),
+                AgentId: message.AgentId,
+                ConversationId: message.ConversationId,
+                PrimaryAgentId: message.AgentId,
+                Environment: null,
+                ScopePath: null,
+                SupportsSelfCritique: false,
+                TelemetryTags: tags);
+        }
+
+        private static IReadOnlyDictionary<string, string>? BuildTelemetryTags(Dictionary<string, object?> metadata, string plannerKey, PlannerQuotaDecision decision)
+        {
+            var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plannerKey"] = plannerKey
+            };
+
+            if (metadata.TryGetValue("branchSlug", out var branch) && branch is not null)
+            {
+                tags["branch"] = branch.ToString() ?? string.Empty;
+            }
+            if (metadata.TryGetValue("conversationPlanId", out var planId) && planId is not null)
+            {
+                tags["conversationPlanId"] = planId.ToString() ?? string.Empty;
+            }
+            if (metadata.TryGetValue("taskId", out var taskId) && taskId is not null)
+            {
+                tags["taskId"] = taskId.ToString() ?? string.Empty;
+            }
+            if (decision.Limit.HasValue)
+            {
+                tags["quotaLimit"] = decision.Limit.Value.ToString();
+            }
+            if (decision.LimitValue.HasValue)
+            {
+                tags["quotaLimitValue"] = decision.LimitValue.Value.ToString();
+            }
+
+            return tags.Count == 0 ? null : tags;
+        }
+
+        private static void AddQuotaMetadata(Dictionary<string, object?> metadata, PlannerQuotaDecision decision)
+        {
+            metadata["quotaLimit"] = decision.Limit?.ToString();
+            if (decision.LimitValue.HasValue)
+            {
+                metadata["quotaLimitValue"] = decision.LimitValue.Value;
+            }
+            if (!string.IsNullOrWhiteSpace(decision.Reason))
+            {
+                metadata["quotaReason"] = decision.Reason;
+            }
         }
 
         private static Dictionary<string, object?> BuildMetadata(Dictionary<string, object?>? source, ConversationTask? task, string branchSlug, IDictionary<string, object?> args)

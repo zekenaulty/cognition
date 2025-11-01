@@ -50,7 +50,7 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 - [ ] Refactor ScopePath construction to a locked factory; remove public constructors.
 - [ ] Introduce analyzer or CI check preventing direct `new ScopePath`.
 - [ ] Define and test authorization policies per controller.
-- [ ] Ship planner token budgets and throttling telemetry.
+- [x] Ship planner token budgets and throttling telemetry.
 - [ ] Wire structured logging + correlation IDs across API, Jobs, Clients, LLM, and vector layers.
 - [ ] Add template seeding self-test and OpenSearch schema guard.
 - [ ] Harden DTO validation and API abuse headers.

@@ -268,6 +268,8 @@ public interface IPlannerTelemetry
     Task PlanStartedAsync(PlannerTelemetryContext context, CancellationToken ct);
     Task PlanCompletedAsync(PlannerTelemetryContext context, PlannerResult result, CancellationToken ct);
     Task PlanFailedAsync(PlannerTelemetryContext context, Exception exception, CancellationToken ct);
+    Task PlanThrottledAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct);
+    Task PlanRejectedAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct);
 }
 
 public sealed class LoggerPlannerTelemetry : IPlannerTelemetry
@@ -309,6 +311,28 @@ public sealed class LoggerPlannerTelemetry : IPlannerTelemetry
         {
             payload["error"] = exception.Message;
             payload["exceptionType"] = exception.GetType().FullName;
+        });
+        return Task.CompletedTask;
+    }
+
+    public Task PlanThrottledAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)
+    {
+        LogEvent("planner.throttled", context, payload =>
+        {
+            payload["limit"] = decision.Limit?.ToString();
+            payload["limitValue"] = decision.LimitValue;
+            payload["reason"] = decision.Reason;
+        });
+        return Task.CompletedTask;
+    }
+
+    public Task PlanRejectedAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)
+    {
+        LogEvent("planner.rejected", context, payload =>
+        {
+            payload["limit"] = decision.Limit?.ToString();
+            payload["limitValue"] = decision.LimitValue;
+            payload["reason"] = decision.Reason;
         });
         return Task.CompletedTask;
     }

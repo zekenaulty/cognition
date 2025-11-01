@@ -16,19 +16,25 @@ public class ToolDispatcher : IToolDispatcher
     private readonly IToolRegistry _registry;
     private readonly ILogger<ToolDispatcher> _logger;
     private readonly IScopePathBuilder _scopePathBuilder;
+    private readonly IPlannerQuotaService _plannerQuotas;
+    private readonly IPlannerTelemetry _telemetry;
 
     public ToolDispatcher(
         CognitionDbContext db,
         IServiceProvider sp,
         IToolRegistry registry,
         ILogger<ToolDispatcher> logger,
-        IScopePathBuilder scopePathBuilder)
+        IScopePathBuilder scopePathBuilder,
+        IPlannerQuotaService plannerQuotas,
+        IPlannerTelemetry telemetry)
     {
         _db = db;
         _sp = sp;
         _registry = registry;
         _logger = logger;
         _scopePathBuilder = scopePathBuilder ?? throw new ArgumentNullException(nameof(scopePathBuilder));
+        _plannerQuotas = plannerQuotas ?? throw new ArgumentNullException(nameof(plannerQuotas));
+        _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
     }
 
     public async Task<(bool ok, PlannerResult? result, string? error)> ExecutePlannerAsync(
@@ -112,8 +118,30 @@ public class ToolDispatcher : IToolDispatcher
                 ? enrichedContext
                 : enrichedContext with { ToolId = tool.Id };
 
-            _logger.LogInformation("Executing planner {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId}", tool.Name, tool.Id, tool.ClassPath, plannerContext.ToolContext.ConversationId);
-            result = await impl.PlanAsync(ctxWithToolId, plannerParameters, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+            var plannerKey = impl.Metadata?.Name ?? tool.Name ?? tool.ClassPath ?? "planner";
+            var quotaDecision = _plannerQuotas.Evaluate(plannerKey, new PlannerQuotaContext(), plannerContext.ToolContext.PersonaId);
+            PlannerTelemetryContext? quotaTelemetryContext = null;
+            if (!quotaDecision.IsAllowed)
+            {
+                quotaTelemetryContext = BuildQuotaTelemetryContext(ctxWithToolId, impl.Metadata!, tool, plannerKey, quotaDecision);
+            }
+
+            if (!quotaDecision.IsAllowed)
+            {
+                if (quotaTelemetryContext is not null)
+                {
+                    await EmitQuotaTelemetryAsync(quotaTelemetryContext, quotaDecision, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+                }
+                _logger.LogWarning("Planner quota exceeded for {Planner} (limit={Limit}, value={Value}) conversation={ConversationId}", plannerKey, quotaDecision.Limit, quotaDecision.LimitValue, plannerContext.ToolContext.ConversationId);
+                ok = false;
+                error = quotaDecision.Reason ?? $"Planner quota '{quotaDecision.Limit}' exceeded.";
+                result = null;
+            }
+            else
+            {
+                _logger.LogInformation("Executing planner {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId}", tool.Name, tool.Id, tool.ClassPath, plannerContext.ToolContext.ConversationId);
+                result = await impl.PlanAsync(ctxWithToolId, plannerParameters, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -335,6 +363,54 @@ public class ToolDispatcher : IToolDispatcher
             return JsonToDotNet(je);
         }
         return value;
+    }
+
+    private PlannerTelemetryContext BuildQuotaTelemetryContext(
+        PlannerContext context,
+        PlannerMetadata metadata,
+        Tool tool,
+        string plannerKey,
+        PlannerQuotaDecision decision)
+    {
+        var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["plannerKey"] = plannerKey,
+            ["toolId"] = tool.Id.ToString()
+        };
+
+        if (!string.IsNullOrWhiteSpace(tool.ClassPath))
+        {
+            tags["classPath"] = tool.ClassPath!;
+        }
+
+        if (decision.Limit.HasValue)
+        {
+            tags["quotaLimit"] = decision.Limit.Value.ToString();
+        }
+
+        if (decision.LimitValue.HasValue)
+        {
+            tags["quotaLimitValue"] = decision.LimitValue.Value.ToString();
+        }
+
+        return new PlannerTelemetryContext(
+            ToolId: tool.Id,
+            PlannerName: plannerKey,
+            Capabilities: metadata?.Capabilities ?? Array.Empty<string>(),
+            AgentId: context.ToolContext.AgentId,
+            ConversationId: context.ToolContext.ConversationId,
+            PrimaryAgentId: context.PrimaryAgentId,
+            Environment: context.Environment,
+            ScopePath: context.ScopePath?.ToString(),
+            SupportsSelfCritique: context.SupportsSelfCritique,
+            TelemetryTags: tags);
+    }
+
+    private Task EmitQuotaTelemetryAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)
+    {
+        return decision.Limit == PlannerQuotaLimit.MaxIterations
+            ? _telemetry.PlanThrottledAsync(context, decision, ct)
+            : _telemetry.PlanRejectedAsync(context, decision, ct);
     }
 
     private static object? JsonToDotNet(object? value)

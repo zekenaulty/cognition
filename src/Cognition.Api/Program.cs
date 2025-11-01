@@ -61,6 +61,8 @@ builder.Services.AddOptions<PlannerCritiqueOptions>()
 builder.Services.AddOptions<OpsAlertingOptions>()
     .Bind(builder.Configuration.GetSection(OpsAlertingOptions.SectionName))
     .ValidateOnStart();
+builder.Services.AddOptions<PlannerQuotaOptions>()
+    .Bind(builder.Configuration.GetSection(PlannerQuotaOptions.SectionName));
 builder.Services.AddSingleton<IValidateOptions<OpsAlertingOptions>, OpsAlertingOptionsValidator>();
 builder.Services.AddScoped<Cognition.Api.Infrastructure.ScopePath.ScopePathBackfillService>();
 
@@ -423,11 +425,11 @@ using (var scope = app.Services.CreateScope())
     await StartupDataSeeder.SeedAsync(app.Services, logger);
 }
 
-app.Run();
-
 // Log Rebus input queue name at startup
 {
     var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("RebusStartup");
     var rebusBus = app.Services.GetService<Rebus.Bus.IBus>();
     logger.LogInformation("Rebus input queue: cognition-api");
 }
+
+app.Run();

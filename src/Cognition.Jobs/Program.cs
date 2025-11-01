@@ -1,6 +1,7 @@
 using Cognition.Jobs;
 using Cognition.Data.Relational;
 using Cognition.Clients;
+using Cognition.Clients.Tools.Planning;
 using Hangfire;
 using Hangfire.PostgreSql;
 using Rebus.ServiceProvider;
@@ -74,7 +75,10 @@ builder.Services.AddRebus(config =>
 // Register Db + clients so jobs can use the same services as API
 builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddCognitionClients();
+builder.Services.AddCognitionTools();
 builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
+builder.Services.AddOptions<PlannerQuotaOptions>()
+    .Bind(builder.Configuration.GetSection(PlannerQuotaOptions.SectionName));
 
 var workflowEventsEnabled = builder.Configuration.GetValue("WorkflowEvents:Enabled", true);
 builder.Services.AddScoped(sp => new WorkflowEventLogger(sp.GetRequiredService<CognitionDbContext>(), workflowEventsEnabled));
