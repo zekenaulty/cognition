@@ -117,6 +117,7 @@ public class FictionPlanBacklogTests
             bus,
             notifier,
             new WorkflowEventLogger(db, enabled: false),
+            Substitute.For<IFictionBacklogScheduler>(),
             NullLogger<FictionWeaverJobs>.Instance);
         var metadata = new Dictionary<string, string>
         {
@@ -298,8 +299,9 @@ public class FictionPlanBacklogTests
         var bus = Substitute.For<IBus>();
         var notifier = Substitute.For<IPlanProgressNotifier>();
         var workflowLogger = new WorkflowEventLogger(db, enabled: false);
+        var scheduler = Substitute.For<IFictionBacklogScheduler>();
         var logger = NullLogger<FictionWeaverJobs>.Instance;
-        return new FictionWeaverJobs(db, runners, bus, notifier, workflowLogger, logger);
+        return new FictionWeaverJobs(db, runners, bus, notifier, workflowLogger, scheduler, logger);
     }
 
     private static string? ReadBacklogId(object payload)

@@ -9,7 +9,7 @@ public class FictionWorldBibleEntry : BaseEntity
 
     public string EntrySlug { get; set; } = string.Empty;
     public string EntryName { get; set; } = string.Empty;
-    public Dictionary<string, object?> Content { get; set; } = new();
+    public FictionWorldBibleEntryContent Content { get; set; } = new();
 
     public int Version { get; set; } = 1;
     public FictionWorldBibleChangeType ChangeType { get; set; } = FictionWorldBibleChangeType.Unknown;

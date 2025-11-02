@@ -187,7 +187,7 @@ namespace Cognition.Jobs
                             providerId = message.ProviderId,
                             modelId = message.ModelId,
                             branchSlug,
-                            iterationIndex = 0
+                            iterationIndex = 1
                         }
                     }
                 }

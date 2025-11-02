@@ -47,6 +47,7 @@ public class PlannerHealthServiceTests
         step.Issue.Should().Be("missing");
         report.Warnings.Should().Contain(w => w.Contains("not found", StringComparison.OrdinalIgnoreCase));
         report.Backlog.Plans.Should().BeEmpty();
+        report.WorldBible.Plans.Should().BeEmpty();
         report.Alerts.Should().Contain(a => a.Id.StartsWith("template-missing", StringComparison.OrdinalIgnoreCase));
         alertPublisher.Published.Should().HaveCount(1);
         alertPublisher.Published.Single().Should().Contain(a => a.Id.StartsWith("template-missing", StringComparison.OrdinalIgnoreCase));
@@ -262,7 +263,9 @@ public class PlannerHealthServiceTests
                 typeof(PromptTemplate),
                 typeof(FictionPlan),
                 typeof(FictionPlanBacklogItem),
-                typeof(PlannerExecution)
+                typeof(PlannerExecution),
+                typeof(FictionWorldBible),
+                typeof(FictionWorldBibleEntry)
             };
 
             foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())

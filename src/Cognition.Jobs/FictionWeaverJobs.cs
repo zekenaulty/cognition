@@ -25,6 +25,7 @@ public class FictionWeaverJobs
     private readonly IBus _bus;
     private readonly IPlanProgressNotifier _planNotifier;
     private readonly WorkflowEventLogger _workflowLogger;
+    private readonly IFictionBacklogScheduler _backlogScheduler;
 
     public FictionWeaverJobs(
         CognitionDbContext db,
@@ -32,6 +33,7 @@ public class FictionWeaverJobs
         IBus bus,
         IPlanProgressNotifier notifier,
         WorkflowEventLogger workflowLogger,
+        IFictionBacklogScheduler backlogScheduler,
         ILogger<FictionWeaverJobs> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -40,6 +42,7 @@ public class FictionWeaverJobs
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
         _planNotifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
         _workflowLogger = workflowLogger ?? throw new ArgumentNullException(nameof(workflowLogger));
+        _backlogScheduler = backlogScheduler ?? throw new ArgumentNullException(nameof(backlogScheduler));
     }
 
     public Task<FictionPhaseResult> RunVisionPlannerAsync(
@@ -318,6 +321,7 @@ public class FictionWeaverJobs
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
             await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, progressStatus, result.Summary, result, null, startedAtUtc, cancellationToken).ConfigureAwait(false);
+            await _backlogScheduler.ScheduleAsync(plan, phase, result, effectiveContext, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation("Finished fiction phase {Phase} for plan {PlanId} with status {Status}.", phase, plan.Id, result.Status);
             return result;
@@ -454,6 +458,21 @@ public class FictionWeaverJobs
         return context.Metadata.TryGetValue("backlogItemId", out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : null;
+    }
+
+    private static Guid? GetWorldBibleId(FictionPhaseExecutionContext context)
+    {
+        if (context.Metadata is null)
+        {
+            return null;
+        }
+
+        if (context.Metadata.TryGetValue("worldBibleId", out var raw) && Guid.TryParse(raw, out var id))
+        {
+            return id;
+        }
+
+        return null;
     }
 
     private async Task ApplyVisionPlannerBacklogAsync(Guid planId, FictionPhaseResult result, FictionPhaseExecutionContext context, CancellationToken cancellationToken)
@@ -906,6 +925,12 @@ public class FictionWeaverJobs
         if (!string.IsNullOrEmpty(backlogItemId))
         {
             snapshot["backlogItemId"] = backlogItemId;
+        }
+
+        var worldBibleId = GetWorldBibleId(context);
+        if (worldBibleId.HasValue)
+        {
+            snapshot["worldBibleId"] = worldBibleId.Value;
         }
 
         if (startedAtUtc.HasValue)

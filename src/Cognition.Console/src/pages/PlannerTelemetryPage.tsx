@@ -158,6 +158,7 @@ export default function PlannerTelemetryPage() {
     { label: 'In Progress', value: plannerReport.backlog.inProgress, color: 'info' as const },
     { label: 'Complete', value: plannerReport.backlog.complete, color: 'success' as const }
   ];
+  const worldBibleReport = plannerReport.worldBible;
 
   return (
     <Stack spacing={3}>
@@ -268,6 +269,105 @@ export default function PlannerTelemetryPage() {
                     ))}
                   </List>
                 </>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12}>
+          <Card>
+            <CardHeader
+              title="World Bible Snapshots"
+              subheader="Active entries recorded by WorldBibleManager"
+            />
+            <CardContent>
+              {worldBibleReport.plans.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No world bible entries have been captured yet. Run the WorldBibleManager phase to populate lore snapshots.
+                </Typography>
+              ) : (
+                <Stack spacing={3}>
+                  {worldBibleReport.plans.map(plan => (
+                    <Box key={plan.worldBibleId}>
+                      <Stack
+                        direction={{ xs: 'column', md: 'row' }}
+                        spacing={1}
+                        justifyContent="space-between"
+                        alignItems={{ xs: 'flex-start', md: 'center' }}
+                      >
+                        <Box>
+                          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                            {plan.planName}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Domain {plan.domain} • Branch {plan.branchSlug ?? 'main'}
+                          </Typography>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary">
+                          Last updated{' '}
+                          {plan.lastUpdatedUtc
+                            ? `${formatRelativeTime(plan.lastUpdatedUtc)} (${formatTimestamp(plan.lastUpdatedUtc)})`
+                            : '—'}
+                        </Typography>
+                      </Stack>
+                      {plan.activeEntries.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                          No active entries for this plan.
+                        </Typography>
+                      ) : (
+                        <Table size="small" sx={{ mt: 2 }}>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Category</TableCell>
+                              <TableCell>Entry</TableCell>
+                              <TableCell>Status</TableCell>
+                              <TableCell>Iteration</TableCell>
+                              <TableCell>Backlog Item</TableCell>
+                              <TableCell>Continuity Notes</TableCell>
+                              <TableCell align="right">Last Updated</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {plan.activeEntries.map(entry => (
+                              <TableRow key={`${entry.entrySlug}-v${entry.version}`}>
+                                <TableCell sx={{ textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{entry.category}</TableCell>
+                                <TableCell>
+                                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                    {entry.entryName}
+                                  </Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {entry.summary || 'No summary provided.'}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {entry.entrySlug}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Chip label={entry.status || 'Unknown'} size="small" color="info" variant="outlined" />
+                                </TableCell>
+                                <TableCell>{entry.iterationIndex ?? '—'}</TableCell>
+                                <TableCell>{entry.backlogItemId ?? '—'}</TableCell>
+                                <TableCell>
+                                  {entry.continuityNotes.length === 0 ? (
+                                    '—'
+                                  ) : (
+                                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                      {entry.continuityNotes.map(note => (
+                                        <Chip key={note} size="small" label={note} variant="outlined" />
+                                      ))}
+                                    </Stack>
+                                  )}
+                                </TableCell>
+                                <TableCell align="right">
+                                  {formatTimestamp(entry.updatedAtUtc)}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </Box>
+                  ))}
+                </Stack>
               )}
             </CardContent>
           </Card>

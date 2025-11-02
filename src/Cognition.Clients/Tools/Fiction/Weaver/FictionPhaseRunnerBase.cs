@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -143,11 +144,9 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
             ["branch"] = context.BranchSlug
         };
 
-        var backlogId = context.Metadata is not null
-            && context.Metadata.TryGetValue("backlogItemId", out var backlogValue)
-            && !string.IsNullOrWhiteSpace(backlogValue)
-            ? backlogValue
-            : null;
+        var backlogId = TryGetMetadataValue(context, MetadataKeys.BacklogItemId);
+        var iteration = context.IterationIndex ?? TryGetMetadataInt(context, MetadataKeys.IterationIndex);
+        var worldBibleId = TryGetMetadataGuid(context, MetadataKeys.WorldBibleId);
 
         if (transcriptMetadata is not null)
         {
@@ -160,6 +159,16 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
         if (!string.IsNullOrEmpty(backlogId))
         {
             transcriptMeta["backlogItemId"] = backlogId;
+        }
+
+        if (iteration.HasValue)
+        {
+            transcriptMeta["iterationIndex"] = iteration.Value;
+        }
+
+        if (worldBibleId.HasValue)
+        {
+            transcriptMeta["worldBibleId"] = worldBibleId.Value;
         }
 
         var transcript = new FictionPhaseTranscript(
@@ -190,6 +199,16 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
             resultData["backlogItemId"] = backlogId;
         }
 
+        if (iteration.HasValue)
+        {
+            resultData["iterationIndex"] = iteration.Value;
+        }
+
+        if (worldBibleId.HasValue)
+        {
+            resultData["worldBibleId"] = worldBibleId.Value;
+        }
+
         if (data is not null)
         {
             foreach (var kv in data)
@@ -199,6 +218,34 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
         }
 
         return new FictionPhaseResult(Phase, status, summary, resultData, exception, new[] { transcript });
+    }
+
+    protected static string? TryGetMetadataValue(FictionPhaseExecutionContext context, string key)
+    {
+        if (context.Metadata is null || !context.Metadata.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+        return raw;
+    }
+
+    protected static Guid? TryGetMetadataGuid(FictionPhaseExecutionContext context, string key)
+    {
+        var raw = TryGetMetadataValue(context, key);
+        return Guid.TryParse(raw, out var parsed) ? parsed : null;
+    }
+
+    protected static int? TryGetMetadataInt(FictionPhaseExecutionContext context, string key)
+    {
+        var raw = TryGetMetadataValue(context, key);
+        return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : (int?)null;
+    }
+
+    protected static class MetadataKeys
+    {
+        public const string BacklogItemId = "backlogItemId";
+        public const string WorldBibleId = "worldBibleId";
+        public const string IterationIndex = "iterationIndex";
     }
 
     protected abstract Task<FictionPhaseResult> ExecuteCoreAsync(FictionPlan plan, Conversation conversation, FictionPhaseExecutionContext context, CancellationToken cancellationToken);

@@ -32,13 +32,16 @@ namespace Cognition.Jobs.Tests
             var personaId = Guid.NewGuid();
             var planId = Guid.NewGuid();
             var agentId = Guid.NewGuid();
+            var worldBibleId = Guid.NewGuid();
             var args = new Dictionary<string, object?>
             {
                 ["planId"] = Guid.NewGuid(),
                 ["agentId"] = agentId,
                 ["conversationId"] = conversationId,
                 ["providerId"] = Guid.NewGuid(),
-                ["backlogItemId"] = "outline-core-conflicts"
+                ["backlogItemId"] = "outline-core-conflicts",
+                ["worldBibleId"] = worldBibleId,
+                ["iterationIndex"] = 2
             };
 
             var conversationPlan = new ConversationPlan
@@ -93,6 +96,8 @@ namespace Cognition.Jobs.Tests
 
             published.Should().NotBeNull();
             published!.Metadata.Should().ContainKey("backlogItemId").WhoseValue.Should().Be("outline-core-conflicts");
+            published.Metadata.Should().ContainKey("worldBibleId").WhoseValue.Should().Be(worldBibleId.ToString());
+            published.Metadata.Should().ContainKey("iterationIndex").WhoseValue.Should().Be("2");
         }
 
         [Fact]
@@ -129,9 +134,12 @@ namespace Cognition.Jobs.Tests
             var telemetry = Substitute.For<IPlannerTelemetry>();
             ToolExecutionHandler handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false), quotaService, telemetry);
 
+            var worldBibleId = Guid.NewGuid().ToString();
             var metadata = new Dictionary<string, object?>
             {
-                ["backlogItemId"] = "outline-core-conflicts"
+                ["backlogItemId"] = "outline-core-conflicts",
+                ["worldBibleId"] = worldBibleId,
+                ["iterationIndex"] = "7"
             };
 
             var args = new Dictionary<string, object?>
@@ -140,7 +148,9 @@ namespace Cognition.Jobs.Tests
                 ["agentId"] = agentId.ToString(),
                 ["conversationId"] = conversationId.ToString(),
                 ["providerId"] = Guid.NewGuid().ToString(),
-                ["chapterBlueprintId"] = Guid.NewGuid().ToString()
+                ["chapterBlueprintId"] = Guid.NewGuid().ToString(),
+                ["worldBibleId"] = worldBibleId,
+                ["iterationIndex"] = 7
             };
 
             var request = new ToolExecutionRequested(
@@ -166,7 +176,13 @@ namespace Cognition.Jobs.Tests
                 Guid.Parse(args["providerId"]?.ToString() ?? throw new InvalidOperationException("providerId missing")),
                 Arg.Any<Guid?>(),
                 "main",
-                Arg.Is<IReadOnlyDictionary<string, string>>(md => md.ContainsKey("backlogItemId") && md["backlogItemId"] == "outline-core-conflicts"));
+                Arg.Is<IReadOnlyDictionary<string, string>>(md =>
+                    md.ContainsKey("backlogItemId") &&
+                    md["backlogItemId"] == "outline-core-conflicts" &&
+                    md.ContainsKey("worldBibleId") &&
+                    md["worldBibleId"] == worldBibleId &&
+                    md.ContainsKey("iterationIndex") &&
+                    md["iterationIndex"] == "7"));
         }
 
         [Fact]
@@ -205,6 +221,7 @@ namespace Cognition.Jobs.Tests
             var telemetry = Substitute.For<IPlannerTelemetry>();
             ToolExecutionHandler handler = new ToolExecutionHandler(db, dispatcher, weaverJobs, new ServiceCollection().BuildServiceProvider(), bus, new WorkflowEventLogger(db, false), quotaService, telemetry);
 
+            var worldBibleIdFromArgs = Guid.NewGuid().ToString();
             var args = new Dictionary<string, object?>
             {
                 ["planId"] = planId.ToString(),
@@ -212,7 +229,9 @@ namespace Cognition.Jobs.Tests
                 ["conversationId"] = conversationId.ToString(),
                 ["providerId"] = Guid.NewGuid().ToString(),
                 ["chapterBlueprintId"] = Guid.NewGuid().ToString(),
-                ["backlogItemId"] = backlogId
+                ["backlogItemId"] = backlogId,
+                ["worldBibleId"] = worldBibleIdFromArgs,
+                ["iterationIndex"] = 11
             };
 
             var request = new ToolExecutionRequested(
@@ -238,7 +257,10 @@ namespace Cognition.Jobs.Tests
                 Guid.Parse(args["providerId"]?.ToString() ?? throw new InvalidOperationException("providerId missing")),
                 Arg.Any<Guid?>(),
                 "main",
-                Arg.Is<IReadOnlyDictionary<string, string>>(md => md.ContainsKey("backlogItemId") && md["backlogItemId"] == backlogId));
+                Arg.Is<IReadOnlyDictionary<string, string>>(md =>
+                    md.ContainsKey("backlogItemId") && md["backlogItemId"] == backlogId &&
+                    md.ContainsKey("worldBibleId") && md["worldBibleId"] == worldBibleIdFromArgs &&
+                    md.ContainsKey("iterationIndex") && md["iterationIndex"] == "11"));
         }
 
         [Fact]
@@ -426,6 +448,7 @@ namespace Cognition.Jobs.Tests
                 Substitute.For<IBus>(),
                 Substitute.For<IPlanProgressNotifier>(),
                 new WorkflowEventLogger(db, enabled: false),
+                Substitute.For<IFictionBacklogScheduler>(),
                 NullLogger<FictionWeaverJobs>.Instance);
 
             var metadata = new Dictionary<string, string>
@@ -480,6 +503,7 @@ namespace Cognition.Jobs.Tests
                 Substitute.For<IBus>(),
                 Substitute.For<IPlanProgressNotifier>(),
                 new WorkflowEventLogger(db, enabled: false),
+                Substitute.For<IFictionBacklogScheduler>(),
                 NullLogger<FictionWeaverJobs>.Instance);
 
             var metadata = new Dictionary<string, string>
@@ -595,7 +619,7 @@ namespace Cognition.Jobs.Tests
             ["agentId"] = agentId,
             ["conversationId"] = conversationId,
             ["providerId"] = Guid.NewGuid(),
-            ["iterationIndex"] = 0
+            ["iterationIndex"] = 1
         });
 
         var dispatcher = Substitute.For<IToolDispatcher>();

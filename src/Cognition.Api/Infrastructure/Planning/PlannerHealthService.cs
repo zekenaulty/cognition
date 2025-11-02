@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
@@ -28,9 +29,35 @@ public sealed record PlannerHealthReport(
     PlannerHealthStatus Status,
     IReadOnlyList<PlannerHealthPlanner> Planners,
     PlannerHealthBacklog Backlog,
+    PlannerHealthWorldBibleReport WorldBible,
     PlannerHealthTelemetry Telemetry,
     IReadOnlyList<PlannerHealthAlert> Alerts,
     IReadOnlyList<string> Warnings);
+
+public sealed record PlannerHealthWorldBibleReport(
+    IReadOnlyList<PlannerHealthWorldBiblePlan> Plans);
+
+public sealed record PlannerHealthWorldBiblePlan(
+    Guid PlanId,
+    string PlanName,
+    Guid WorldBibleId,
+    string Domain,
+    string? BranchSlug,
+    DateTime? LastUpdatedUtc,
+    IReadOnlyList<PlannerHealthWorldBibleEntry> ActiveEntries);
+
+public sealed record PlannerHealthWorldBibleEntry(
+    string Category,
+    string EntrySlug,
+    string EntryName,
+    string Summary,
+    string Status,
+    IReadOnlyList<string> ContinuityNotes,
+    int Version,
+    bool IsActive,
+    int? IterationIndex,
+    string? BacklogItemId,
+    DateTime UpdatedAtUtc);
 
 public sealed record PlannerHealthPlanner(
     string Name,
@@ -162,6 +189,8 @@ public sealed class PlannerHealthService : IPlannerHealthService
             warnings.Add($"{backlog.OrphanedItems.Count} backlog item(s) reference missing plans.");
         }
 
+        var worldBible = await BuildWorldBibleReportAsync(ct).ConfigureAwait(false);
+
         var telemetry = await BuildTelemetryReportAsync(ct).ConfigureAwait(false);
         if (telemetry.TotalExecutions == 0)
         {
@@ -188,6 +217,7 @@ public sealed class PlannerHealthService : IPlannerHealthService
             Status: status,
             Planners: plannerReports,
             Backlog: backlog,
+            WorldBible: worldBible,
             Telemetry: telemetry,
             Alerts: alerts,
             Warnings: warnings);
@@ -436,7 +466,79 @@ public sealed class PlannerHealthService : IPlannerHealthService
             OrphanedItems: orphaned);
     }
 
-    private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(CancellationToken ct)
+    
+    private async Task<PlannerHealthWorldBibleReport> BuildWorldBibleReportAsync(CancellationToken ct)
+    {
+        var worldBibles = await _db.FictionWorldBibles
+            .AsNoTracking()
+            .Include(b => b.FictionPlan)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (worldBibles.Count == 0)
+        {
+            return new PlannerHealthWorldBibleReport(Array.Empty<PlannerHealthWorldBiblePlan>());
+        }
+
+        var bibleIds = worldBibles.Select(b => b.Id).ToArray();
+        var entries = await _db.FictionWorldBibleEntries
+            .AsNoTracking()
+            .Where(e => bibleIds.Contains(e.FictionWorldBibleId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var entryLookup = entries
+            .GroupBy(e => e.FictionWorldBibleId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var plans = new List<PlannerHealthWorldBiblePlan>(worldBibles.Count);
+        foreach (var bible in worldBibles)
+        {
+            entryLookup.TryGetValue(bible.Id, out var entryList);
+            entryList ??= new List<FictionWorldBibleEntry>();
+
+            var activeEntries = entryList
+                .Where(e => e.IsActive)
+                .OrderBy(e => e.EntrySlug)
+                .Select(e => new PlannerHealthWorldBibleEntry(
+                    Category: e.Content.Category,
+                    EntrySlug: e.EntrySlug,
+                    EntryName: e.EntryName,
+                    Summary: e.Content.Summary,
+                    Status: e.Content.Status,
+                    ContinuityNotes: e.Content.ContinuityNotes ?? Array.Empty<string>(),
+                    Version: e.Version,
+                    IsActive: e.IsActive,
+                    IterationIndex: e.Content.IterationIndex,
+                    BacklogItemId: e.Content.BacklogItemId,
+                    UpdatedAtUtc: e.Content.UpdatedAtUtc != default ? e.Content.UpdatedAtUtc : (e.UpdatedAtUtc ?? e.CreatedAtUtc)))
+                .ToList();
+
+            var lastUpdated = entryList.Count == 0
+                ? (DateTime?)null
+                : entryList.Max(e => e.UpdatedAtUtc ?? e.CreatedAtUtc);
+
+            var planName = bible.FictionPlan?.Name;
+            if (string.IsNullOrWhiteSpace(planName))
+            {
+                planName = $"Plan {bible.FictionPlanId:N}";
+            }
+
+            plans.Add(new PlannerHealthWorldBiblePlan(
+                PlanId: bible.FictionPlanId,
+                PlanName: planName,
+                WorldBibleId: bible.Id,
+                Domain: bible.Domain,
+                BranchSlug: bible.BranchSlug,
+                LastUpdatedUtc: lastUpdated,
+                ActiveEntries: activeEntries));
+        }
+
+        return new PlannerHealthWorldBibleReport(
+            plans.OrderByDescending(p => p.LastUpdatedUtc ?? DateTime.MinValue).ToList());
+    }
+
+private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(CancellationToken ct)
     {
         var executions = _db.PlannerExecutions.AsNoTracking();
         var total = await executions.CountAsync(ct).ConfigureAwait(false);

@@ -124,6 +124,7 @@ public class FictionPlannerPipelineTests
             Substitute.For<Rebus.Bus.IBus>(),
             Substitute.For<IPlanProgressNotifier>(),
             new WorkflowEventLogger(db, enabled: false),
+            Substitute.For<IFictionBacklogScheduler>(),
             NullLogger<FictionWeaverJobs>.Instance);
 
         var providerId = Guid.NewGuid();

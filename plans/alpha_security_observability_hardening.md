@@ -12,6 +12,7 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
    - Make ScopePath builder the only construction path (internal constructors, DI-exposed factory).
    - Audit repository for `new ScopePath` usage and replace with factory.
    - Add analyzer coverage + tests that fail when `ScopePath.Parse` or direct constructors surface; document the factory-only contract for future contributors.
+   - ✅ `TRACK-482` Ensure analyzer/CI rules flag direct `ScopePathBuilder` instantiation outside tests and propagate correlation IDs through jobs/planner telemetry before enabling stricter quotas.
 2. **Correlation IDs & structured logging**
    - Extend correlation scopes beyond API (Jobs, Clients, telemetry payloads).
 3. **Tool foundry + sandbox orchestration**

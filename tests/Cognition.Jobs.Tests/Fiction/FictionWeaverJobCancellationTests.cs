@@ -79,6 +79,7 @@ public class FictionWeaverJobCancellationTests
             Substitute.For<IBus>(),
             Substitute.For<IPlanProgressNotifier>(),
             new WorkflowEventLogger(db, enabled: false),
+            Substitute.For<IFictionBacklogScheduler>(),
             NullLogger<FictionWeaverJobs>.Instance);
 
         var metadata = new Dictionary<string, string>

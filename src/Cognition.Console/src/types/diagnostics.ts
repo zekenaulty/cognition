@@ -13,9 +13,38 @@ export type PlannerHealthReport = {
   status: PlannerHealthStatus;
   planners: PlannerHealthPlanner[];
   backlog: PlannerHealthBacklog;
+  worldBible: PlannerHealthWorldBibleReport;
   telemetry: PlannerHealthTelemetry;
   alerts: PlannerHealthAlert[];
   warnings: string[];
+};
+
+export type PlannerHealthWorldBibleReport = {
+  plans: PlannerHealthWorldBiblePlan[];
+};
+
+export type PlannerHealthWorldBiblePlan = {
+  planId: string;
+  planName: string;
+  worldBibleId: string;
+  domain: string;
+  branchSlug?: string | null;
+  lastUpdatedUtc?: string | null;
+  activeEntries: PlannerHealthWorldBibleEntry[];
+};
+
+export type PlannerHealthWorldBibleEntry = {
+  category: string;
+  entrySlug: string;
+  entryName: string;
+  summary: string;
+  status: string;
+  continuityNotes: string[];
+  version: number;
+  isActive: boolean;
+  iterationIndex?: number | null;
+  backlogItemId?: string | null;
+  updatedAtUtc: string;
 };
 
 export type PlannerHealthPlanner = {

@@ -77,6 +77,7 @@ builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddCognitionClients();
 builder.Services.AddCognitionTools();
 builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
+builder.Services.AddTransient<IFictionBacklogScheduler, FictionBacklogScheduler>();
 builder.Services.AddOptions<PlannerQuotaOptions>()
     .Bind(builder.Configuration.GetSection(PlannerQuotaOptions.SectionName));
 

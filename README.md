@@ -222,6 +222,7 @@ Canonical scope identity is required for every planner, tool, and search surface
 - When invoking planners, pass the built `ScopePath` into `PlannerContext.FromToolContext` so transcripts, telemetry, and backlog metadata all log the same canonical path.
 - Background jobs should attach the same path to phase execution contexts so backlog transitions, `FictionPhaseProgressed`, and OpenSearch writes remain consistent.
 - Query surfaces (`QueryDslBuilder`) automatically duplicate `ScopePath`, `ScopePrincipal*`, and `ScopeSegments.*` filters into both top-level vector fields and `metadata.*`, enabling canonical searches even during dual-write windows. Provide the canonical path string you receive from the builder; it already encodes the principal and sorted segments.
+- `TRACK-482` is widening analyzer coverage to block direct `ScopePathBuilder` construction outside DI and to enforce correlation IDs flowing through jobs and planner telemetry; audit new code paths now so the rule flip is painless.
 
 Example: injecting the builder inside a tool.
 

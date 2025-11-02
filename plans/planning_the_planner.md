@@ -203,6 +203,7 @@ Next Steps
 2. Deprecate legacy runner scaffolding now that fiction planners have migrated; tighten CI/lint gates around planner template configuration and scripted pipeline coverage.
 3. Explore multi-channel Ops publishing (e.g., Slack + PagerDuty) and acknowledgement workflows once webhook payloads stabilise under alpha usage.
 4. Extend planner health dashboards with additional alert drill-downs/SLA visualisations to support upcoming planner additions.
+5. Track world-bible telemetry gaps: add PlannerHealth alerts/Ops routing for missing or stale lore snapshots and ensure console filters surface the warning (see step note `planning_the_planner_step_20251102_0930_world_bible_alerts`).
 
 Alpha Hardening Requirements (2025-10-27)
 

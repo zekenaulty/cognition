@@ -210,14 +210,24 @@ public sealed class InMemoryVectorStore : IVectorStore
         {
             var len = Math.Min(item.Embedding.Length, embedding.Count);
             double dot = 0;
+            double itemMagnitude = 0;
+            double queryMagnitude = 0;
             for (var i = 0; i < len; i++)
             {
-                dot += item.Embedding[i] * embedding[i];
+                var itemValue = item.Embedding[i];
+                var queryValue = embedding[i];
+                dot += itemValue * queryValue;
+                itemMagnitude += itemValue * itemValue;
+                queryMagnitude += queryValue * queryValue;
             }
-            return dot;
+            if (itemMagnitude <= 0 || queryMagnitude <= 0)
+            {
+                return 0;
+            }
+            return dot / (Math.Sqrt(itemMagnitude) * Math.Sqrt(queryMagnitude));
         }
 
-        return 1.0;
+        return 0.0;
     }
 
     public record SimilarityCall(float[] Embedding, int TopK, string TenantKey, Dictionary<string, object> Filters, string? Kind);

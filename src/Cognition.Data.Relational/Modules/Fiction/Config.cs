@@ -331,7 +331,10 @@ public class FictionWorldBibleEntryConfiguration : IEntityTypeConfiguration<Fict
         b.Property(x => x.FictionWorldBibleId).HasColumnName("fiction_world_bible_id");
         b.Property(x => x.EntrySlug).HasColumnName("entry_slug");
         b.Property(x => x.EntryName).HasColumnName("entry_name");
-        b.Property(x => x.Content).HasColumnName("content").HasColumnType("jsonb");
+        b.OwnsOne(x => x.Content, owned =>
+        {
+            owned.ToJson("content");
+        });
         b.Property(x => x.Version).HasColumnName("version");
         b.Property(x => x.ChangeType).HasColumnName("change_type").HasConversion<string>();
         b.Property(x => x.Sequence).HasColumnName("sequence");

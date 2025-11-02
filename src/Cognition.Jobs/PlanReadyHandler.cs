@@ -149,12 +149,32 @@ namespace Cognition.Jobs
                 }
             }
 
-            if (args.TryGetValue("backlogItemId", out var backlogId) && backlogId is not null)
-            {
-                metadata["backlogItemId"] = backlogId.ToString();
-            }
+            TryAddMetadataValue(metadata, args, "backlogItemId");
+            TryAddMetadataValue(metadata, args, "worldBibleId");
+            TryAddMetadataValue(metadata, args, "iterationIndex");
 
             return metadata;
+        }
+
+        private static void TryAddMetadataValue(IDictionary<string, object?> metadata, IReadOnlyDictionary<string, object?> args, string key)
+        {
+            if (!args.TryGetValue(key, out var value) || value is null)
+            {
+                return;
+            }
+
+            string? text = value switch
+            {
+                JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
+                JsonElement element when element.ValueKind == JsonValueKind.Number => element.GetRawText(),
+                JsonElement element when element.ValueKind == JsonValueKind.Null => null,
+                _ => value.ToString()
+            };
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                metadata[key] = text;
+            }
         }
     }
 }
