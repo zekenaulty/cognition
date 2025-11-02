@@ -29,7 +29,7 @@ public sealed class ScopePath : IEquatable<ScopePath>
 
     public static ScopePath Empty { get; } = new ScopePath(ScopePrincipal.None, Array.Empty<ScopeSegment>());
 
-    public static ScopePath Create(ScopePrincipal principal, IEnumerable<ScopeSegment> segments)
+    internal static ScopePath Create(ScopePrincipal principal, IEnumerable<ScopeSegment> segments)
     {
         var normalizedSegments = NormalizeSegments(segments);
         return new ScopePath(NormalizePrincipal(principal), normalizedSegments);

@@ -1,3 +1,4 @@
+using Cognition.Clients.Scope;
 using Cognition.Contracts;
 using Cognition.Contracts.Scopes;
 using FluentAssertions;
@@ -18,7 +19,8 @@ public class ScopePathTests
 
         var token = new ScopeToken(tenantId, appId, personaId, agentId, conversationId, null, null);
 
-        var path = token.ToScopePath();
+        var builder = new ScopePathBuilder();
+        var path = builder.Build(token);
 
         path.Principal.Should().Be(new ScopePrincipal(agentId, "agent"));
         path.Segments.Should().Contain(new ScopeSegment("tenant", tenantId.ToString("D")));
@@ -37,7 +39,8 @@ public class ScopePathTests
 
         var token = new ScopeToken(null, null, personaId, null, null, projectId, null);
 
-        var path = token.ToScopePath();
+        var builder = new ScopePathBuilder();
+        var path = builder.Build(token);
 
         path.Principal.Should().Be(new ScopePrincipal(personaId, "persona"));
         path.Segments.Should().ContainSingle(s => s.Key == "project" && s.Value == projectId.ToString("D"));

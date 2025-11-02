@@ -11,7 +11,7 @@ public readonly record struct ScopePathProjection(
 {
     public static bool TryCreate(ScopeToken scope, out ScopePathProjection projection)
     {
-        var path = scope.ToScopePath();
+        var path = ScopePathFactory.Create(scope);
         if (path.Principal.IsEmpty)
         {
             projection = default;

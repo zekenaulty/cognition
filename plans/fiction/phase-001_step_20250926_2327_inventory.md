@@ -25,15 +25,13 @@ Completion
 - Complete (updated 2025-10-05)
 
 Follow-Up Tasks
+- [ ] Refactor `FictionWeaverJobs` + Hangfire routing so backlog items drive the entire phase sequence (no hard-coded calls) and extend pipeline regression coverage (outside review 2025-11-01).
 - [ ] Audit remaining prompts outside fiction tools (e.g., remember/promotion flows) for completeness (track under Phase 001 Milestone A).
-- [x] Thread `backlogItemId` metadata from conversation/task scheduling so phase runners automatically close matching backlog entries; next action is documenting the contract with updated telemetry screenshots (review note 2025-10-14).
+- [ ] Thread `backlogItemId` metadata documentation update with telemetry screenshots (pending write-up).
 - [ ] Review a `_context` snapshot to verify the file-output list and capture anomalies (file new issue if discrepancies persist).
 - [ ] Verify the front-end persists `fictionPlanId`/provider/model metadata before the next user turn so auto-resume triggers reliably (coordinate with UI team).
-- [x] Confirm SignalR listeners consume the richer FictionPhaseProgressed payload (backlog identifiers now ride on the SignalR path); add an integration assertion for the new schema.
 - [ ] Land the `FictionPlanCheckpoint` lock manager migration, add resume/cancel regression tests, and ensure backlog status flips respect checkpoint failures.
 - [ ] Capture per-phase token budgets (vision/iterative/architect/scroll/scene), implement soft-stop `Partial` outcomes, and persist token metrics alongside backlog snapshots.
-- [x] Added scripted multi-phase regression (FictionPlannerPipelineTests) ensuring backlog items close when each runner succeeds.
-- [x] Guard planner execution against missing prompt templates to prevent empty prompt runs (See PlannerBase template enforcement, 2025-10-18).
 
 
 Update (data modeling)

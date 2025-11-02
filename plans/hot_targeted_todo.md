@@ -11,14 +11,16 @@
 
 ## Priority Action Stack
 
-1. Implement API rate limiting, per-persona/agent quotas, request size caps, and cancellation propagation (global + principal limiters + controller/JWT cancellation wiring landed; follow through on downstream jobs/clients + regression tests) (plans/alpha_security_observability_hardening.md, src/Cognition.Api/*).
-2. Lock ScopePath construction behind the shared factory and block direct `new ScopePath` usage (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
-3. Wire structured correlation logging now that planner quotas and authorization policies are in place (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
-4. Catalogue non-fiction planners and adjacent orchestrators that should adopt PlannerBase; capture template prerequisites and scope expectations (plans/planning_the_planner.md:184, plans/_next_session_prompt.md:10-13, plans/scope_token_path_refactor.md:25-45).
-5. Draft the non-fiction migration matrix and seed checklist updates in plans/planning_the_planner_rollout_recipe.md to cover non-fiction specifics (plans/planning_the_planner_rollout_recipe.md, plans/planning_the_planner.md:189-195).
-6. Identify and remove remaining legacy runner scaffolding/tests that duplicate PlannerBase functionality; update CI/lint gates to enforce scripted pipeline coverage (plans/_next_session_prompt.md:11-13, plans/planning_the_planner.md:185).
-7. Prototype multi-channel Ops routing (Slack, PagerDuty) using the validated webhook payloads; define acknowledgement semantics and Ops override metadata (plans/_next_session_prompt.md:14-16, plans/planning_the_planner.md:186).
-8. Extend planner health dashboards with alert drill-downs, SLA visualisations, and recent transcript surfacing for upcoming planners (plans/_next_session_prompt.md:17-19, plans/planning_the_planner.md:187, plans/planning_the_planner.md:205-206).
+1. Make the fiction backlog authoritative: drop hard-coded phase invocations, route `ConversationTask` scheduling off backlog state, and extend regression coverage so planners/telemetry align (plans/fiction/phase-001_step_20250926_2327_inventory.md).
+2. Normalize ScopePath usage post-review: audit for lingering `ScopePath.Parse`/direct constructors, add analyzer baselines, and document the factory-only contract (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
+3. Replace the in-memory vector score with cosine similarity so offline tests mirror OpenSearch behavior (tests/Cognition.Data.Vectors.Tests/*, plans/alpha_security_observability_hardening.md).
+4. Land the sandbox + foundry missing pieces: implement the OOPS worker, queue/approval Hangfire jobs, and exercise HGTF end-to-end with integration tests (docs/specs/human_gated_tool_foundry.md, plans/alpha_security_observability_hardening.md).
+5. Wire structured correlation logging now that planner quotas and authorization policies are in place (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
+6. Catalogue non-fiction planners and adjacent orchestrators that should adopt PlannerBase; capture template prerequisites and scope expectations (plans/planning_the_planner.md:184, plans/_next_session_prompt.md:10-13, plans/scope_token_path_refactor.md:25-45).
+7. Draft the non-fiction migration matrix and seed checklist updates in plans/planning_the_planner_rollout_recipe.md to cover non-fiction specifics (plans/planning_the_planner_rollout_recipe.md, plans/planning_the_planner.md:189-195).
+8. Identify and remove remaining legacy runner scaffolding/tests that duplicate PlannerBase functionality; update CI/lint gates to enforce scripted pipeline coverage (plans/_next_session_prompt.md:11-13, plans/planning_the_planner.md:185).
+9. Prototype multi-channel Ops routing (Slack, PagerDuty) using the validated webhook payloads; define acknowledgement semantics and Ops override metadata (plans/_next_session_prompt.md:14-16, plans/planning_the_planner.md:186).
+10. Extend planner health dashboards with alert drill-downs, SLA visualisations, and recent transcript surfacing for upcoming planners (plans/_next_session_prompt.md:17-19, plans/planning_the_planner.md:187, plans/planning_the_planner.md:205-206).
 
 ## Fast Follow Improvements
 

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Cognition.Contracts.Scopes;
 
 namespace Cognition.Contracts;
@@ -22,35 +21,8 @@ public readonly partial record struct ScopeToken(
         return ScopePrincipal.None;
     }
 
-    public ScopePath ToScopePath()
-    {
-        var principal = ResolvePrincipal();
-        var segments = new List<ScopeSegment>(8);
-
-        AddSegment("tenant", TenantId, principal);
-        AddSegment("app", AppId, principal);
-        AddSegment("persona", PersonaId, principal);
-        AddSegment("agent", AgentId, principal);
-        AddSegment("conversation", ConversationId, principal, includeEvenIfPrincipal: true);
-        AddSegment("project", ProjectId, principal, includeEvenIfPrincipal: true);
-        AddSegment("world", WorldId, principal, includeEvenIfPrincipal: true);
-
-        return ScopePath.Create(principal, segments);
-
-        void AddSegment(string key, Guid? value, ScopePrincipal targetPrincipal, bool includeEvenIfPrincipal = false)
-        {
-            if (!value.HasValue) return;
-            if (!includeEvenIfPrincipal && !targetPrincipal.IsEmpty && string.Equals(targetPrincipal.PrincipalType, key, StringComparison.Ordinal) && targetPrincipal.RootId == value.Value)
-            {
-                return;
-            }
-
-            segments.Add(ScopeSegment.FromGuid(key, value.Value));
-        }
-    }
-
     public override string ToString()
     {
-        return ToScopePath().Canonical;
+        return ScopePathFactory.Create(this).Canonical;
     }
 }

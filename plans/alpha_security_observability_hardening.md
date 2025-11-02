@@ -8,28 +8,23 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 - Weak spots: missing rate limits/quotas/authorization policies, ad-hoc ScopePath construction risk, token spend controls, OpenSearch schema drift protections, end-to-end correlation IDs, console auth/error guards.
 
 ## P0 Blockers (Pre-pilot)
-1. **Global & per-principal throttles**
-   - DONE Add ASP.NET rate limiting middleware with persona/agent quotas (Program.cs:67, src/Cognition.Api/appsettings.json:12).
-   - DONE Audit CancellationToken propagation in downstream clients after tightening quotas (controllers/hubs + JwtTokenHelper now thread cancellation through EF + tool dispatch).
-2. **ScopePath factory lockdown**
+1. **ScopePath factory lockdown**
    - Make ScopePath builder the only construction path (internal constructors, DI-exposed factory).
    - Audit repository for `new ScopePath` usage and replace with factory.
-   - Optional: Roslyn analyzer or CI script to block direct instantiation.
-3. **Authorization policies**
-   - Define `[Authorize(Policy = "...")]` per controller/action, driven by persona/agent roles.
-   - Add unit tests that fail when endpoints lack required attributes.
-4. **Planner budgets & throttling**
-   - Configuration per planner/persona for max iterations, critique toggle, token caps.
-   - Emit `planner.throttled` / `planner.rejected` telemetry and Hangfire circuit breaker to avoid requeue storms.
-5. **Correlation IDs & structured logging**
-   - DONE RequestCorrelationMiddleware stamps correlation IDs at the API edge (RequestCorrelationMiddleware.cs).
-   - TODO extend correlation scopes beyond API (Jobs, Clients, telemetry payloads).
+   - Add analyzer coverage + tests that fail when `ScopePath.Parse` or direct constructors surface; document the factory-only contract for future contributors.
+2. **Correlation IDs & structured logging**
+   - Extend correlation scopes beyond API (Jobs, Clients, telemetry payloads).
+3. **Tool foundry + sandbox orchestration**
+   - Implement the OOPS worker lane, deterministic build/enable Hangfire jobs, and HGTF integration tests so the spec matches code.
 
 ## P1 Stabilisation Tasks
 - Fail-fast template seeding: validate every `PlannerMetadata.Step` template exists at startup (`StartupDataSeeder` self-test).
 - OpenSearch schema/mapping guard: boot-time verification of index template dimensions + fields.
 - Harden DTO validation (FluentValidation/DataAnnotations); add integration tests asserting 400s.
 - Anti-abuse headers/CORS defaults for API + Console.
+- Align in-memory vector scoring with cosine similarity so offline harnesses match production ranking.
+- Enforce explicit authorization policies/roles across admin endpoints.
+- Introduce feature flags for HGTF, sandbox, and canary rollouts.
 - Enhance PlannerHealth with latency percentiles, retry counts, critique usage, SLO breach rollups.
 
 ## P2 DevEx & Testing
@@ -45,16 +40,16 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 - **Week 4:** Extend PlannerHealth dashboards (SLOs, p95s, drill-downs), add Console PlanTimeline links, and finalize Ops multi-channel routing.
 
 ## Checklist
-- [x] Implement ASP.NET rate limiting + per-agent/persona quotas with configuration in `appsettings`.
-- [x] Enforce request body size limits and audit CancellationToken usage.
 - [ ] Refactor ScopePath construction to a locked factory; remove public constructors.
 - [ ] Introduce analyzer or CI check preventing direct `new ScopePath`.
-- [x] Define and test authorization policies per controller.
-- [x] Ship planner token budgets and throttling telemetry.
 - [ ] Wire structured logging + correlation IDs across API, Jobs, Clients, LLM, and vector layers.
+- [ ] Stand up tool foundry + sandbox orchestration (OOPS worker, enable/approval jobs, HGTF integration tests).
+- [ ] Replace in-memory vector scoring with cosine similarity so local harnesses mirror OpenSearch.
 - [ ] Add template seeding self-test and OpenSearch schema guard.
 - [ ] Harden DTO validation and API abuse headers.
 - [ ] Extend PlannerHealth with latency, retry, critique, and SLO aggregates.
+- [ ] Enforce explicit authorization policies/roles across admin endpoints.
+- [ ] Introduce feature flags for HGTF, sandbox, and canary rollouts.
 - [ ] Adopt nullable reference types + warnings as errors + analyzers.
 - [ ] Add golden transcript snapshots and property-based tests.
 - [ ] Publish updated developer/ops documentation and checklist for alpha hardening.

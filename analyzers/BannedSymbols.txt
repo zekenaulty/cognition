@@ -1,0 +1,2 @@
+# ScopePath creation must go through ScopePathBuilder / ScopePathFactory.
+M:Cognition.Contracts.ScopeToken.ToScopePath -> Use IScopePathBuilder.Build or ScopePathFactory.Create.

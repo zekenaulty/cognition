@@ -26,6 +26,7 @@ Deliverables
 - Dual-write persistence (legacy columns + new principal/path fields), with migration scripts/read models documented (optional for alpha; we can cut over directly because only seed data exists).
 - Fluent query extensions (`ForPrincipal`, `ForPersona`, `ForAgent`, `WithContext`, `UnderPath`, `WalkUp`) for EF/OpenSearch/Cosmos consumers.
 - Updated tooling docs + developer guidance for constructing scopes with principals.
+- Analyzer/CI guardrails that ban `ScopePath.Parse`/direct constructors and enforce the factory/builder usage.
 - Regression tests: hashing, persistence, LINQ helpers, dispatcher integration, retrieval fallbacks.
 
  Strategy

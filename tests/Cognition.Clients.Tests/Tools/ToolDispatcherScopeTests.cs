@@ -272,7 +272,7 @@ public class ToolDispatcherScopeTests
         planner.Contexts.Should().HaveCount(1);
         var recordedContext = planner.Contexts.Single();
         recordedContext.ScopePath.Should().NotBeNull();
-        var expectedScope = new ScopeToken(null, null, personaId, null, conversationId, null, null).ToScopePath().Canonical;
+        var expectedScope = scopePathBuilder.Build(new ScopeToken(null, null, personaId, null, conversationId, null, null)).Canonical;
         recordedContext.ScopePath!.Canonical.Should().Be(expectedScope);
         telemetry.Started.Should().HaveCount(1);
         telemetry.Completed.Should().HaveCount(1);
@@ -437,7 +437,7 @@ public class ToolDispatcherScopeTests
         planner.Contexts.Should().HaveCount(1);
         var recordedContext = planner.Contexts.Single();
         recordedContext.ScopePath.Should().NotBeNull();
-        var expectedScope = new ScopeToken(null, null, personaId, null, conversationId, null, null).ToScopePath().Canonical;
+        var expectedScope = scopePathBuilder.Build(new ScopeToken(null, null, personaId, null, conversationId, null, null)).Canonical;
         recordedContext.ScopePath!.Canonical.Should().Be(expectedScope);
         telemetry.Started.Should().HaveCount(1);
         telemetry.Completed.Should().BeEmpty();

@@ -51,12 +51,12 @@ public sealed class ScopePathBuilder : IScopePathBuilder
 {
     public ScopePath Build(ScopeToken scopeToken)
     {
-        return scopeToken.ToScopePath();
+        return ScopePathFactory.Create(scopeToken);
     }
 
     public bool TryBuild(ScopeToken scopeToken, out ScopePath scopePath)
     {
-        scopePath = scopeToken.ToScopePath();
+        scopePath = ScopePathFactory.Create(scopeToken);
         return !IsEmpty(scopePath);
     }
 
