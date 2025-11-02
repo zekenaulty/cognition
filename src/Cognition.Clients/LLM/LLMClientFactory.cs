@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.LLM;
 using Microsoft.EntityFrameworkCore;
@@ -7,7 +8,7 @@ namespace Cognition.Clients.LLM;
 
 public interface ILLMClientFactory
 {
-    Task<ILLMClient> CreateAsync(Guid providerId, Guid? modelId = null);
+    Task<ILLMClient> CreateAsync(Guid providerId, Guid? modelId = null, CancellationToken ct = default);
 }
 
 public class LLMClientFactory : ILLMClientFactory
@@ -21,13 +22,13 @@ public class LLMClientFactory : ILLMClientFactory
         _httpClientFactory = httpClientFactory;
     }
 
-    public async Task<ILLMClient> CreateAsync(Guid providerId, Guid? modelId = null)
+    public async Task<ILLMClient> CreateAsync(Guid providerId, Guid? modelId = null, CancellationToken ct = default)
     {
-        var provider = await _db.Providers.AsNoTracking().FirstAsync(p => p.Id == providerId);
+        var provider = await _db.Providers.AsNoTracking().FirstAsync(p => p.Id == providerId, ct);
         Model? model = null;
         if (modelId.HasValue)
         {
-            model = await _db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.Id == modelId.Value);
+            model = await _db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.Id == modelId.Value, ct);
         }
 
         // Prefer a matching client profile (by provider and model) if present
@@ -35,7 +36,7 @@ public class LLMClientFactory : ILLMClientFactory
             .Include(p => p.ApiCredential)
             .Where(p => p.ProviderId == providerId && (!modelId.HasValue || p.ModelId == modelId))
             .OrderByDescending(p => p.ModelId != null) // prefer model-specific profile
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(ct);
 
         // Resolve credential value from profile.ApiCredential.KeyRef; fallback to provider-level credential
         string? apiKey = null;
@@ -48,7 +49,7 @@ public class LLMClientFactory : ILLMClientFactory
             var providerCred = await _db.ApiCredentials.AsNoTracking()
                 .Where(c => c.ProviderId == providerId && c.IsValid)
                 .OrderByDescending(c => c.UpdatedAtUtc)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
             if (providerCred != null) apiKey = ResolveSecret(providerCred.KeyRef);
         }
 

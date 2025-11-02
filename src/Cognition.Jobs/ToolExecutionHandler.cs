@@ -11,6 +11,7 @@ using Cognition.Data.Relational.Modules.Conversations;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
 using Rebus.Handlers;
+using Rebus.Extensions;
 
 namespace Cognition.Jobs
 {
@@ -54,12 +55,13 @@ namespace Cognition.Jobs
         {
             var branchSlug = string.IsNullOrWhiteSpace(message.BranchSlug) ? "main" : message.BranchSlug.Trim();
             var args = message.Args ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            var cancellationToken = Rebus.Pipeline.MessageContext.Current?.GetCancellationToken() ?? CancellationToken.None;
 
             ConversationTask? task = null;
             if (message.ConversationPlanId.HasValue)
             {
                 task = await _db.ConversationTasks
-                    .FirstOrDefaultAsync(t => t.ConversationPlanId == message.ConversationPlanId.Value && t.StepNumber == message.StepNumber)
+                    .FirstOrDefaultAsync(t => t.ConversationPlanId == message.ConversationPlanId.Value && t.StepNumber == message.StepNumber, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -67,14 +69,14 @@ namespace Cognition.Jobs
             if (!quotaDecision.IsAllowed)
             {
                 var quotaMetadata = BuildMetadata(message.Metadata, task, branchSlug, args);
-                await HandlePlannerQuotaExceededAsync(message, args, branchSlug, task, quotaMetadata, quotaDecision).ConfigureAwait(false);
+                await HandlePlannerQuotaExceededAsync(message, args, branchSlug, task, quotaMetadata, quotaDecision, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             if (task is not null)
             {
                 task.Status = "Running";
-                await _db.SaveChangesAsync().ConfigureAwait(false);
+                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
 
             var metadata = BuildMetadata(message.Metadata, task, branchSlug, args);
@@ -95,12 +97,12 @@ namespace Cognition.Jobs
                     {
                         task.Status = "Queued";
                         task.Observation = result is IDictionary<string, object?> dict && dict.TryGetValue("jobId", out var jobObj) ? jobObj?.ToString() : null;
-                        await _db.SaveChangesAsync().ConfigureAwait(false);
+                        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else
                 {
-                    var outcome = await ExecuteToolAsync(message, args).ConfigureAwait(false);
+                    var outcome = await ExecuteToolAsync(message, args, cancellationToken).ConfigureAwait(false);
                     success = outcome.Success;
                     error = outcome.Error;
                     result = outcome.Result;
@@ -110,9 +112,13 @@ namespace Cognition.Jobs
                         task.Status = success ? "Completed" : "Failed";
                         task.Observation = success ? TruncateObservation(outcome.Result) : error;
                         task.Error = error;
-                        await _db.SaveChangesAsync().ConfigureAwait(false);
+                        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                     }
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -124,7 +130,7 @@ namespace Cognition.Jobs
                 {
                     task.Status = "Failed";
                     task.Error = ex.Message;
-                    await _db.SaveChangesAsync().ConfigureAwait(false);
+                    await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -157,6 +163,7 @@ namespace Cognition.Jobs
                 branchSlug,
                 metadata);
 
+            cancellationToken.ThrowIfCancellationRequested();
             await _bus.Publish(toolCompleted).ConfigureAwait(false);
         }
 
@@ -191,14 +198,14 @@ namespace Cognition.Jobs
             };
         }
 
-        private async Task<(bool Success, object? Result, string? Error)> ExecuteToolAsync(ToolExecutionRequested message, IDictionary<string, object?> args)
+        private async Task<(bool Success, object? Result, string? Error)> ExecuteToolAsync(ToolExecutionRequested message, IDictionary<string, object?> args, CancellationToken cancellationToken)
         {
             if (!Guid.TryParse(message.Tool, out var toolId))
             {
                 throw new InvalidOperationException($"Unable to resolve tool identifier '{message.Tool}'.");
             }
 
-            var context = new ToolContext(message.AgentId, message.ConversationId, message.PersonaId, _services, CancellationToken.None);
+            var context = new ToolContext(message.AgentId, message.ConversationId, message.PersonaId, _services, cancellationToken);
             var (ok, result, error) = await _dispatcher.ExecuteAsync(toolId, context, args, log: true).ConfigureAwait(false);
 
             return (ok, result, error);
@@ -222,29 +229,37 @@ namespace Cognition.Jobs
             string branchSlug,
             ConversationTask? task,
             Dictionary<string, object?> metadata,
-            PlannerQuotaDecision decision)
+            PlannerQuotaDecision decision,
+            CancellationToken cancellationToken)
         {
             var plannerKey = message.Tool;
             var errorMessage = decision.Reason ?? $"Planner quota '{decision.Limit}' exceeded.";
 
-            if (task is not null)
-            {
-                task.Status = decision.Limit == PlannerQuotaLimit.MaxIterations ? "Throttled" : "Rejected";
-                task.Error = errorMessage;
-                await _db.SaveChangesAsync().ConfigureAwait(false);
-            }
+        var saveToken = cancellationToken.IsCancellationRequested ? CancellationToken.None : cancellationToken;
 
-            AddQuotaMetadata(metadata, decision);
-            var telemetryTags = BuildTelemetryTags(metadata, plannerKey, decision);
-            var telemetryContext = BuildTelemetryContext(message, plannerKey, telemetryTags);
+        if (task is not null)
+        {
+            task.Status = decision.Limit == PlannerQuotaLimit.MaxIterations ? "Throttled" : "Rejected";
+            task.Error = errorMessage;
+            await _db.SaveChangesAsync(saveToken).ConfigureAwait(false);
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        AddQuotaMetadata(metadata, decision);
+        var telemetryTags = BuildTelemetryTags(metadata, plannerKey, decision);
+        var telemetryContext = BuildTelemetryContext(message, plannerKey, telemetryTags);
 
             if (decision.Limit == PlannerQuotaLimit.MaxIterations)
             {
-                await _telemetry.PlanThrottledAsync(telemetryContext, decision, CancellationToken.None).ConfigureAwait(false);
+                await _telemetry.PlanThrottledAsync(telemetryContext, decision, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                await _telemetry.PlanRejectedAsync(telemetryContext, decision, CancellationToken.None).ConfigureAwait(false);
+                await _telemetry.PlanRejectedAsync(telemetryContext, decision, cancellationToken).ConfigureAwait(false);
             }
 
             await _logger.LogAsync(message.ConversationId, nameof(ToolExecutionRequested), JObject.FromObject(new
@@ -291,6 +306,7 @@ namespace Cognition.Jobs
                 branchSlug,
                 metadata);
 
+            cancellationToken.ThrowIfCancellationRequested();
             await _bus.Publish(toolCompleted).ConfigureAwait(false);
         }
 

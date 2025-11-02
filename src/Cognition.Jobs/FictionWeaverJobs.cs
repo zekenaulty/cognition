@@ -7,6 +7,7 @@ using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Contracts.Events;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -187,6 +188,7 @@ public class FictionWeaverJobs
 
         var effectiveContext = NormalizeContext(context, plan.PrimaryBranchSlug);
         var backlogItemId = GetBacklogItemId(effectiveContext);
+        var conversationTask = await FindConversationTaskAsync(effectiveContext, cancellationToken).ConfigureAwait(false);
 
         if (plan.Status == FictionPlanStatus.Draft)
         {
@@ -200,6 +202,7 @@ public class FictionWeaverJobs
         if (IsMetadataFlagSet(effectiveContext, "cancel"))
         {
             CancelCheckpoint(phase, checkpoint, effectiveContext);
+            UpdateConversationTaskStatus(conversationTask, "Cancelled", null, "Cancellation requested prior to execution.");
             if (!string.IsNullOrEmpty(backlogItemId))
             {
                 await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "cancel-requested", cancellationToken).ConfigureAwait(false);
@@ -217,6 +220,8 @@ public class FictionWeaverJobs
                 await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "cancelled-checkpoint", cancellationToken).ConfigureAwait(false);
             }
 
+            UpdateConversationTaskStatus(conversationTask, "Cancelled", null, "Phase remains cancelled; skipping execution.");
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "cancelled", "Phase remains cancelled; skipping execution.", null, null, null, cancellationToken).ConfigureAwait(false);
             return FictionPhaseResult.Cancelled(phase, "Phase cancelled for this branch.");
         }
@@ -248,6 +253,7 @@ public class FictionWeaverJobs
         checkpoint.Progress = BuildProgressSnapshot(phase, effectiveContext, "started", "Phase execution started.");
         checkpoint.UpdatedAtUtc = DateTime.UtcNow;
 
+        UpdateConversationTaskStatus(conversationTask, "Running");
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         var startedAtUtc = DateTime.UtcNow;
         await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "started", "Phase execution started.", null, null, startedAtUtc, cancellationToken).ConfigureAwait(false);
@@ -277,6 +283,12 @@ public class FictionWeaverJobs
                 var finalStatus = MapPhaseStatusToBacklog(result.Status);
                 await SetBacklogStatusAsync(plan.Id, backlogItemId!, finalStatus, phase, effectiveContext, "phase-complete", cancellationToken).ConfigureAwait(false);
             }
+
+            UpdateConversationTaskStatus(
+                conversationTask,
+                MapConversationTaskStatus(result.Status),
+                result.Summary,
+                result.Status == FictionPhaseStatus.Cancelled ? result.Summary : null);
 
             await PersistTranscriptsAsync(plan, checkpoint, effectiveContext, result, cancellationToken).ConfigureAwait(false);
 
@@ -312,24 +324,86 @@ public class FictionWeaverJobs
         }
         catch (Exception ex)
         {
+            var isCancellation = ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
+            var saveToken = isCancellation ? CancellationToken.None : cancellationToken;
+
             _logger.LogError(ex, "Phase {Phase} failed for plan {PlanId}.", phase, plan.Id);
 
             if (!string.IsNullOrEmpty(backlogItemId))
             {
-                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "phase-failed", cancellationToken).ConfigureAwait(false);
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "phase-failed", saveToken).ConfigureAwait(false);
             }
 
-            checkpoint.Status = FictionPlanCheckpointStatus.Pending;
             checkpoint.LockedByAgentId = null;
             checkpoint.LockedByConversationId = null;
             checkpoint.LockedAtUtc = null;
-            checkpoint.Progress = BuildProgressSnapshot(phase, effectiveContext, "failed", ex.Message, null, ex, startedAtUtc);
             checkpoint.UpdatedAtUtc = DateTime.UtcNow;
 
-            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, "failed", ex.Message, null, ex, startedAtUtc, cancellationToken).ConfigureAwait(false);
+            var failureSummary = isCancellation ? "Phase execution cancelled." : ex.Message;
+            var progressStatus = isCancellation ? "cancelled" : "failed";
+            checkpoint.Progress = BuildProgressSnapshot(phase, effectiveContext, progressStatus, failureSummary, null, isCancellation ? null : ex, startedAtUtc);
+            checkpoint.Status = isCancellation ? FictionPlanCheckpointStatus.Cancelled : FictionPlanCheckpointStatus.Pending;
+
+            UpdateConversationTaskStatus(conversationTask, isCancellation ? "Cancelled" : "Failed", null, failureSummary);
+
+            await _db.SaveChangesAsync(saveToken).ConfigureAwait(false);
+            await PublishProgressAsync(phase, plan, checkpoint, effectiveContext, progressStatus, failureSummary, null, isCancellation ? null : ex, startedAtUtc, saveToken).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private async Task<ConversationTask?> FindConversationTaskAsync(FictionPhaseExecutionContext context, CancellationToken cancellationToken)
+    {
+        if (!TryReadMetadataGuid(context.Metadata, "taskId", out var taskId))
+        {
+            return null;
+        }
+
+        return await _db.ConversationTasks.FirstOrDefaultAsync(t => t.Id == taskId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void UpdateConversationTaskStatus(ConversationTask? task, string status, string? observation = null, string? error = null)
+    {
+        if (task is null)
+        {
+            return;
+        }
+
+        task.Status = status;
+
+        if (observation is not null)
+        {
+            task.Observation = observation;
+        }
+
+        if (error is not null)
+        {
+            task.Error = error;
+        }
+    }
+
+    private static string MapConversationTaskStatus(FictionPhaseStatus status) => status switch
+    {
+        FictionPhaseStatus.Completed => "Completed",
+        FictionPhaseStatus.Cancelled => "Cancelled",
+        FictionPhaseStatus.Blocked => "Blocked",
+        _ => "Completed"
+    };
+
+    private static bool TryReadMetadataGuid(IReadOnlyDictionary<string, string>? metadata, string key, out Guid value)
+    {
+        value = Guid.Empty;
+        if (metadata is null)
+        {
+            return false;
+        }
+
+        if (!metadata.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        return Guid.TryParse(raw, out value);
     }
 
     private static FictionPhaseExecutionContext NormalizeContext(FictionPhaseExecutionContext context, string? defaultBranch)

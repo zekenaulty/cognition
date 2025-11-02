@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Contracts.Events;
 using Cognition.Data.Relational;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
 using Rebus.Handlers;
+using Rebus.Extensions;
 
 namespace Cognition.Jobs
 {
@@ -24,11 +26,13 @@ namespace Cognition.Jobs
 
         public async Task Handle(UserMessageAppended message)
         {
+            var cancellationToken = Rebus.Pipeline.MessageContext.Current?.GetCancellationToken() ?? CancellationToken.None;
+
             await _logger.LogAsync(message.ConversationId, nameof(UserMessageAppended), JObject.FromObject(message)).ConfigureAwait(false);
 
             var conversation = await _db.Conversations
                 .Include(c => c.Agent)
-                .FirstOrDefaultAsync(c => c.Id == message.ConversationId)
+                .FirstOrDefaultAsync(c => c.Id == message.ConversationId, cancellationToken)
                 .ConfigureAwait(false);
             if (conversation is null || conversation.Metadata is null)
             {
@@ -84,6 +88,7 @@ namespace Cognition.Jobs
                 branchSlug,
                 metadata);
 
+            cancellationToken.ThrowIfCancellationRequested();
             await _bus.Publish(planRequested).ConfigureAwait(false);
         }
 

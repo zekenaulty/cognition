@@ -1,15 +1,19 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Tools;
 using Cognition.Clients.Tools;
+using Microsoft.AspNetCore.Authorization;
+using Cognition.Api.Infrastructure.Security;
 using System.Text.Json;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/tools")]
 public class ToolsController : ControllerBase
@@ -22,28 +26,28 @@ public class ToolsController : ControllerBase
     public record PatchToolRequest(string? Name, string? ClassPath, string? Description, string[]? Tags, object? Metadata, string? Example, bool? IsActive, Guid? ClientProfileId = null);
 
     [HttpGet]
-    public async Task<IActionResult> ListTools()
+    public async Task<IActionResult> ListTools(CancellationToken cancellationToken = default)
     {
-        var items = await _db.Tools.AsNoTracking().OrderBy(t => t.Name).ToListAsync();
+        var items = await _db.Tools.AsNoTracking().OrderBy(t => t.Name).ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     [HttpPost]
-    public async Task<IActionResult> CreateTool([FromBody] CreateToolRequest req)
+    public async Task<IActionResult> CreateTool([FromBody] CreateToolRequest req, CancellationToken cancellationToken = default)
     {
         // Validate ClassPath is a resolvable ITool type
         if (!IsValidToolClassPath(req.ClassPath, out var validationError))
             return BadRequest(validationError);
         var t = new Tool { Name = req.Name, ClassPath = req.ClassPath, Description = req.Description, Tags = req.Tags, Metadata = req.Metadata as System.Collections.Generic.Dictionary<string, object?>, Example = req.Example, IsActive = req.IsActive, ClientProfileId = req.ClientProfileId };
         _db.Tools.Add(t);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { t.Id });
     }
 
     [HttpPatch("{id:guid}")]
-    public async Task<IActionResult> PatchTool(Guid id, [FromBody] PatchToolRequest req)
+    public async Task<IActionResult> PatchTool(Guid id, [FromBody] PatchToolRequest req, CancellationToken cancellationToken = default)
     {
-        var t = await _db.Tools.FirstOrDefaultAsync(x => x.Id == id);
+        var t = await _db.Tools.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (t == null) return NotFound();
         t.Name = req.Name ?? t.Name;
         if (!string.IsNullOrWhiteSpace(req.ClassPath))
@@ -58,7 +62,7 @@ public class ToolsController : ControllerBase
         t.Example = req.Example ?? t.Example;
         if (req.IsActive.HasValue) t.IsActive = req.IsActive.Value;
         if (req.ClientProfileId.HasValue) t.ClientProfileId = req.ClientProfileId.Value;
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
 
@@ -79,6 +83,7 @@ public class ToolsController : ControllerBase
     }
 }
 
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/tool-parameters")]
 public class ToolParametersController : ControllerBase
@@ -89,18 +94,18 @@ public class ToolParametersController : ControllerBase
     public record CreateParamRequest(Guid ToolId, string Name, string Type, string Direction = "Input", bool Required = false, object? DefaultValue = null, object? Options = null, string? Description = null);
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] Guid? toolId)
+    public async Task<IActionResult> List([FromQuery] Guid? toolId, CancellationToken cancellationToken = default)
     {
         var q = _db.ToolParameters.AsNoTracking().AsQueryable();
         if (toolId.HasValue) q = q.Where(p => p.ToolId == toolId.Value);
-        var items = await q.OrderBy(p => p.ToolId).ThenBy(p => p.Name).ToListAsync();
+        var items = await q.OrderBy(p => p.ToolId).ThenBy(p => p.Name).ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateParamRequest req)
+    public async Task<IActionResult> Create([FromBody] CreateParamRequest req, CancellationToken cancellationToken = default)
     {
-        if (!await _db.Tools.AnyAsync(t => t.Id == req.ToolId)) return BadRequest("Tool not found");
+        if (!await _db.Tools.AnyAsync(t => t.Id == req.ToolId, cancellationToken)) return BadRequest("Tool not found");
         if (!Enum.TryParse<Cognition.Data.Relational.Modules.Common.ToolParamDirection>(req.Direction, true, out var dir)) dir = Cognition.Data.Relational.Modules.Common.ToolParamDirection.Input;
         var p = new ToolParameter
         {
@@ -114,7 +119,7 @@ public class ToolParametersController : ControllerBase
             Description = req.Description
         };
         _db.ToolParameters.Add(p);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { p.Id });
     }
 
@@ -183,6 +188,7 @@ public class ToolParametersController : ControllerBase
     }
 }
 
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/tool-provider-supports")]
 public class ToolProviderSupportsController : ControllerBase
@@ -193,25 +199,25 @@ public class ToolProviderSupportsController : ControllerBase
     public record CreateSupportRequest(Guid ToolId, Guid ProviderId, Guid? ModelId, string SupportLevel = "Full", string? Notes = null);
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] Guid? toolId, [FromQuery] Guid? providerId)
+    public async Task<IActionResult> List([FromQuery] Guid? toolId, [FromQuery] Guid? providerId, CancellationToken cancellationToken = default)
     {
         var q = _db.ToolProviderSupports.AsNoTracking().AsQueryable();
         if (toolId.HasValue) q = q.Where(s => s.ToolId == toolId.Value);
         if (providerId.HasValue) q = q.Where(s => s.ProviderId == providerId.Value);
-        var items = await q.OrderBy(s => s.ToolId).ToListAsync();
+        var items = await q.OrderBy(s => s.ToolId).ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateSupportRequest req)
+    public async Task<IActionResult> Create([FromBody] CreateSupportRequest req, CancellationToken cancellationToken = default)
     {
-        if (!await _db.Tools.AnyAsync(t => t.Id == req.ToolId)) return BadRequest("Tool not found");
-        if (!await _db.Providers.AnyAsync(p => p.Id == req.ProviderId)) return BadRequest("Provider not found");
-        if (req.ModelId.HasValue && !await _db.Models.AnyAsync(m => m.Id == req.ModelId.Value)) return BadRequest("Model not found");
+        if (!await _db.Tools.AnyAsync(t => t.Id == req.ToolId, cancellationToken)) return BadRequest("Tool not found");
+        if (!await _db.Providers.AnyAsync(p => p.Id == req.ProviderId, cancellationToken)) return BadRequest("Provider not found");
+        if (req.ModelId.HasValue && !await _db.Models.AnyAsync(m => m.Id == req.ModelId.Value, cancellationToken)) return BadRequest("Model not found");
         if (!Enum.TryParse<Cognition.Data.Relational.Modules.Common.SupportLevel>(req.SupportLevel, true, out var lvl)) lvl = Cognition.Data.Relational.Modules.Common.SupportLevel.Full;
         var s = new ToolProviderSupport { ToolId = req.ToolId, ProviderId = req.ProviderId, ModelId = req.ModelId, SupportLevel = lvl, Notes = req.Notes };
         _db.ToolProviderSupports.Add(s);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { s.Id });
     }
 }

@@ -73,7 +73,7 @@ public class AgentService : IAgentService
         var maxTurns = 20;
         if (modelId.HasValue)
         {
-            var m = await _db.Models.AsNoTracking().FirstOrDefaultAsync(mm => mm.Id == modelId.Value);
+            var m = await _db.Models.AsNoTracking().FirstOrDefaultAsync(mm => mm.Id == modelId.Value, ct);
             if (m?.ContextWindow is int cw && cw > 0)
             {
                 maxTurns = Math.Clamp(cw / 256, 6, 40);
@@ -113,7 +113,7 @@ public class AgentService : IAgentService
         // Append the new input (also in window now via persisted user message)
         chat.Add(new ChatMessage("user", input));
 
-        var client = await _factory.CreateAsync(providerId, modelId);
+        var client = await _factory.CreateAsync(providerId, modelId, ct);
         string reply;
         try
         {
@@ -250,7 +250,7 @@ public class AgentService : IAgentService
         promptBuilder.AppendLine($"user: {input}");
         var prompt = promptBuilder.ToString();
         // 3. Get client and generate response
-        var client = await _factory.CreateAsync(provId, modId);
+        var client = await _factory.CreateAsync(provId, modId, ct);
         var response = await client.GenerateAsync(prompt, track: true);
         // 4. Persist assistant message
         var agentId = await _db.Agents.AsNoTracking().Where(a => a.PersonaId == personaId).Select(a => a.Id).FirstOrDefaultAsync(ct);
@@ -284,7 +284,7 @@ public class AgentService : IAgentService
         var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
         var sys = persona is null ? "" : BuildSystemMessage(persona);
         var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
-        var client = await _factory.CreateAsync(prov, modl);
+        var client = await _factory.CreateAsync(prov, modl, ct);
         var prompt = string.IsNullOrWhiteSpace(sys) ? input : $"{sys}\n\nUser: {input}";
         try
         {
@@ -320,7 +320,7 @@ public class AgentService : IAgentService
             .ToListAsync(ct);
 
         var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
-        var draft = await AskWithToolIndexAsync(personaId, prov, modl, input, tools);
+        var draft = await AskWithToolIndexAsync(personaId, prov, modl, input, tools, ct);
 
         // Try to parse a tool plan (by id or name)
         try
@@ -363,13 +363,13 @@ public class AgentService : IAgentService
         return draft;
     }
     
-    public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools)
+    public async Task<string> AskWithToolIndexAsync(Guid personaId, Guid providerId, Guid? modelId, string input, IEnumerable<Tool> tools, CancellationToken ct = default)
     {
-        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId);
+        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
         var sys = persona is null ? "" : BuildSystemMessage(persona);
         var toolIndex = BuildToolIndexSection(tools);
         var fullSys = string.IsNullOrWhiteSpace(toolIndex) ? sys : (string.IsNullOrWhiteSpace(sys) ? toolIndex : $"{sys}\n\n{toolIndex}");
-        var client = await _factory.CreateAsync(providerId, modelId);
+        var client = await _factory.CreateAsync(providerId, modelId, ct);
         var prompt = string.IsNullOrWhiteSpace(fullSys) ? input : $"{fullSys}\n\nUser: {input}";
         try
         {
@@ -418,7 +418,7 @@ public class AgentService : IAgentService
         var respondAnswerToolId = tools.FirstOrDefault(t => string.Equals(t.Name, "Respond.Answer", StringComparison.OrdinalIgnoreCase))?.Id;
         var toolIndex = BuildToolIndexSection(tools);
         var sys = persona is null ? "" : BuildSystemMessage(persona);
-        var client = await _factory.CreateAsync(prov, modl);
+        var client = await _factory.CreateAsync(prov, modl, ct);
 
         // 3. Generate OUTLINE_PLAN
         var compactHistory = await BuildCompactHistoryAsync(conversationId, ct);

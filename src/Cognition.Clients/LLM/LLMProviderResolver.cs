@@ -43,7 +43,7 @@ public sealed class LLMProviderResolver : ILLMProviderResolver
             modelName = await _db.Models.AsNoTracking().Where(m => m.Id == resolvedModelId.Value).Select(m => m.Name).FirstOrDefaultAsync(ct);
         }
 
-        var client = await _factory.CreateAsync(resolvedProviderId, resolvedModelId);
+        var client = await _factory.CreateAsync(resolvedProviderId, resolvedModelId, ct);
         return (client, resolvedProviderId, providerName, resolvedModelId, modelName);
     }
 }

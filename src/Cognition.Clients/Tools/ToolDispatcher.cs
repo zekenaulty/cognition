@@ -49,7 +49,7 @@ public class ToolDispatcher : IToolDispatcher
         var tool = await _db.Tools
             .Include(t => t.Parameters)
             .Include(t => t.ClientProfile)
-            .FirstAsync(t => t.Id == toolId);
+            .FirstAsync(t => t.Id == toolId, plannerContext.ToolContext.Ct);
 
         var args = new Dictionary<string, object?>(parameters.AsReadOnlyDictionary(), StringComparer.OrdinalIgnoreCase);
         var sw = Stopwatch.StartNew();
@@ -143,6 +143,10 @@ public class ToolDispatcher : IToolDispatcher
                 result = await impl.PlanAsync(ctxWithToolId, plannerParameters, plannerContext.ToolContext.Ct).ConfigureAwait(false);
             }
         }
+        catch (OperationCanceledException) when (plannerContext.ToolContext.Ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             ok = false;
@@ -181,7 +185,7 @@ public class ToolDispatcher : IToolDispatcher
         var tool = await _db.Tools
             .Include(t => t.Parameters)
             .Include(t => t.ClientProfile)
-            .FirstAsync(t => t.Id == toolId);
+            .FirstAsync(t => t.Id == toolId, ctx.Ct);
         var sw = Stopwatch.StartNew();
         object? result = null; string? error = null; var ok = true;
 
@@ -238,6 +242,10 @@ public class ToolDispatcher : IToolDispatcher
             _logger.LogInformation("Executing tool {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId} persona {PersonaId}", tool.Name, tool.Id, tool.ClassPath, ctx.ConversationId, ctx.PersonaId);
             result = await impl.ExecuteAsync(ctx, args);
             ok = true; error = null;
+        }
+        catch (OperationCanceledException) when (ctx.Ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

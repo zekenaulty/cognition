@@ -6,6 +6,7 @@ using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Users;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Threading;
 
 namespace Cognition.Api.Infrastructure;
 
@@ -46,27 +47,27 @@ public static class JwtTokenHelper
         return (jwt, expires);
     }
 
-    public static async Task<(string AccessToken, DateTime ExpiresAt, string RefreshToken)?> RotateRefreshAsync(CognitionDbContext db, string refreshToken)
+    public static async Task<(string AccessToken, DateTime ExpiresAt, string RefreshToken)?> RotateRefreshAsync(CognitionDbContext db, string refreshToken, CancellationToken cancellationToken = default)
     {
         // Hash the provided token and look up by hash first
         var hashed = HashToken(refreshToken);
         var token = await db.Set<RefreshToken>()
-            .FirstOrDefaultAsync(t => t.Token == hashed && t.RevokedAtUtc == null);
+            .FirstOrDefaultAsync(t => t.Token == hashed && t.RevokedAtUtc == null, cancellationToken);
 
         // Backward-compatibility: fall back to plaintext lookup if not found (older rows)
         if (token == null)
         {
             token = await db.Set<RefreshToken>()
-                .FirstOrDefaultAsync(t => t.Token == refreshToken && t.RevokedAtUtc == null);
+                .FirstOrDefaultAsync(t => t.Token == refreshToken && t.RevokedAtUtc == null, cancellationToken);
             if (token != null)
             {
                 // Upgrade stored value to hashed form
                 token.Token = hashed;
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(cancellationToken);
             }
         }
         if (token == null || token.ExpiresAtUtc < DateTime.UtcNow) return null;
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == token.UserId);
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == token.UserId, cancellationToken);
         if (user == null) return null;
         token.RevokedAtUtc = DateTime.UtcNow;
         var newToken = new RefreshToken
@@ -78,12 +79,12 @@ public static class JwtTokenHelper
             CreatedAtUtc = DateTime.UtcNow
         };
         db.Set<RefreshToken>().Add(newToken);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(cancellationToken);
         var (access, exp) = IssueAccessToken(user);
         return (access, exp, plaintext);
     }
 
-    public static async Task<(string Token, DateTime ExpiresAt)> IssueRefreshTokenAsync(CognitionDbContext db, Data.Relational.Modules.Users.User user)
+    public static async Task<(string Token, DateTime ExpiresAt)> IssueRefreshTokenAsync(CognitionDbContext db, Data.Relational.Modules.Users.User user, CancellationToken cancellationToken = default)
     {
         var token = new RefreshToken
         {
@@ -94,7 +95,7 @@ public static class JwtTokenHelper
             CreatedAtUtc = DateTime.UtcNow
         };
         db.Set<RefreshToken>().Add(token);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(cancellationToken);
         return (plaintext, token.ExpiresAtUtc);
     }
 

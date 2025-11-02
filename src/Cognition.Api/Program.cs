@@ -305,7 +305,10 @@ builder.Services.AddAuthentication(options =>
         ClockSkew = TimeSpan.FromMinutes(2)
     };
 });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    AuthorizationPolicies.Configure(options);
+});
 
 var app = builder.Build();
 

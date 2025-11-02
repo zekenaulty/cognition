@@ -11,9 +11,12 @@ using Cognition.Data.Vectors.OpenSearch.OpenSearch.Store;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Authorization;
+using Cognition.Api.Infrastructure.Security;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/knowledge")]
 public class KnowledgeIndexController : ControllerBase

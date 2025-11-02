@@ -1,11 +1,14 @@
+using Cognition.Api.Infrastructure.Security;
 using Cognition.Clients.Agents;
 using Cognition.Data.Relational;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.Tasks;
 
 namespace Cognition.Api.Controllers
 {
+    [Authorize(Policy = AuthorizationPolicies.UserOrHigher)]
     public class ChatHub : Hub
     {
         private readonly IAgentService _agentService;

@@ -10,7 +10,7 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 ## P0 Blockers (Pre-pilot)
 1. **Global & per-principal throttles**
    - DONE Add ASP.NET rate limiting middleware with persona/agent quotas (Program.cs:67, src/Cognition.Api/appsettings.json:12).
-   - TODO Audit CancellationToken propagation in downstream clients after tightening quotas.
+   - DONE Audit CancellationToken propagation in downstream clients after tightening quotas (controllers/hubs + JwtTokenHelper now thread cancellation through EF + tool dispatch).
 2. **ScopePath factory lockdown**
    - Make ScopePath builder the only construction path (internal constructors, DI-exposed factory).
    - Audit repository for `new ScopePath` usage and replace with factory.
@@ -46,10 +46,10 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 
 ## Checklist
 - [x] Implement ASP.NET rate limiting + per-agent/persona quotas with configuration in `appsettings`.
-- [ ] Enforce request body size limits and audit CancellationToken usage.
+- [x] Enforce request body size limits and audit CancellationToken usage.
 - [ ] Refactor ScopePath construction to a locked factory; remove public constructors.
 - [ ] Introduce analyzer or CI check preventing direct `new ScopePath`.
-- [ ] Define and test authorization policies per controller.
+- [x] Define and test authorization policies per controller.
 - [x] Ship planner token budgets and throttling telemetry.
 - [ ] Wire structured logging + correlation IDs across API, Jobs, Clients, LLM, and vector layers.
 - [ ] Add template seeding self-test and OpenSearch schema guard.

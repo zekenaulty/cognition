@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Contracts.Events;
 using Cognition.Data.Relational;
@@ -9,6 +10,7 @@ using Cognition.Data.Relational.Modules.Conversations;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
 using Rebus.Handlers;
+using Rebus.Extensions;
 
 namespace Cognition.Jobs
 {
@@ -33,10 +35,11 @@ namespace Cognition.Jobs
         public async Task Handle(PlanReady message)
         {
             var branchSlug = string.IsNullOrWhiteSpace(message.BranchSlug) ? "main" : message.BranchSlug.Trim();
+            var cancellationToken = Rebus.Pipeline.MessageContext.Current?.GetCancellationToken() ?? CancellationToken.None;
 
             var conversationPlan = await _db.ConversationPlans
                 .Include(p => p.Tasks)
-                .FirstOrDefaultAsync(p => p.Id == message.ConversationPlanId)
+                .FirstOrDefaultAsync(p => p.Id == message.ConversationPlanId, cancellationToken)
                 .ConfigureAwait(false);
             if (conversationPlan is null)
             {
@@ -69,7 +72,7 @@ namespace Cognition.Jobs
 
             var args = ParseArgs(nextTask.ArgsJson);
             nextTask.Status = "Requested";
-            await _db.SaveChangesAsync().ConfigureAwait(false);
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
             var metadata = BuildMetadata(message.Metadata, conversationPlan.Id, nextTask, branchSlug, args);
 
@@ -99,6 +102,7 @@ namespace Cognition.Jobs
                 branchSlug,
                 metadata);
 
+            cancellationToken.ThrowIfCancellationRequested();
             await _bus.Publish(toolRequested).ConfigureAwait(false);
         }
 

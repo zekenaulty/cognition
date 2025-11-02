@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
+using Cognition.Api.Infrastructure.Security;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.AuthenticatedUser)]
 [ApiController]
 [Route("api/system/env")] 
 public class EnvStatusController : ControllerBase
@@ -15,7 +17,6 @@ public class EnvStatusController : ControllerBase
     }
 
     [HttpGet("status")]
-    [Authorize]
     public IActionResult GetStatus()
     {
         string? openaiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? Environment.GetEnvironmentVariable("OPENAI_KEY");

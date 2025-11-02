@@ -1,18 +1,20 @@
 using System;
 using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Cognition.Data.Relational;
-using Cognition.Data.Relational.Modules.Conversations;
-using Cognition.Data.Relational.Modules.Common;
-using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using Cognition.Api.Infrastructure.Security;
+using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Common;
+using Cognition.Data.Relational.Modules.Conversations;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
-using Cognition.Api.Controllers;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.UserOrHigher)]
 [ApiController]
 [Route("api/conversations")]
 public class ConversationsController : ControllerBase
@@ -28,8 +30,7 @@ public class ConversationsController : ControllerBase
     public record SetActiveVersionRequest(int Index);
 
     [HttpGet]
-    [Authorize]
-    public async Task<IActionResult> List([FromQuery] Guid? participantId, [FromQuery] Guid? agentId)
+    public async Task<IActionResult> List([FromQuery] Guid? participantId, [FromQuery] Guid? agentId, CancellationToken cancellationToken = default)
     {
         var q = _db.Conversations.AsNoTracking().AsQueryable();
 
@@ -41,18 +42,18 @@ public class ConversationsController : ControllerBase
         var linkedIds = await _db.UserPersonas.AsNoTracking()
             .Where(up => up.UserId == caller)
             .Select(up => up.PersonaId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         var primaryId = await _db.Users.AsNoTracking()
             .Where(u => u.Id == caller)
             .Select(u => u.PrimaryPersonaId)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
         var allowedPersonaIds = new HashSet<Guid>(linkedIds);
         if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
 
         Guid? defaultSystemId = await _db.Personas.AsNoTracking()
             .Where(p => p.OwnedBy == Cognition.Data.Relational.Modules.Personas.OwnedBy.System && p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.Assistant)
             .Select(p => (Guid?)p.Id)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (agentId.HasValue)
         {
@@ -86,24 +87,23 @@ public class ConversationsController : ControllerBase
         var items = await q
             .OrderByDescending(c => c.UpdatedAtUtc ?? c.CreatedAtUtc)
             .Select(c => new ConversationListItem(c.Id, c.Title, c.CreatedAtUtc, c.UpdatedAtUtc))
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     [HttpPost]
-    [Authorize]
-    public async Task<IActionResult> Create([FromBody] CreateConversationRequest req)
+    public async Task<IActionResult> Create([FromBody] CreateConversationRequest req, CancellationToken cancellationToken = default)
     {
         var conv = new Conversation { Title = req.Title, CreatedAtUtc = DateTime.UtcNow, AgentId = req.AgentId };
         _db.Conversations.Add(conv);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         // participants (optional)
         var participants = (req.ParticipantIds ?? Array.Empty<Guid>()).Distinct().ToList();
         // Always include the caller's primary persona as a participant if available
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (Guid.TryParse(sub, out var caller))
         {
-            var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync();
+            var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync(cancellationToken);
             if (primaryId.HasValue && !participants.Contains(primaryId.Value)) participants.Add(primaryId.Value);
         }
         if (participants.Count == 0)
@@ -112,7 +112,7 @@ public class ConversationsController : ControllerBase
                 .AsNoTracking()
                 .Where(p => p.OwnedBy == Cognition.Data.Relational.Modules.Personas.OwnedBy.System && p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.Assistant)
                 .Select(p => (Guid?)p.Id)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(cancellationToken);
             if (defaultPid.HasValue) participants.Add(defaultPid.Value);
         }
         foreach (var pid in participants)
@@ -124,17 +124,16 @@ public class ConversationsController : ControllerBase
                 JoinedAtUtc = DateTime.UtcNow
             });
         }
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return CreatedAtAction(nameof(Get), new { id = conv.Id }, new { conv.Id });
     }
 
     // Removed legacy v2 create endpoint; POST /api/conversations accepts AgentId
 
     [HttpGet("{id:guid}")]
-    [Authorize]
-    public async Task<IActionResult> Get(Guid id)
+    public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken = default)
     {
-        var conv = await _db.Conversations.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
+        var conv = await _db.Conversations.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
         if (conv == null) return NotFound();
 
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -143,20 +142,20 @@ public class ConversationsController : ControllerBase
         var linkedIds = await _db.UserPersonas.AsNoTracking()
             .Where(up => up.UserId == caller)
             .Select(up => up.PersonaId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         var primaryId = await _db.Users.AsNoTracking()
             .Where(u => u.Id == caller)
             .Select(u => u.PrimaryPersonaId)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
         var allowedPersonaIds = new HashSet<Guid>(linkedIds);
         if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
 
         var participants = await _db.ConversationParticipants.AsNoTracking()
             .Where(p => p.ConversationId == id)
             .Select(p => p.PersonaId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
-        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == id && m.CreatedByUserId == caller);
+        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == id && m.CreatedByUserId == caller, cancellationToken);
         var allowed = userHasMsg || participants.Any(pid => allowedPersonaIds.Contains(pid));
         if (!allowed) return Forbid();
 
@@ -164,10 +163,9 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
-        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id);
+        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
         if (conv == null) return NotFound();
 
         // Delete related rows explicitly
@@ -175,12 +173,12 @@ public class ConversationsController : ControllerBase
             .AsNoTracking()
             .Where(m => m.ConversationId == id)
             .Select(m => m.Id)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         if (msgIds.Count > 0)
         {
             var versions = _db.ConversationMessageVersions.Where(v => msgIds.Contains(v.ConversationMessageId));
             _db.ConversationMessageVersions.RemoveRange(versions);
-            await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync(cancellationToken);
         }
         var messages = _db.ConversationMessages.Where(m => m.ConversationId == id);
         _db.ConversationMessages.RemoveRange(messages);
@@ -192,7 +190,7 @@ public class ConversationsController : ControllerBase
         _db.ConversationSummaries.RemoveRange(summaries);
 
         var plans = _db.ConversationPlans.Where(p => p.ConversationId == id);
-        var planIds = await plans.Select(p => p.Id).ToListAsync();
+        var planIds = await plans.Select(p => p.Id).ToListAsync(cancellationToken);
         if (planIds.Count > 0)
         {
             var tasks = _db.ConversationTasks.Where(t => planIds.Contains(t.ConversationPlanId));
@@ -203,7 +201,7 @@ public class ConversationsController : ControllerBase
         var thoughts = _db.ConversationThoughts.Where(t => t.ConversationId == id);
         _db.ConversationThoughts.RemoveRange(thoughts);
 
-        var wfState = await _db.ConversationWorkflowStates.FirstOrDefaultAsync(s => s.ConversationId == id);
+        var wfState = await _db.ConversationWorkflowStates.FirstOrDefaultAsync(s => s.ConversationId == id, cancellationToken);
         if (wfState != null) _db.ConversationWorkflowStates.Remove(wfState);
 
         var wfEvents = _db.WorkflowEvents.Where(e => e.ConversationId == id);
@@ -211,22 +209,21 @@ public class ConversationsController : ControllerBase
 
         // Finally remove conversation
         _db.Conversations.Remove(conv);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
 
     [HttpGet("{id:guid}/messages")]
-    [Authorize]
-    public async Task<IActionResult> ListMessages(Guid id)
+    public async Task<IActionResult> ListMessages(Guid id, CancellationToken cancellationToken = default)
     {
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
-        var linkedIds = await _db.UserPersonas.AsNoTracking().Where(up => up.UserId == caller).Select(up => up.PersonaId).ToListAsync();
-        var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync();
+        var linkedIds = await _db.UserPersonas.AsNoTracking().Where(up => up.UserId == caller).Select(up => up.PersonaId).ToListAsync(cancellationToken);
+        var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync(cancellationToken);
         var allowedPersonaIds = new HashSet<Guid>(linkedIds);
         if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
-        var participants = await _db.ConversationParticipants.AsNoTracking().Where(p => p.ConversationId == id).Select(p => p.PersonaId).ToListAsync();
-        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == id && m.CreatedByUserId == caller);
+        var participants = await _db.ConversationParticipants.AsNoTracking().Where(p => p.ConversationId == id).Select(p => p.PersonaId).ToListAsync(cancellationToken);
+        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == id && m.CreatedByUserId == caller, cancellationToken);
         var allowed = userHasMsg || participants.Any(pid => allowedPersonaIds.Contains(pid));
         if (!allowed) return Forbid();
 
@@ -248,21 +245,20 @@ public class ConversationsController : ControllerBase
                     .ToList(),
                 VersionIndex = m.ActiveVersionIndex
             })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok(msgs);
     }
 
     [HttpPost("{id:guid}/messages")]
-    [Authorize]
-    public async Task<IActionResult> AddMessage(Guid id, [FromBody] AddMessageRequest req)
+    public async Task<IActionResult> AddMessage(Guid id, [FromBody] AddMessageRequest req, CancellationToken cancellationToken = default)
     {
-        if (!await _db.Conversations.AnyAsync(c => c.Id == id)) return NotFound("Conversation not found");
+        if (!await _db.Conversations.AnyAsync(c => c.Id == id, cancellationToken)) return NotFound("Conversation not found");
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var userId)) return Unauthorized();
 
         if (req.Role == ChatRole.User)
         {
-            var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+            var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
             if (user == null || user.PrimaryPersonaId == null || user.PrimaryPersonaId.Value != req.FromPersonaId)
             {
                 return BadRequest("User-authored messages must use the user's primary persona.");
@@ -271,7 +267,7 @@ public class ConversationsController : ControllerBase
         var fromAgentId = await _db.Agents.AsNoTracking()
             .Where(a => a.PersonaId == req.FromPersonaId)
             .Select(a => a.Id)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
         var msg = new ConversationMessage
         {
             ConversationId = id,
@@ -285,7 +281,7 @@ public class ConversationsController : ControllerBase
             Metatype = req.Metatype
         };
         _db.ConversationMessages.Add(msg);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         // Initialize version 0
         var versionEntity = new ConversationMessageVersion
         {
@@ -296,16 +292,16 @@ public class ConversationsController : ControllerBase
         };
         _db.ConversationMessageVersions.Add(versionEntity);
         msg.ActiveVersionIndex = 0;
-        await _db.SaveChangesAsync();
-        await _hub.Clients.Group(id.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = id, MessageId = msg.Id, Content = versionEntity.Content, VersionIndex = versionEntity.VersionIndex });
+        await _db.SaveChangesAsync(cancellationToken);
+        await _hub.Clients.Group(id.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = id, MessageId = msg.Id, Content = versionEntity.Content, VersionIndex = versionEntity.VersionIndex }, cancellationToken);
         // Mark conversation as updated
         try
         {
-            var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id);
+            var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
             if (conv != null)
             {
                 conv.UpdatedAtUtc = DateTime.UtcNow;
-                await _db.SaveChangesAsync();
+                await _db.SaveChangesAsync(cancellationToken);
             }
         }
         catch { }
@@ -313,12 +309,11 @@ public class ConversationsController : ControllerBase
     }
 
     [HttpPost("{conversationId:guid}/messages/{messageId:guid}/versions")]
-    [Authorize]
-    public async Task<IActionResult> AddVersion(Guid conversationId, Guid messageId, [FromBody] AddVersionRequest req)
+    public async Task<IActionResult> AddVersion(Guid conversationId, Guid messageId, [FromBody] AddVersionRequest req, CancellationToken cancellationToken = default)
     {
-        var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId);
+        var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId, cancellationToken);
         if (msg == null) return NotFound();
-        var maxIndex = await _db.ConversationMessageVersions.Where(v => v.ConversationMessageId == messageId).Select(v => (int?)v.VersionIndex).MaxAsync() ?? -1;
+        var maxIndex = await _db.ConversationMessageVersions.Where(v => v.ConversationMessageId == messageId).Select(v => (int?)v.VersionIndex).MaxAsync(cancellationToken) ?? -1;
         var next = maxIndex + 1;
         var v = new ConversationMessageVersion
         {
@@ -330,23 +325,22 @@ public class ConversationsController : ControllerBase
         _db.ConversationMessageVersions.Add(v);
         msg.ActiveVersionIndex = next;
         msg.Content = req.Content;
-        await _db.SaveChangesAsync();
-        await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = conversationId, MessageId = messageId, Content = v.Content, VersionIndex = next });
+        await _db.SaveChangesAsync(cancellationToken);
+        await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = conversationId, MessageId = messageId, Content = v.Content, VersionIndex = next }, cancellationToken);
         return Ok(new { msg.Id, VersionIndex = next });
     }
 
     [HttpPatch("{conversationId:guid}/messages/{messageId:guid}/active-version")]
-    [Authorize]
-    public async Task<IActionResult> SetActiveVersion(Guid conversationId, Guid messageId, [FromBody] SetActiveVersionRequest req)
+    public async Task<IActionResult> SetActiveVersion(Guid conversationId, Guid messageId, [FromBody] SetActiveVersionRequest req, CancellationToken cancellationToken = default)
     {
-        var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId);
+        var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId, cancellationToken);
         if (msg == null) return NotFound();
-        var target = await _db.ConversationMessageVersions.AsNoTracking().FirstOrDefaultAsync(v => v.ConversationMessageId == messageId && v.VersionIndex == req.Index);
+        var target = await _db.ConversationMessageVersions.AsNoTracking().FirstOrDefaultAsync(v => v.ConversationMessageId == messageId && v.VersionIndex == req.Index, cancellationToken);
         if (target == null) return BadRequest("Version index not found");
         msg.ActiveVersionIndex = req.Index;
         msg.Content = target.Content;
-        await _db.SaveChangesAsync();
-        await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantActiveVersionChanged", new { ConversationId = conversationId, MessageId = messageId, VersionIndex = req.Index });
+        await _db.SaveChangesAsync(cancellationToken);
+        await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantActiveVersionChanged", new { ConversationId = conversationId, MessageId = messageId, VersionIndex = req.Index }, cancellationToken);
         return Ok(new { msg.Id, msg.ActiveVersionIndex });
     }
 }

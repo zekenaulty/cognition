@@ -349,6 +349,9 @@ dotnet ef database update \
 
 ### Security Notes
 
+- Controllers and SignalR hubs require named authorization policies (`AuthorizationPolicies`). Use the provided constants (`AuthenticatedUser`, `ViewerOrHigher`, `UserOrHigher`, `AdministratorOnly`) instead of anonymous `[Authorize]` attributes so access stays consistent across the API.
+- Rate limiting and request guardrails live under `ApiRateLimiting` in `appsettings`. `MaxRequestBodyBytes` caps payload size, and controllers propagate the ASP.NET `CancellationToken` through EF/database calls and tool dispatch so cancelled requests stop work promptly.
+
 - Set `JWT__Secret` in Production; the dev fallback secret is rejected in Production
 - The Hangfire dashboard is unrestricted in Development and local-only in Production
 - Tool execution logs redact common secret-shaped values (apiKey, token, password, secret, authorization)

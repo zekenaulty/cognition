@@ -1,14 +1,17 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Cognition.Api.Infrastructure.Security;
 using Cognition.Clients.Images;
 using Cognition.Data.Relational;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.UserOrHigher)]
 [ApiController]
 [Route("api/images")]
 public class ImagesController : ControllerBase
@@ -24,12 +27,12 @@ public class ImagesController : ControllerBase
         string Provider = "OpenAI", string Model = "dall-e-3");
 
     [HttpPost("generate")]
-    public async Task<IActionResult> Generate([FromBody] GenerateImageRequest req)
+    public async Task<IActionResult> Generate([FromBody] GenerateImageRequest req, CancellationToken cancellationToken = default)
     {
         var style = req.StyleId.HasValue
-            ? await _db.ImageStyles.AsNoTracking().FirstOrDefaultAsync(s => s.Id == req.StyleId.Value)
+            ? await _db.ImageStyles.AsNoTracking().FirstOrDefaultAsync(s => s.Id == req.StyleId.Value, cancellationToken)
             : (!string.IsNullOrWhiteSpace(req.StyleName)
-                ? await _db.ImageStyles.AsNoTracking().FirstOrDefaultAsync(s => s.Name == req.StyleName)
+                ? await _db.ImageStyles.AsNoTracking().FirstOrDefaultAsync(s => s.Name == req.StyleName, cancellationToken)
                 : null);
 
         var p = new ImageParameters(req.Width, req.Height, style?.Name, req.NegativePrompt, req.Steps, req.Guidance, req.Seed, req.Model);
@@ -38,16 +41,16 @@ public class ImagesController : ControllerBase
         if (style != null)
         {
             asset.StyleId = style.Id;
-            await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync(cancellationToken);
         }
         return Ok(new { asset.Id });
     }
 
     [AllowAnonymous]
     [HttpGet("{id:guid}")]
-    public async Task<IActionResult> Get(Guid id)
+    public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken = default)
     {
-        var a = await _db.ImageAssets.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+        var a = await _db.ImageAssets.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (a == null) return NotFound();
         return File(a.Bytes, a.MimeType);
     }
@@ -55,26 +58,25 @@ public class ImagesController : ControllerBase
     // Querystring-friendly variant for use in <img src="..."> tags
     [AllowAnonymous]
     [HttpGet("content")]
-    public async Task<IActionResult> ContentById([FromQuery] Guid id)
+    public async Task<IActionResult> ContentById([FromQuery] Guid id, CancellationToken cancellationToken = default)
     {
-        var a = await _db.ImageAssets.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+        var a = await _db.ImageAssets.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (a == null) return NotFound();
         return File(a.Bytes, a.MimeType);
     }
 
     [HttpGet("by-conversation/{conversationId:guid}")]
-    [Authorize]
-    public async Task<IActionResult> ListByConversation(Guid conversationId)
+    public async Task<IActionResult> ListByConversation(Guid conversationId, CancellationToken cancellationToken = default)
     {
         // Verify caller can see this conversation (participant or author)
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
-        var linkedIds = await _db.UserPersonas.AsNoTracking().Where(up => up.UserId == caller).Select(up => up.PersonaId).ToListAsync();
-        var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync();
+        var linkedIds = await _db.UserPersonas.AsNoTracking().Where(up => up.UserId == caller).Select(up => up.PersonaId).ToListAsync(cancellationToken);
+        var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync(cancellationToken);
         var allowedPersonaIds = new HashSet<Guid>(linkedIds);
         if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
-        var participants = await _db.ConversationParticipants.AsNoTracking().Where(p => p.ConversationId == conversationId).Select(p => p.PersonaId).ToListAsync();
-        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == conversationId && m.CreatedByUserId == caller);
+        var participants = await _db.ConversationParticipants.AsNoTracking().Where(p => p.ConversationId == conversationId).Select(p => p.PersonaId).ToListAsync(cancellationToken);
+        var userHasMsg = await _db.ConversationMessages.AsNoTracking().AnyAsync(m => m.ConversationId == conversationId && m.CreatedByUserId == caller, cancellationToken);
         var allowed = userHasMsg || participants.Any(pid => allowedPersonaIds.Contains(pid));
         if (!allowed) return Forbid();
 
@@ -82,25 +84,24 @@ public class ImagesController : ControllerBase
             .Where(x => x.ConversationId == conversationId)
             .OrderByDescending(x => x.CreatedAtUtc)
             .Select(x => new { x.Id, x.Provider, x.Model, x.Width, x.Height, x.MimeType, x.CreatedAtUtc, x.StyleId, x.Prompt, StyleName = x.Style != null ? x.Style.Name : null })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     [HttpGet("by-persona/{personaId:guid}")]
-    [Authorize]
-    public async Task<IActionResult> ListByPersona(Guid personaId)
+    public async Task<IActionResult> ListByPersona(Guid personaId, CancellationToken cancellationToken = default)
     {
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
         var isAdmin = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator);
-        var linkedIds = await _db.UserPersonas.AsNoTracking().Where(up => up.UserId == caller).Select(up => up.PersonaId).ToListAsync();
-        var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync();
+        var linkedIds = await _db.UserPersonas.AsNoTracking().Where(up => up.UserId == caller).Select(up => up.PersonaId).ToListAsync(cancellationToken);
+        var primaryId = await _db.Users.AsNoTracking().Where(u => u.Id == caller).Select(u => u.PrimaryPersonaId).FirstOrDefaultAsync(cancellationToken);
         var allowedPersonaIds = new HashSet<Guid>(linkedIds);
         if (primaryId.HasValue) allowedPersonaIds.Add(primaryId.Value);
         Guid? defaultSystemId = await _db.Personas.AsNoTracking()
             .Where(p => p.OwnedBy == Cognition.Data.Relational.Modules.Personas.OwnedBy.System && p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.Assistant)
-            .Select(p => (Guid?)p.Id).FirstOrDefaultAsync();
+            .Select(p => (Guid?)p.Id).FirstOrDefaultAsync(cancellationToken);
 
         var isDefaultSystem = defaultSystemId.HasValue && personaId == defaultSystemId.Value;
         if (!(allowedPersonaIds.Contains(personaId) || (isAdmin && isDefaultSystem)))
@@ -118,7 +119,7 @@ public class ImagesController : ControllerBase
         var items = await q
             .OrderByDescending(x => x.CreatedAtUtc)
             .Select(x => new { x.Id, x.Provider, x.Model, x.Width, x.Height, x.MimeType, x.CreatedAtUtc, x.StyleId, x.ConversationId })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok(items);
     }
 }

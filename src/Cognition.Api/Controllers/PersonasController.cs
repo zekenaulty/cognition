@@ -1,15 +1,18 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Users;
+using Cognition.Api.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.UserOrHigher)]
 [ApiController]
 [Route("api/personas")]
 public class PersonasController : ControllerBase
@@ -44,8 +47,7 @@ public class PersonasController : ControllerBase
     
     // Returns all personas with an IsOwner flag for the current user
     [HttpGet("with-ownership")]
-    [Authorize]
-    public async Task<IActionResult> ListWithOwnership([FromQuery] bool? publicOnly)
+    public async Task<IActionResult> ListWithOwnership([FromQuery] bool? publicOnly, CancellationToken cancellationToken = default)
     {
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
@@ -64,40 +66,38 @@ public class PersonasController : ControllerBase
                 p.OwnedBy,
                 IsOwner = _db.UserPersonas.Any(up => up.UserId == caller && up.PersonaId == p.Id && up.IsOwner)
             })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     // Returns personas owned by the system
     [HttpGet("system")]
-    [Authorize(Roles = nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator))]
-    public async Task<IActionResult> ListSystem([FromQuery] bool? publicOnly)
+    [Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
+    public async Task<IActionResult> ListSystem([FromQuery] bool? publicOnly, CancellationToken cancellationToken = default)
     {
         var q = _db.Personas.AsNoTracking().Where(p => p.OwnedBy == OwnedBy.System);
         if (publicOnly == true) q = q.Where(p => p.IsPublic);
         var items = await q
             .OrderBy(p => p.Name)
             .Select(p => new { p.Id, p.Name, p.Nickname, p.Role, p.IsPublic, p.Type, p.OwnedBy })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     // Returns the default system assistant persona (minimal), available to all authenticated users
     [HttpGet("default-assistant")]
-    [Authorize]
-    public async Task<IActionResult> GetDefaultAssistant()
+    public async Task<IActionResult> GetDefaultAssistant(CancellationToken cancellationToken = default)
     {
         var p = await _db.Personas.AsNoTracking()
             .Where(x => x.OwnedBy == OwnedBy.System && x.Type == PersonaType.Assistant)
             .OrderBy(x => x.Name)
             .Select(x => new { x.Id, x.Name })
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
         if (p == null) return NotFound();
         return Ok(p);
     }
     [HttpGet]
-    [Authorize]
-    public async Task<IActionResult> List([FromQuery] bool? publicOnly)
+    public async Task<IActionResult> List([FromQuery] bool? publicOnly, CancellationToken cancellationToken = default)
     {
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
@@ -107,11 +107,11 @@ public class PersonasController : ControllerBase
         var linkedIds = await _db.UserPersonas.AsNoTracking()
             .Where(up => up.UserId == caller)
             .Select(up => up.PersonaId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         var primaryId = await _db.Users.AsNoTracking()
             .Where(u => u.Id == caller)
             .Select(u => u.PrimaryPersonaId)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
 
         var ids = new HashSet<Guid>(linkedIds);
         if (primaryId.HasValue) ids.Add(primaryId.Value);
@@ -122,106 +122,138 @@ public class PersonasController : ControllerBase
         var items = await q
             .OrderBy(p => p.Name)
             .Select(p => new { p.Id, p.Name, p.Nickname, p.Role, p.IsPublic, p.Type })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok(items);
     }
 
-    [HttpPatch("{id:guid}")]
-    [Authorize(Roles = nameof(Cognition.Data.Relational.Modules.Users.UserRole.User) + "," + nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator))]
-    public async Task<IActionResult> Update(Guid id, [FromBody] PersonaUpdateRequest req)
+[HttpPatch("{id:guid}")]
+public async Task<IActionResult> Update(Guid id, [FromBody] PersonaUpdateRequest req, CancellationToken cancellationToken = default)
+{
+    var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    if (p == null) return NotFound();
+    // Only owner or admin may edit
+    var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    if (!Guid.TryParse(sub, out var caller)) return Forbid();
+
+    var canEdit = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
+        || (p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
+            .AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner, cancellationToken));
+    if (!canEdit) return Forbid();
+
+    var isAdmin = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator);
+    var isOwner = p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
+        .AnyAsync(up => up.PersonaId == id && up.UserId == caller && up.IsOwner, cancellationToken);
+
+    // Allow non-owners to update Voice only if they have a user-persona link
+    var voiceOnly =
+        req.Name == null &&
+        req.Nickname == null &&
+        req.Role == null &&
+        req.Gender == null &&
+        req.Essence == null &&
+        req.Beliefs == null &&
+        req.Background == null &&
+        req.CommunicationStyle == null &&
+        req.EmotionalDrivers == null &&
+        req.SignatureTraits == null &&
+        req.NarrativeThemes == null &&
+        req.DomainExpertise == null &&
+        !req.IsPublic.HasValue &&
+        req.Voice != null;
+
+    if (!isOwner && !isAdmin)
     {
-        var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id);
-        if (p == null) return NotFound();
-        // Only owner or admin may edit
-        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (!Guid.TryParse(sub, out var caller)) return Forbid(); var can = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator) || (p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner)); if (!can) return Forbid();
-
-        var isAdmin = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator);
-        var isOwner = p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.PersonaId == id && up.UserId == caller && up.IsOwner);
-
-        // Allow non-owners to update Voice only if they have a user-persona link
-        var voiceOnly =
-            req.Name == null &&
-            req.Nickname == null &&
-            req.Role == null &&
-            req.Gender == null &&
-            req.Essence == null &&
-            req.Beliefs == null &&
-            req.Background == null &&
-            req.CommunicationStyle == null &&
-            req.EmotionalDrivers == null &&
-            req.SignatureTraits == null &&
-            req.NarrativeThemes == null &&
-            req.DomainExpertise == null &&
-            !req.IsPublic.HasValue &&
-            req.Voice != null;
-
-        if (!isOwner && !isAdmin)
+        if (voiceOnly)
         {
-            if (voiceOnly)
-            {
-                var allow = p.IsPublic || await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == caller && up.PersonaId == id);
-                if (!allow) return Forbid();
-                p.Voice = req.Voice ?? p.Voice;
-                p.UpdatedAtUtc = DateTime.UtcNow;
-                await _db.SaveChangesAsync();
-                return NoContent();
-            }
-            return Forbid();
+            var allow = p.IsPublic || await _db.UserPersonas.AsNoTracking()
+                .AnyAsync(up => up.UserId == caller && up.PersonaId == id, cancellationToken);
+            if (!allow) return Forbid();
+            p.Voice = req.Voice ?? p.Voice;
+            p.UpdatedAtUtc = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return NoContent();
         }
-        if (req.Name != null) p.Name = req.Name;
-        if (req.Nickname != null) p.Nickname = req.Nickname;
-        if (req.Role != null) p.Role = req.Role;
-        if (req.Gender != null) p.Gender = req.Gender;
-        if (req.Essence != null) p.Essence = req.Essence;
-        if (req.Beliefs != null) p.Beliefs = req.Beliefs;
-        if (req.Background != null) p.Background = req.Background;
-        if (req.CommunicationStyle != null) p.CommunicationStyle = req.CommunicationStyle;
-        if (req.EmotionalDrivers != null) p.EmotionalDrivers = req.EmotionalDrivers;
-        if (req.SignatureTraits != null) p.SignatureTraits = req.SignatureTraits;
-        if (req.NarrativeThemes != null) p.NarrativeThemes = req.NarrativeThemes;
-        if (req.DomainExpertise != null) p.DomainExpertise = req.DomainExpertise;
-        if (req.IsPublic.HasValue) p.IsPublic = req.IsPublic.Value;
-        if (req.Voice != null) p.Voice = req.Voice;
-        // Persona type guards:
-        // - Never allow setting type to User via update
-        // - If persona is already User, its type is locked and cannot change
-        if (req.Type.HasValue)
-        {
-            if (req.Type.Value == Cognition.Data.Relational.Modules.Personas.PersonaType.User)
-                return BadRequest("Cannot change persona type to User.");
-            if (p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.User && req.Type.Value != Cognition.Data.Relational.Modules.Personas.PersonaType.User)
-                return BadRequest("User persona type is locked and cannot be changed.");
-            p.Type = req.Type.Value;
-        }
-        p.UpdatedAtUtc = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-        return NoContent();
+        return Forbid();
     }
-
-    [HttpDelete("{id:guid}")]
-    [Authorize(Roles = nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator))]
-    public async Task<IActionResult> Delete(Guid id)
+    if (req.Name != null) p.Name = req.Name;
+    if (req.Nickname != null) p.Nickname = req.Nickname;
+    if (req.Role != null) p.Role = req.Role;
+    if (req.Gender != null) p.Gender = req.Gender;
+    if (req.Essence != null) p.Essence = req.Essence;
+    if (req.Beliefs != null) p.Beliefs = req.Beliefs;
+    if (req.Background != null) p.Background = req.Background;
+    if (req.CommunicationStyle != null) p.CommunicationStyle = req.CommunicationStyle;
+    if (req.EmotionalDrivers != null) p.EmotionalDrivers = req.EmotionalDrivers;
+    if (req.SignatureTraits != null) p.SignatureTraits = req.SignatureTraits;
+    if (req.NarrativeThemes != null) p.NarrativeThemes = req.NarrativeThemes;
+    if (req.DomainExpertise != null) p.DomainExpertise = req.DomainExpertise;
+    if (req.IsPublic.HasValue) p.IsPublic = req.IsPublic.Value;
+    if (req.Voice != null) p.Voice = req.Voice;
+    // Persona type guards:
+    // - Never allow setting type to User via update
+    // - If persona is already User, its type is locked and cannot change
+    if (req.Type.HasValue)
     {
-        var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id);
-        if (p == null) return NotFound();
-        _db.Personas.Remove(p);
-        await _db.SaveChangesAsync();
-        return NoContent();
+        if (req.Type.Value == Cognition.Data.Relational.Modules.Personas.PersonaType.User)
+            return BadRequest("Cannot change persona type to User.");
+        if (p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.User && req.Type.Value != Cognition.Data.Relational.Modules.Personas.PersonaType.User)
+            return BadRequest("User persona type is locked and cannot be changed.");
+        p.Type = req.Type.Value;
     }
+    p.UpdatedAtUtc = DateTime.UtcNow;
+    await _db.SaveChangesAsync(cancellationToken);
+    return NoContent();
+}
 
-    [HttpGet("{id:guid}")]
-    public async Task<IActionResult> Get(Guid id)
+[HttpDelete("{id:guid}")]
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
+public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
+{
+    var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    if (p == null) return NotFound();
+    _db.Personas.Remove(p);
+    await _db.SaveChangesAsync(cancellationToken);
+    return NoContent();
+}
+
+[HttpGet("{id:guid}")]
+public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken = default)
+{
+    var p = await _db.Personas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    if (p == null) return NotFound();
+    var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    var isOwner = false;
+    if (Guid.TryParse(sub, out var caller) && p.OwnedBy == OwnedBy.User)
     {
-        var p = await _db.Personas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
-        if (p == null) return NotFound();
-        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value; Guid caller; bool isOwner = Guid.TryParse(sub, out caller) && p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner); return Ok(new { p.Id, p.Name, p.Nickname, p.Role, p.Gender, p.Essence, p.Beliefs, p.Background, p.CommunicationStyle, p.EmotionalDrivers, p.SignatureTraits, p.NarrativeThemes, p.DomainExpertise, p.IsPublic, p.Voice, p.Type, p.OwnedBy, IsOwner = isOwner });
+        isOwner = await _db.UserPersonas.AsNoTracking()
+            .AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner, cancellationToken);
     }
+    return Ok(new
+    {
+        p.Id,
+        p.Name,
+        p.Nickname,
+        p.Role,
+        p.Gender,
+        p.Essence,
+        p.Beliefs,
+        p.Background,
+        p.CommunicationStyle,
+        p.EmotionalDrivers,
+        p.SignatureTraits,
+        p.NarrativeThemes,
+        p.DomainExpertise,
+        p.IsPublic,
+        p.Voice,
+        p.Type,
+        p.OwnedBy,
+        IsOwner = isOwner
+    });
+}
 
     [HttpPost]
-    [Authorize(Roles = nameof(Cognition.Data.Relational.Modules.Users.UserRole.User) + "," + nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator))]
-    public async Task<IActionResult> Create([FromBody] PersonaCreateRequest req)
+    public async Task<IActionResult> Create([FromBody] PersonaCreateRequest req, CancellationToken cancellationToken = default)
     {
         var p = new Persona
         {
@@ -256,48 +288,58 @@ public class PersonasController : ControllerBase
             }
         }
         _db.Personas.Add(p);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         // If owned by user, mark link as owner
         if (p.OwnedBy == OwnedBy.User && Guid.TryParse(sub, out var creator))
         {
-            var link = await _db.UserPersonas.FirstOrDefaultAsync(up => up.UserId == creator && up.PersonaId == p.Id);
+            var link = await _db.UserPersonas.FirstOrDefaultAsync(up => up.UserId == creator && up.PersonaId == p.Id, cancellationToken);
             if (link == null)
+            {
                 _db.UserPersonas.Add(new UserPersonas { UserId = creator, PersonaId = p.Id, IsDefault = false, IsOwner = true, CreatedAtUtc = DateTime.UtcNow });
+            }
             else
             {
                 link.IsOwner = true;
                 link.UpdatedAtUtc = DateTime.UtcNow;
             }
-            await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync(cancellationToken);
         }
         return CreatedAtAction(nameof(Get), new { id = p.Id }, new { p.Id });
     }
 
     [HttpPatch("{id:guid}/visibility")]
-    public async Task<IActionResult> SetVisibility(Guid id, [FromBody] VisibilityRequest req)
+    public async Task<IActionResult> SetVisibility(Guid id, [FromBody] VisibilityRequest req, CancellationToken cancellationToken = default)
     {
-        var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id);
+        var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (p == null) return NotFound();
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (!Guid.TryParse(sub, out var caller)) return Forbid(); var can = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator) || (p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner)); if (!can) return Forbid();
+        if (!Guid.TryParse(sub, out var caller)) return Forbid();
+        var can = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
+                  || (p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
+                      .AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner, cancellationToken));
+        if (!can) return Forbid();
         p.IsPublic = req.IsPublic;
         p.UpdatedAtUtc = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
 
     [HttpPost("{id:guid}/access")]
-    public async Task<IActionResult> GrantAccess(Guid id, [FromBody] GrantAccessRequest req)
+    public async Task<IActionResult> GrantAccess(Guid id, [FromBody] GrantAccessRequest req, CancellationToken cancellationToken = default)
     {
-        if (!await _db.Personas.AnyAsync(p => p.Id == id)) return NotFound("Persona not found");
-        if (!await _db.Users.AnyAsync(u => u.Id == req.UserId)) return NotFound("User not found");
-        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id);
+        if (!await _db.Personas.AnyAsync(p => p.Id == id, cancellationToken)) return NotFound("Persona not found");
+        if (!await _db.Users.AnyAsync(u => u.Id == req.UserId, cancellationToken)) return NotFound("User not found");
+        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id, cancellationToken);
         var sub2 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role2 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (!Guid.TryParse(sub2, out var caller2)) return Forbid(); var canAccess = role2 == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator) || (persona.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == caller2 && up.PersonaId == id && up.IsOwner)); if (!canAccess) return Forbid();
+        if (!Guid.TryParse(sub2, out var caller2)) return Forbid();
+        var canAccess = role2 == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
+                        || (persona.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
+                            .AnyAsync(up => up.UserId == caller2 && up.PersonaId == id && up.IsOwner, cancellationToken));
+        if (!canAccess) return Forbid();
 
-        var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == req.UserId && x.PersonaId == id);
+        var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == req.UserId && x.PersonaId == id, cancellationToken);
         if (link == null)
         {
             link = new UserPersonas { UserId = req.UserId, PersonaId = id, IsDefault = req.IsDefault, Label = req.Label };
@@ -309,21 +351,25 @@ public class PersonasController : ControllerBase
             link.Label = req.Label;
             link.UpdatedAtUtc = DateTime.UtcNow;
         }
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { link.Id });
     }
 
     [HttpDelete("{id:guid}/access/{userId:guid}")]
-    public async Task<IActionResult> RevokeAccess(Guid id, Guid userId)
+    public async Task<IActionResult> RevokeAccess(Guid id, Guid userId, CancellationToken cancellationToken = default)
     {
-        var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == userId && x.PersonaId == id);
+        var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == userId && x.PersonaId == id, cancellationToken);
         if (link == null) return NotFound();
-        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id);
+        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id, cancellationToken);
         var sub3 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role3 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (!Guid.TryParse(sub3, out var caller3)) return Forbid(); var canAccess3 = role3 == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator) || (persona.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == caller3 && up.PersonaId == id && up.IsOwner)); if (!canAccess3) return Forbid();
+        if (!Guid.TryParse(sub3, out var caller3)) return Forbid();
+        var canAccess3 = role3 == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
+                         || (persona.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
+                             .AnyAsync(up => up.UserId == caller3 && up.PersonaId == id && up.IsOwner, cancellationToken));
+        if (!canAccess3) return Forbid();
         _db.UserPersonas.Remove(link);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
 }

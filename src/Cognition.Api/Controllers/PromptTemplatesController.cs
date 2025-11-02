@@ -2,14 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Prompts;
+using Microsoft.AspNetCore.Authorization;
+using Cognition.Api.Infrastructure.Security;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/prompt-templates")]
 public class PromptTemplatesController : ControllerBase
@@ -21,14 +25,14 @@ public class PromptTemplatesController : ControllerBase
     public record PatchRequest(string? Name, string? Template, string? PromptType, object? Tokens, string? Example, bool? IsActive);
 
     [HttpGet]
-    public async Task<IActionResult> List()
+    public async Task<IActionResult> List(CancellationToken cancellationToken = default)
     {
-        var items = await _db.PromptTemplates.AsNoTracking().OrderBy(t => t.Name).ToListAsync();
+        var items = await _db.PromptTemplates.AsNoTracking().OrderBy(t => t.Name).ToListAsync(cancellationToken);
         return Ok(items);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateRequest req)
+    public async Task<IActionResult> Create([FromBody] CreateRequest req, CancellationToken cancellationToken = default)
     {
         if (!Enum.TryParse<Cognition.Data.Relational.Modules.Common.PromptType>(req.PromptType, true, out var kind)) kind = Cognition.Data.Relational.Modules.Common.PromptType.None;
         var t = new PromptTemplate
@@ -42,14 +46,14 @@ public class PromptTemplatesController : ControllerBase
             CreatedAtUtc = DateTime.UtcNow
         };
         _db.PromptTemplates.Add(t);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return Ok(new { t.Id });
     }
 
     [HttpPatch("{id:guid}")]
-    public async Task<IActionResult> Patch(Guid id, [FromBody] PatchRequest req)
+    public async Task<IActionResult> Patch(Guid id, [FromBody] PatchRequest req, CancellationToken cancellationToken = default)
     {
-        var t = await _db.PromptTemplates.FirstOrDefaultAsync(x => x.Id == id);
+        var t = await _db.PromptTemplates.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (t == null) return NotFound();
         t.Name = req.Name ?? t.Name;
         t.Template = req.Template ?? t.Template;
@@ -58,17 +62,17 @@ public class PromptTemplatesController : ControllerBase
         t.Example = req.Example ?? t.Example;
         if (req.IsActive.HasValue) t.IsActive = req.IsActive.Value;
         t.UpdatedAtUtc = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
-        var t = await _db.PromptTemplates.FirstOrDefaultAsync(x => x.Id == id);
+        var t = await _db.PromptTemplates.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (t == null) return NotFound();
         _db.PromptTemplates.Remove(t);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
 }
 

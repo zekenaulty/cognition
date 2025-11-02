@@ -1,8 +1,11 @@
 using Cognition.Api.Infrastructure.OpenSearch;
+using Cognition.Api.Infrastructure.Security;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/diagnostics/opensearch")]
 public sealed class OpenSearchDiagnosticsController : ControllerBase

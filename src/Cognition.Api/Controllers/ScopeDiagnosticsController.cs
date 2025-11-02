@@ -1,4 +1,6 @@
 using Cognition.Api.Infrastructure.ScopePath;
+using Cognition.Api.Infrastructure.Security;
+using Microsoft.AspNetCore.Authorization;
 using Cognition.Clients.Configuration;
 using Cognition.Clients.Scope;
 using Microsoft.AspNetCore.Mvc;
@@ -6,6 +8,7 @@ using Microsoft.Extensions.Options;
 
 namespace Cognition.Api.Controllers;
 
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/diagnostics/scope")]
 public sealed class ScopeDiagnosticsController : ControllerBase

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Contracts.Events;
 using Cognition.Data.Relational;
@@ -10,6 +11,7 @@ using Cognition.Data.Relational.Modules.Fiction;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
 using Rebus.Handlers;
+using Rebus.Extensions;
 
 namespace Cognition.Jobs
 {
@@ -34,10 +36,11 @@ namespace Cognition.Jobs
         public async Task Handle(PlanRequested message)
         {
             var branchSlug = string.IsNullOrWhiteSpace(message.BranchSlug) ? "main" : message.BranchSlug.Trim();
+            var cancellationToken = Rebus.Pipeline.MessageContext.Current?.GetCancellationToken() ?? CancellationToken.None;
 
             var conversation = await _db.Conversations
                 .Include(c => c.Agent)
-                .FirstOrDefaultAsync(c => c.Id == message.ConversationId)
+                .FirstOrDefaultAsync(c => c.Id == message.ConversationId, cancellationToken)
                 .ConfigureAwait(false);
             if (conversation is null)
             {
@@ -51,7 +54,7 @@ namespace Cognition.Jobs
 
             var fictionPlan = await _db.Set<FictionPlan>()
                 .Include(p => p.FictionProject)
-                .FirstOrDefaultAsync(p => p.Id == message.FictionPlanId)
+                .FirstOrDefaultAsync(p => p.Id == message.FictionPlanId, cancellationToken)
                 .ConfigureAwait(false);
             if (fictionPlan is null)
             {
@@ -102,7 +105,7 @@ namespace Cognition.Jobs
             }
 
             _db.ConversationPlans.Add(conversationPlan);
-            await _db.SaveChangesAsync().ConfigureAwait(false);
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
             await _logger.LogAsync(message.ConversationId, nameof(PlanRequested), JObject.FromObject(new
             {
@@ -131,6 +134,7 @@ namespace Cognition.Jobs
                 branchSlug,
                 metadata);
 
+            cancellationToken.ThrowIfCancellationRequested();
             await _bus.Publish(planReady).ConfigureAwait(false);
         }
 

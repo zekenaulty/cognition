@@ -284,6 +284,72 @@ public class ToolDispatcherScopeTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_propagates_cancellation_from_tool_context()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new ToolDispatcherDbContext(options);
+        var toolId = Guid.NewGuid();
+        var classPath = ToolClassPath<TestScopeTool>();
+
+        db.Tools.Add(new Tool
+        {
+            Id = toolId,
+            Name = "cancel-test",
+            ClassPath = classPath,
+            Parameters = new List<ToolParameter>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    ToolId = toolId,
+                    Name = "providerId",
+                    Type = "guid",
+                    Direction = ToolParamDirection.Input,
+                    Required = false
+                },
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    ToolId = toolId,
+                    Name = "modelId",
+                    Type = "guid",
+                    Direction = ToolParamDirection.Input,
+                    Required = false
+                }
+            }
+        });
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection()
+            .AddSingleton<TestScopeTool>()
+            .AddSingleton<ITool>(sp => sp.GetRequiredService<TestScopeTool>())
+            .BuildServiceProvider();
+
+        var registry = new SingleToolRegistry(classPath, typeof(TestScopeTool));
+        var dispatcher = new ToolDispatcher(
+            db,
+            services,
+            registry,
+            NullLogger<ToolDispatcher>.Instance,
+            new ScopePathBuilder(),
+            new AllowAllPlannerQuotaService(),
+            new SpyPlannerTelemetry());
+
+        var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        var ctx = new ToolContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), services, cancelled.Token);
+
+        Func<Task> act = async () =>
+            await dispatcher.ExecuteAsync(toolId, ctx, new Dictionary<string, object?>(), log: false);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task ExecutePlannerAsync_emits_failure_telemetry_on_exception()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()

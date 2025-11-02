@@ -11,9 +11,9 @@
 
 ## Priority Action Stack
 
-1. Implement API rate limiting, per-persona/agent quotas, request size caps, and cancellation propagation (global + principal limiters in place; audit remaining CT usage) (plans/alpha_security_observability_hardening.md, src/Cognition.Api/*).
+1. Implement API rate limiting, per-persona/agent quotas, request size caps, and cancellation propagation (global + principal limiters + controller/JWT cancellation wiring landed; follow through on downstream jobs/clients + regression tests) (plans/alpha_security_observability_hardening.md, src/Cognition.Api/*).
 2. Lock ScopePath construction behind the shared factory and block direct `new ScopePath` usage (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
-3. Define and test authorization policies + planner token budgets; emit throttling telemetry and wire structured correlation logging (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
+3. Wire structured correlation logging now that planner quotas and authorization policies are in place (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
 4. Catalogue non-fiction planners and adjacent orchestrators that should adopt PlannerBase; capture template prerequisites and scope expectations (plans/planning_the_planner.md:184, plans/_next_session_prompt.md:10-13, plans/scope_token_path_refactor.md:25-45).
 5. Draft the non-fiction migration matrix and seed checklist updates in plans/planning_the_planner_rollout_recipe.md to cover non-fiction specifics (plans/planning_the_planner_rollout_recipe.md, plans/planning_the_planner.md:189-195).
 6. Identify and remove remaining legacy runner scaffolding/tests that duplicate PlannerBase functionality; update CI/lint gates to enforce scripted pipeline coverage (plans/_next_session_prompt.md:11-13, plans/planning_the_planner.md:185).

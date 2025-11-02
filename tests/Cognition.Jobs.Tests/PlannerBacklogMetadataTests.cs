@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Contracts.Events;
@@ -666,6 +667,71 @@ namespace Cognition.Jobs.Tests
         published.Error.Should().Contain("Max iterations");
         published.Metadata.Should().ContainKey("quotaLimit");
         published.Metadata!["quotaLimit"].Should().Be("MaxIterations");
+    }
+
+    [Fact]
+    public async Task ToolExecutionHandler_skips_quota_telemetry_when_cancellation_requested()
+    {
+        await using var db = CreateDbContext();
+        var planId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var task = SeedConversationTask(db, planId, 2, "fiction.weaver.iterativePlanner", conversationId, new Dictionary<string, object?>
+        {
+            ["planId"] = planId,
+            ["agentId"] = agentId,
+            ["conversationId"] = conversationId,
+            ["providerId"] = Guid.NewGuid(),
+            ["iterationIndex"] = 1
+        });
+
+        var dispatcher = Substitute.For<IToolDispatcher>();
+        var weaverJobs = Substitute.For<IFictionWeaverJobClient>();
+        var bus = Substitute.For<IBus>();
+        var quotaService = Substitute.For<IPlannerQuotaService>();
+        var telemetry = Substitute.For<IPlannerTelemetry>();
+
+        var handler = new ToolExecutionHandler(
+            db,
+            dispatcher,
+            weaverJobs,
+            new ServiceCollection().BuildServiceProvider(),
+            bus,
+            new WorkflowEventLogger(db, false),
+            quotaService,
+            telemetry);
+
+        var method = typeof(ToolExecutionHandler).GetMethod("HandlePlannerQuotaExceededAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        method.Should().NotBeNull();
+
+        var args = new Dictionary<string, object?>();
+        var metadata = new Dictionary<string, object?>();
+        var decision = PlannerQuotaDecision.Blocked(PlannerQuotaLimit.MaxIterations, 1, "Max iterations reached");
+
+        var request = new ToolExecutionRequested(
+            conversationId,
+            agentId,
+            Guid.NewGuid(),
+            "fiction.weaver.iterativePlanner",
+            args,
+            task.ConversationPlanId,
+            task.StepNumber,
+            planId,
+            "main",
+            metadata);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var invocation = (Task)method!.Invoke(handler, new object[] { request, args, "main", task, metadata, decision, cts.Token })!;
+        await invocation;
+
+        await telemetry.DidNotReceive().PlanThrottledAsync(Arg.Any<PlannerTelemetryContext>(), decision, Arg.Any<CancellationToken>());
+        _ = telemetry.DidNotReceive().PlanRejectedAsync(Arg.Any<PlannerTelemetryContext>(), Arg.Any<PlannerQuotaDecision>(), Arg.Any<CancellationToken>());
+
+        await db.Entry(task).ReloadAsync();
+        task.Status.Should().Be("Throttled");
+        task.Error.Should().Contain("Max iterations");
     }
 
     private sealed class StubPhaseRunner : IFictionPhaseRunner
