@@ -15,6 +15,7 @@ using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Prompts;
+using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -130,7 +131,7 @@ Return minified JSON:
 Ensure backlog entries capture still-needed planner passes rather than a finished story outline.
 Respond with JSON only.";
         var templateRepository = new StubTemplateRepository(template);
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         var tool = new VisionPlannerTool(
             agentService,
             NullLoggerFactory.Instance,
@@ -219,7 +220,7 @@ Existing passes:
 Project details:
 {{description}}";
         var templateRepository = new StubTemplateRepository(template);
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         var tool = new IterativePlannerTool(
             agentService,
             NullLoggerFactory.Instance,
@@ -280,7 +281,7 @@ Project details:
         var transcriptStore = new NullPlannerTranscriptStore();
         var templateRepository = new CountingTemplateRepository("planner.test.shared", "Shared template content.");
         var options = Options.Create(new PlannerCritiqueOptions());
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         var planner = new TemplateCountingPlanner(
             NullLoggerFactory.Instance,
             telemetry,

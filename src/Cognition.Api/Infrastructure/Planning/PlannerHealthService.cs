@@ -149,6 +149,7 @@ public sealed class PlannerHealthService : IPlannerHealthService
 {
     private static readonly TimeSpan StaleBacklogThreshold = TimeSpan.FromHours(2);
     private static readonly TimeSpan RecentFailureWindow = TimeSpan.FromHours(24);
+    private static readonly TimeSpan WorldBibleStaleThreshold = TimeSpan.FromHours(6);
 
     private readonly CognitionDbContext _db;
     private readonly IToolRegistry _toolRegistry;
@@ -190,6 +191,19 @@ public sealed class PlannerHealthService : IPlannerHealthService
         }
 
         var worldBible = await BuildWorldBibleReportAsync(ct).ConfigureAwait(false);
+        var worldBibleIssues = DetectWorldBibleIssues(worldBible);
+        foreach (var issue in worldBibleIssues)
+        {
+            switch (issue.Type)
+            {
+                case WorldBibleIssueType.MissingEntries:
+                    warnings.Add($"Plan '{issue.Plan.PlanName}' has no active world-bible entries.");
+                    break;
+                case WorldBibleIssueType.Stale when issue.Age is TimeSpan age:
+                    warnings.Add($"Plan '{issue.Plan.PlanName}' world-bible is stale ({age:g} since last update).");
+                    break;
+            }
+        }
 
         var telemetry = await BuildTelemetryReportAsync(ct).ConfigureAwait(false);
         if (telemetry.TotalExecutions == 0)
@@ -209,8 +223,13 @@ public sealed class PlannerHealthService : IPlannerHealthService
             warnings.Add($"{tokenExhausted} planner execution(s) exceeded critique token budgets.");
         }
 
-        var alerts = BuildAlerts(plannerReports, backlog, telemetry, generatedAt);
-        var status = DetermineStatus(plannerReports, backlog, telemetry);
+        if (worldBible.Plans.Count == 0)
+        {
+            warnings.Add("No world-bible snapshots have been recorded yet.");
+        }
+
+        var alerts = BuildAlerts(plannerReports, backlog, worldBibleIssues, telemetry, generatedAt);
+        var status = DetermineStatus(plannerReports, backlog, worldBibleIssues, telemetry, alerts);
 
         var report = new PlannerHealthReport(
             GeneratedAtUtc: generatedAt,
@@ -538,7 +557,40 @@ public sealed class PlannerHealthService : IPlannerHealthService
             plans.OrderByDescending(p => p.LastUpdatedUtc ?? DateTime.MinValue).ToList());
     }
 
-private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(CancellationToken ct)
+    private IReadOnlyList<WorldBibleIssue> DetectWorldBibleIssues(PlannerHealthWorldBibleReport report)
+    {
+        if (report.Plans.Count == 0)
+        {
+            return Array.Empty<WorldBibleIssue>();
+        }
+
+        var now = DateTime.UtcNow;
+        var issues = new List<WorldBibleIssue>();
+        foreach (var plan in report.Plans)
+        {
+            if (plan.ActiveEntries.Count == 0)
+            {
+                issues.Add(new WorldBibleIssue(plan, WorldBibleIssueType.MissingEntries, null));
+                continue;
+            }
+
+            if (!plan.LastUpdatedUtc.HasValue)
+            {
+                issues.Add(new WorldBibleIssue(plan, WorldBibleIssueType.MissingEntries, null));
+                continue;
+            }
+
+            var age = now - plan.LastUpdatedUtc.Value;
+            if (age > WorldBibleStaleThreshold)
+            {
+                issues.Add(new WorldBibleIssue(plan, WorldBibleIssueType.Stale, age));
+            }
+        }
+
+        return issues;
+    }
+
+    private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(CancellationToken ct)
     {
         var executions = _db.PlannerExecutions.AsNoTracking();
         var total = await executions.CountAsync(ct).ConfigureAwait(false);
@@ -644,7 +696,9 @@ private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(Cancellatio
     private static PlannerHealthStatus DetermineStatus(
         IReadOnlyList<PlannerHealthPlanner> planners,
         PlannerHealthBacklog backlog,
-        PlannerHealthTelemetry telemetry)
+        IReadOnlyList<WorldBibleIssue> worldBibleIssues,
+        PlannerHealthTelemetry telemetry,
+        IReadOnlyList<PlannerHealthAlert> alerts)
     {
         var hasCriticalTemplateIssue = planners
             .SelectMany(p => p.Steps)
@@ -661,8 +715,10 @@ private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(Cancellatio
         var hasCritiqueAlerts = telemetry.CritiqueStatusCounts.Keys.Any(k =>
             string.Equals(k, "count-exhausted", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(k, "token-exhausted", StringComparison.OrdinalIgnoreCase));
+        var hasWorldBibleIssues = worldBibleIssues.Count > 0;
+        var hasWorldBibleAlerts = alerts.Any(a => a.Id.StartsWith("worldbible:", StringComparison.OrdinalIgnoreCase));
 
-        if (hasDegradedBacklog || hasRecentFailures || hasNoExecutions || hasCritiqueAlerts)
+        if (hasDegradedBacklog || hasRecentFailures || hasNoExecutions || hasCritiqueAlerts || hasWorldBibleIssues || hasWorldBibleAlerts)
         {
             return PlannerHealthStatus.Degraded;
         }
@@ -673,6 +729,7 @@ private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(Cancellatio
     private static IReadOnlyList<PlannerHealthAlert> BuildAlerts(
         IReadOnlyList<PlannerHealthPlanner> planners,
         PlannerHealthBacklog backlog,
+        IReadOnlyList<WorldBibleIssue> worldBibleIssues,
         PlannerHealthTelemetry telemetry,
         DateTime generatedAtUtc)
     {
@@ -735,6 +792,28 @@ private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(Cancellatio
                 PlannerHealthAlertSeverity.Warning,
                 "Backlog item flapping",
                 $"{flap.PlanName} • {flap.BacklogId} returned to pending {flap.PendingCount} time(s) in the latest window.");
+        }
+
+        foreach (var issue in worldBibleIssues)
+        {
+            switch (issue.Type)
+            {
+                case WorldBibleIssueType.MissingEntries:
+                    AddAlert(
+                        BuildAlertId("worldbible:missing", $"{issue.Plan.PlanId:N}"),
+                        PlannerHealthAlertSeverity.Warning,
+                        "World-bible entries missing",
+                        $"Plan '{issue.Plan.PlanName}' has no active world-bible entries.");
+                    break;
+                case WorldBibleIssueType.Stale:
+                    var age = issue.Age ?? TimeSpan.Zero;
+                    AddAlert(
+                        BuildAlertId("worldbible:stale", $"{issue.Plan.PlanId:N}"),
+                        PlannerHealthAlertSeverity.Warning,
+                        "World-bible entries stale",
+                        $"Plan '{issue.Plan.PlanName}' world-bible has not been updated for {age:g}.");
+                    break;
+            }
         }
 
         return alerts;
@@ -832,6 +911,17 @@ private async Task<PlannerHealthTelemetry> BuildTelemetryReportAsync(Cancellatio
     private sealed record PlannerSnapshot(
         IReadOnlyList<PlannerHealthPlanner> Planners,
         HashSet<string> TemplateIds);
+
+    private sealed record WorldBibleIssue(
+        PlannerHealthWorldBiblePlan Plan,
+        WorldBibleIssueType Type,
+        TimeSpan? Age);
+
+    private enum WorldBibleIssueType
+    {
+        MissingEntries,
+        Stale
+    }
 
     private sealed class PlanSummaryAccumulator
     {

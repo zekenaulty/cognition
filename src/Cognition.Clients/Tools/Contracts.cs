@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Cognition.Clients.Tools.Planning;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -8,7 +9,8 @@ public record ToolContext(
     Guid? ConversationId,
     Guid? PersonaId,
     IServiceProvider Services,
-    CancellationToken Ct);
+    CancellationToken Ct,
+    IReadOnlyDictionary<string, object?>? Metadata = null);
 
 public interface ITool
 {

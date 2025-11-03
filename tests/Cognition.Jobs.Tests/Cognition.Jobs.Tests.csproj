@@ -5,5 +5,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cognition.Jobs\Cognition.Jobs.csproj" />
+    <ProjectReference Include="..\Cognition.Testing\Cognition.Testing.csproj" />
   </ItemGroup>
 </Project>

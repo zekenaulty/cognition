@@ -49,10 +49,14 @@ public class PasswordHasherTests
 public class JwtTokenHelperTests : IDisposable
 {
     private readonly string _originalSecret = JwtOptions.Secret;
+    private readonly string _originalIssuer = JwtOptions.Issuer;
+    private readonly string _originalAudience = JwtOptions.Audience;
 
     public void Dispose()
     {
         JwtOptions.Secret = _originalSecret;
+        JwtOptions.Issuer = _originalIssuer;
+        JwtOptions.Audience = _originalAudience;
     }
 
     [Fact]
@@ -61,6 +65,8 @@ public class JwtTokenHelperTests : IDisposable
         using var env = EnvironmentVariableScope.Set(new Dictionary<string, string?> { ["JWT__Secret"] = null });
         const string configuredSecret = "super-secret-key-32-bytes-long-!!!!";
         JwtOptions.Secret = configuredSecret;
+        JwtOptions.Issuer = string.Empty;
+        JwtOptions.Audience = string.Empty;
 
         var user = CreateUser();
 
@@ -80,6 +86,8 @@ public class JwtTokenHelperTests : IDisposable
     {
         const string envSecret = "env-secret-key-32-bytes-long-!!!!!!";
         JwtOptions.Secret = string.Empty;
+        JwtOptions.Issuer = string.Empty;
+        JwtOptions.Audience = string.Empty;
         using var env = EnvironmentVariableScope.Set(new Dictionary<string, string?> { ["JWT__Secret"] = envSecret });
 
         var user = CreateUser();
@@ -93,6 +101,8 @@ public class JwtTokenHelperTests : IDisposable
     public void IssueAccessToken_UsesDevFallback_WhenNoSecretConfigured()
     {
         JwtOptions.Secret = string.Empty;
+        JwtOptions.Issuer = string.Empty;
+        JwtOptions.Audience = string.Empty;
         using var env = EnvironmentVariableScope.Set(new Dictionary<string, string?> { ["JWT__Secret"] = null });
 
         var user = CreateUser();
@@ -100,6 +110,23 @@ public class JwtTokenHelperTests : IDisposable
         var (token, _) = JwtTokenHelper.IssueAccessToken(user);
 
         ValidateToken(token, JwtOptions.DevFallbackSecret, verifySignature: false).Identity.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void IssueAccessToken_IncludesIssuerAndAudience_WhenConfigured()
+    {
+        using var env = EnvironmentVariableScope.Set(new Dictionary<string, string?> { ["JWT__Secret"] = null });
+        JwtOptions.Secret = "issuer-secret-key-32-bytes-long-!!!!!";
+        JwtOptions.Issuer = "https://auth.local";
+        JwtOptions.Audience = "cognition-api";
+
+        var user = CreateUser();
+
+        var (token, _) = JwtTokenHelper.IssueAccessToken(user);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        jwt.Issuer.Should().Be(JwtOptions.Issuer);
+        jwt.Audiences.Should().Contain(JwtOptions.Audience);
     }
 
         private static ClaimsPrincipal ValidateToken(string token, string secret, bool verifySignature = true)

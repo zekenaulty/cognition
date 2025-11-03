@@ -9,6 +9,7 @@ using Cognition.Clients.Retrieval;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
+using Cognition.Testing.Utilities;
 using Cognition.Testing.LLM;
 using Cognition.Testing.Retrieval;
 using FluentAssertions;
@@ -101,7 +102,7 @@ public class AgentRememberToolTests
         });
         var diagnostics = new ScopePathDiagnostics();
         var logger = NullLogger<RetrievalService>.Instance;
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         return new RetrievalService(store, options, scopeOptions, diagnostics, scopePathBuilder, logger, embeddings);
     }
 }

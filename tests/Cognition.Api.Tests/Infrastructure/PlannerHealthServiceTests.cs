@@ -170,6 +170,140 @@ public class PlannerHealthServiceTests
         report.Warnings.Should().Contain(w => w.Contains("critique", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task GetReportAsync_flags_world_bible_missing_entries()
+    {
+        await using var db = CreateDbContext();
+
+        db.PromptTemplates.Add(new PromptTemplate
+        {
+            Id = Guid.NewGuid(),
+            Name = TestPlannerTool.TemplateId,
+            PromptType = PromptType.SystemInstruction,
+            Template = "template",
+            IsActive = true
+        });
+
+        var planId = Guid.NewGuid();
+        db.FictionPlans.Add(new FictionPlan
+        {
+            Id = planId,
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Loreless Plan",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-3)
+        });
+
+        db.FictionWorldBibles.Add(new FictionWorldBible
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = planId,
+            Domain = "core",
+            BranchSlug = "main",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-3),
+            UpdatedAtUtc = DateTime.UtcNow.AddHours(-3)
+        });
+
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped<TestPlannerTool>();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var registry = new StubToolRegistry(typeof(TestPlannerTool));
+        var alertPublisher = new TestAlertPublisher();
+        var health = new PlannerHealthService(db, registry, scope.ServiceProvider, alertPublisher, NullLogger<PlannerHealthService>.Instance);
+
+        var report = await health.GetReportAsync(CancellationToken.None);
+
+        report.Status.Should().Be(PlannerHealthStatus.Degraded);
+        report.Alerts.Should().Contain(a => a.Id.StartsWith("worldbible:missing", StringComparison.OrdinalIgnoreCase));
+        report.Warnings.Should().Contain(w => w.Contains("world-bible", StringComparison.OrdinalIgnoreCase));
+        alertPublisher.Published.Should().HaveCount(1);
+        alertPublisher.Published.Single().Should().Contain(a => a.Id.StartsWith("worldbible:missing", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GetReportAsync_flags_world_bible_stale_entries()
+    {
+        await using var db = CreateDbContext();
+
+        db.PromptTemplates.Add(new PromptTemplate
+        {
+            Id = Guid.NewGuid(),
+            Name = TestPlannerTool.TemplateId,
+            PromptType = PromptType.SystemInstruction,
+            Template = "template",
+            IsActive = true
+        });
+
+        var planId = Guid.NewGuid();
+        var worldBibleId = Guid.NewGuid();
+        var staleTimestamp = DateTime.UtcNow.AddHours(-8);
+
+        db.FictionPlans.Add(new FictionPlan
+        {
+            Id = planId,
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Stale Lore Plan",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-10),
+            UpdatedAtUtc = staleTimestamp
+        });
+
+        db.FictionWorldBibles.Add(new FictionWorldBible
+        {
+            Id = worldBibleId,
+            FictionPlanId = planId,
+            Domain = "core",
+            BranchSlug = "main",
+            CreatedAtUtc = staleTimestamp,
+            UpdatedAtUtc = staleTimestamp
+        });
+
+        db.FictionWorldBibleEntries.Add(new FictionWorldBibleEntry
+        {
+            Id = Guid.NewGuid(),
+            FictionWorldBibleId = worldBibleId,
+            EntrySlug = "hero",
+            EntryName = "Primary Hero",
+            Content = new FictionWorldBibleEntryContent
+            {
+                Category = "characters",
+                Summary = "Hero summary",
+                Status = "Active",
+                ContinuityNotes = new[] { "Keep arc consistent." },
+                UpdatedAtUtc = staleTimestamp
+            },
+            Version = 1,
+            ChangeType = FictionWorldBibleChangeType.Seed,
+            Sequence = 1,
+            IsActive = true,
+            CreatedAtUtc = staleTimestamp,
+            UpdatedAtUtc = staleTimestamp
+        });
+
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped<TestPlannerTool>();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var registry = new StubToolRegistry(typeof(TestPlannerTool));
+        var alertPublisher = new TestAlertPublisher();
+        var health = new PlannerHealthService(db, registry, scope.ServiceProvider, alertPublisher, NullLogger<PlannerHealthService>.Instance);
+
+        var report = await health.GetReportAsync(CancellationToken.None);
+
+        report.Status.Should().Be(PlannerHealthStatus.Degraded);
+        report.Alerts.Should().Contain(a => a.Id.StartsWith("worldbible:stale", StringComparison.OrdinalIgnoreCase));
+        report.Warnings.Should().Contain(w => w.Contains("stale", StringComparison.OrdinalIgnoreCase));
+        alertPublisher.Published.Should().HaveCount(1);
+        alertPublisher.Published.Single().Should().Contain(a => a.Id.StartsWith("worldbible:stale", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static CognitionDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()

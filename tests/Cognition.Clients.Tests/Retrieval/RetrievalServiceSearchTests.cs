@@ -11,6 +11,7 @@ using Cognition.Contracts;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Models;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Store;
+using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -96,7 +97,7 @@ public class RetrievalServiceSearchTests
         var logger = LoggerFactory.Create(b => { }).CreateLogger<RetrievalService>();
         var scopeOptions = Options.Create(new ScopePathOptions { PathAwareHashingEnabled = false, DualWriteEnabled = false });
         var diagnostics = new ScopePathDiagnostics();
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         return new RetrievalService(store, options, scopeOptions, diagnostics, scopePathBuilder, logger, embeddings);
     }
 

@@ -7,4 +7,7 @@
     <ProjectReference Include="..\..\src\Cognition.Api\Cognition.Api.csproj" />
     <ProjectReference Include="..\Cognition.Testing\Cognition.Testing.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+  </ItemGroup>
 </Project>

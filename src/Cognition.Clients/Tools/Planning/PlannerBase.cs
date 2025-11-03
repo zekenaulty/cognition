@@ -73,7 +73,8 @@ public abstract class PlannerBase<TParameters> : IPlannerTool where TParameters 
             ScopePath: effectiveContext.ScopePath?.Canonical,
             PrimaryAgentId: effectiveContext.PrimaryAgentId,
             SupportsSelfCritique: effectiveContext.SupportsSelfCritique,
-            TelemetryTags: Metadata.TelemetryTags);
+            TelemetryTags: Metadata.TelemetryTags,
+            CorrelationId: effectiveContext.CorrelationId);
 
         _logger.LogInformation("Planner {Planner} starting (toolId={ToolId}, agent={AgentId}, conversation={ConversationId}).",
             Metadata.Name, effectiveContext.ToolId, effectiveContext.ToolContext.AgentId, effectiveContext.ToolContext.ConversationId);

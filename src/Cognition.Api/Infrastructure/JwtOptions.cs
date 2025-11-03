@@ -8,4 +8,8 @@ public static class JwtOptions
 
     // The JWT signing secret resolved during app startup.
     public static string Secret { get; set; } = string.Empty;
+
+    // Optional issuer/audience configured via app settings.
+    public static string Issuer { get; set; } = string.Empty;
+    public static string Audience { get; set; } = string.Empty;
 }

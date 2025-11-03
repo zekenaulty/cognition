@@ -92,13 +92,23 @@ public sealed class InMemoryVectorStore : IVectorStore
         }
 
         var scored = snapshot
-            .Take(Math.Max(0, topK))
             .Select(item => new SearchResult
             {
                 Item = Clone(item),
                 Score = ComputeScore(item, queryEmbedding)
             })
+            .OrderByDescending(result => result.Score)
+            .ThenBy(result => result.Item.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        if (topK <= 0)
+        {
+            scored = new List<SearchResult>();
+        }
+        else if (scored.Count > topK)
+        {
+            scored = scored.Take(topK).ToList();
+        }
 
         Calls.Add(new SimilarityCall(
             Embedding: queryEmbedding.ToArray(),

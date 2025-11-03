@@ -11,6 +11,7 @@ using Cognition.Contracts;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Common;
 using Cognition.Data.Relational.Modules.Tools;
+using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -66,7 +67,7 @@ public class ToolDispatcherScopeTests
             .BuildServiceProvider();
 
         var registry = new SingleToolRegistry(classPath, typeof(TestScopeTool));
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         var telemetry = new SpyPlannerTelemetry();
         var quotaService = new AllowAllPlannerQuotaService();
         var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
@@ -160,7 +161,7 @@ public class ToolDispatcherScopeTests
             .BuildServiceProvider();
 
         var registry = new SingleToolRegistry(classPath, typeof(RememberDispatchTool));
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         var telemetry = new SpyPlannerTelemetry();
         var quotaService = new AllowAllPlannerQuotaService();
         var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
@@ -334,7 +335,7 @@ public class ToolDispatcherScopeTests
             services,
             registry,
             NullLogger<ToolDispatcher>.Instance,
-            new ScopePathBuilder(),
+            ScopePathBuilderTestHelper.CreateBuilder(),
             new AllowAllPlannerQuotaService(),
             new SpyPlannerTelemetry());
 

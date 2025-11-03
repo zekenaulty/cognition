@@ -114,4 +114,4 @@ Checklist
 - DONE Document the ScopePath builder usage in developer guides and add samples for tools/jobs to prevent regressions.
 - DONE Finish the OpenSearch query helper alignment (ensure `QueryDslBuilder`/vector stores expose canonical path filters) and add tests guarding the new LINQ extensions.
 - DONE Capture the remaining doc updates + rollout guidance as part of the shared README refresh.
-- `TRACK-482` Add analyzer ban for direct `ScopePathBuilder` construction outside tests and thread correlation IDs through jobs + planner telemetry before flipping stricter quotas.
+- ✅ `TRACK-482` Add analyzer ban for direct `ScopePathBuilder` construction outside tests and thread correlation IDs through jobs + planner telemetry before flipping stricter quotas.

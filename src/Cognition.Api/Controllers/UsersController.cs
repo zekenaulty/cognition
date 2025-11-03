@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.ComponentModel.DataAnnotations;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Users;
 using Cognition.Api.Infrastructure;
+using Cognition.Api.Infrastructure.Validation;
 using Cognition.Api.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
@@ -21,13 +23,22 @@ public class UsersController : ControllerBase
     private readonly CognitionDbContext _db;
     public UsersController(CognitionDbContext db) => _db = db;
 
-    public record RegisterRequest(string Username, string Password, string? Email);
-    public record LoginRequest(string Username, string Password);
-    public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
-    public record UpdateProfileRequest(string? Email, string? Username);
+    public record RegisterRequest(
+        [property: Required, StringLength(64, MinimumLength = 1)] string Username,
+        [property: Required, MinLength(8)] string Password,
+        [property: EmailAddress] string? Email);
+    public record LoginRequest(
+        [property: Required, StringLength(64, MinimumLength = 1)] string Username,
+        [property: Required] string Password);
+    public record ChangePasswordRequest(
+        [property: Required] string CurrentPassword,
+        [property: Required, MinLength(8)] string NewPassword);
+    public record UpdateProfileRequest(
+        string? Email,
+        string? Username);
     public record MeResponse(Guid Id, string Username, string? Email, Guid? PrimaryPersonaId);
-    public record SetPrimaryPersonaRequest(Guid PersonaId);
-    public record LinkPersonaRequest(Guid PersonaId, bool IsDefault = false, string? Label = null);
+    public record SetPrimaryPersonaRequest([property: NotEmptyGuid] Guid PersonaId);
+    public record LinkPersonaRequest([property: NotEmptyGuid] Guid PersonaId, bool IsDefault = false, [property: StringLength(128)] string? Label = null);
 
     [HttpPost("register")]
     [AllowAnonymous]
@@ -267,4 +278,8 @@ public class UsersController : ControllerBase
         return Ok(items);
     }
 }
+
+
+
+
 

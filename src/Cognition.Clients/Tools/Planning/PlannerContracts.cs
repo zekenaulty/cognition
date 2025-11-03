@@ -261,7 +261,8 @@ public sealed record PlannerTelemetryContext(
     string? Environment,
     string? ScopePath,
     bool SupportsSelfCritique,
-    IReadOnlyDictionary<string, string>? TelemetryTags);
+    IReadOnlyDictionary<string, string>? TelemetryTags,
+    string? CorrelationId);
 
 public interface IPlannerTelemetry
 {
@@ -351,7 +352,8 @@ public sealed class LoggerPlannerTelemetry : IPlannerTelemetry
             ["scopePath"] = context.ScopePath,
             ["supportsSelfCritique"] = context.SupportsSelfCritique,
             ["capabilities"] = context.Capabilities,
-            ["tags"] = context.TelemetryTags
+            ["tags"] = context.TelemetryTags,
+            ["correlationId"] = context.CorrelationId
         };
         enrich(payload);
         _logger.LogInformation("{EventName} {@Payload}", name, payload);
@@ -393,7 +395,8 @@ public sealed record PlannerContext(
     Guid? PrimaryAgentId,
     IReadOnlyDictionary<string, object?> ConversationState,
     string? Environment,
-    bool SupportsSelfCritique)
+    bool SupportsSelfCritique,
+    string? CorrelationId = null)
 {
     public static PlannerContext FromToolContext(
         ToolContext toolContext,
@@ -402,7 +405,7 @@ public sealed record PlannerContext(
         IReadOnlyDictionary<string, object?>? conversationState = null,
         string? environment = null,
         bool supportsSelfCritique = false)
-        => new(toolContext, null, scopePath, primaryAgentId, conversationState ?? new Dictionary<string, object?>(), environment, supportsSelfCritique);
+        => new(toolContext, null, scopePath, primaryAgentId, conversationState ?? new Dictionary<string, object?>(), environment, supportsSelfCritique, ExtractCorrelationId(toolContext.Metadata));
 
     public static PlannerContext FromToolContext(
         ToolContext toolContext,
@@ -412,7 +415,27 @@ public sealed record PlannerContext(
         IReadOnlyDictionary<string, object?>? conversationState = null,
         string? environment = null,
         bool supportsSelfCritique = false)
-        => new(toolContext, toolId, scopePath, primaryAgentId, conversationState ?? new Dictionary<string, object?>(), environment, supportsSelfCritique);
+        => new(toolContext, toolId, scopePath, primaryAgentId, conversationState ?? new Dictionary<string, object?>(), environment, supportsSelfCritique, ExtractCorrelationId(toolContext.Metadata));
+
+    private static string? ExtractCorrelationId(IReadOnlyDictionary<string, object?>? metadata)
+    {
+        if (metadata is null)
+        {
+            return null;
+        }
+
+        if (!metadata.TryGetValue("correlationId", out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string s when !string.IsNullOrWhiteSpace(s) => s,
+            Guid guid => guid.ToString("D"),
+            _ => value.ToString()
+        };
+    }
 }
 
 public class PlannerParameters

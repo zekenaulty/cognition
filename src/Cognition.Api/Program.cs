@@ -34,8 +34,6 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers().AddControllersAsServices();
 // Add services to the container.
-
-builder.Services.AddControllers();
 builder.Services.AddSignalR();
 
 // Add EF Core Postgres DbContext
@@ -284,6 +282,8 @@ if (builder.Environment.IsProduction() && string.Equals(jwtSecret, JwtOptions.De
 }
 
 JwtOptions.Secret = jwtSecret; // expose for token issuance
+JwtOptions.Issuer = jwtSection["Issuer"] ?? string.Empty;
+JwtOptions.Audience = jwtSection["Audience"] ?? string.Empty;
 var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
 builder.Services.AddAuthentication(options =>
 {

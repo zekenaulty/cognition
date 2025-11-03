@@ -386,6 +386,10 @@ public class ToolDispatcher : IToolDispatcher
             ["toolId"] = tool.Id.ToString()
         };
 
+        var correlationId = context.ToolContext.Metadata is not null && context.ToolContext.Metadata.TryGetValue("correlationId", out var correlationRaw)
+ ? correlationRaw?.ToString()
+ : null;
+
         if (!string.IsNullOrWhiteSpace(tool.ClassPath))
         {
             tags["classPath"] = tool.ClassPath!;
@@ -411,7 +415,8 @@ public class ToolDispatcher : IToolDispatcher
             Environment: context.Environment,
             ScopePath: context.ScopePath?.ToString(),
             SupportsSelfCritique: context.SupportsSelfCritique,
-            TelemetryTags: tags);
+            TelemetryTags: tags,
+            CorrelationId: correlationId);
     }
 
     private Task EmitQuotaTelemetryAsync(PlannerTelemetryContext context, PlannerQuotaDecision decision, CancellationToken ct)

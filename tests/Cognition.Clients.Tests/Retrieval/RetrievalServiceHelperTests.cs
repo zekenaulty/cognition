@@ -13,6 +13,7 @@ using Cognition.Contracts.Scopes;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Configuration;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Models;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch.Store;
+using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -116,7 +117,7 @@ public class RetrievalServiceHelperTests
 
         var hash = Invoke<string>(ComputeContentHashMethod, "content", scope, metadata, true);
 
-        var builder = new ScopePathBuilder();
+        var builder = ScopePathBuilderTestHelper.CreateBuilder();
         var path = builder.Build(scope);
         var expectedInput = new StringBuilder()
             .AppendLine("content")
@@ -215,7 +216,7 @@ public class RetrievalServiceHelperTests
         var options = Options.Create(new OpenSearchVectorsOptions { UseEmbeddingPipeline = true });
         var scopeOptions = Options.Create(new ScopePathOptions());
         var diagnostics = new ScopePathDiagnostics();
-        var scopePathBuilder = builder ?? new ScopePathBuilder();
+        var scopePathBuilder = builder ?? ScopePathBuilderTestHelper.CreateBuilder();
         var logger = NullLogger<RetrievalService>.Instance;
         var embeddings = new NullEmbeddingsClient();
         return new RetrievalService(store, options, scopeOptions, diagnostics, scopePathBuilder, logger, embeddings);

@@ -12,6 +12,7 @@ using Cognition.Data.Relational.Modules.Agents;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Data.Relational.Modules.Personas;
+using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -76,7 +77,7 @@ public class WorldBibleManagerRunnerTests
                 Arg.Any<CancellationToken>())
             .Returns(_ => Task.FromResult((responses.Dequeue(), Guid.NewGuid())));
 
-        var runner = new WorldBibleManagerRunner(db, agentService, NullLogger<WorldBibleManagerRunner>.Instance, new ScopePathBuilder());
+        var runner = new WorldBibleManagerRunner(db, agentService, NullLogger<WorldBibleManagerRunner>.Instance, ScopePathBuilderTestHelper.CreateBuilder());
 
         var providerId = Guid.NewGuid();
         var modelId = Guid.NewGuid();

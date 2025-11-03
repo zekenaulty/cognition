@@ -5,5 +5,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cognition.Clients\Cognition.Clients.csproj" />
+    <ProjectReference Include="..\Cognition.Testing\Cognition.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cognition.Clients.Tests" />
   </ItemGroup>
 </Project>

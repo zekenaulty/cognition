@@ -15,6 +15,7 @@ using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Jobs;
+using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -58,7 +59,7 @@ public class FictionPlannerPipelineTests
             ["planner.fiction.sceneWeaver"] = Templates.Scene
         });
         var critiqueOptions = Options.Create(new PlannerCritiqueOptions());
-        var scopePathBuilder = new ScopePathBuilder();
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
 
         var services = new ServiceCollection()
             .AddSingleton<IAgentService>(agentService)

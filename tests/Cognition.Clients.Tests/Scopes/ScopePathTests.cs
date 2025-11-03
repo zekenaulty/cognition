@@ -2,6 +2,7 @@ using Cognition.Clients.Scope;
 using Cognition.Contracts;
 using Cognition.Contracts.Scopes;
 using FluentAssertions;
+using Cognition.Testing.Utilities;
 using Xunit;
 
 namespace Cognition.Clients.Tests.Scopes;
@@ -19,7 +20,7 @@ public class ScopePathTests
 
         var token = new ScopeToken(tenantId, appId, personaId, agentId, conversationId, null, null);
 
-        var builder = new ScopePathBuilder();
+        var builder = ScopePathBuilderTestHelper.CreateBuilder();
         var path = builder.Build(token);
 
         path.Principal.Should().Be(new ScopePrincipal(agentId, "agent"));
@@ -39,7 +40,7 @@ public class ScopePathTests
 
         var token = new ScopeToken(null, null, personaId, null, null, projectId, null);
 
-        var builder = new ScopePathBuilder();
+        var builder = ScopePathBuilderTestHelper.CreateBuilder();
         var path = builder.Build(token);
 
         path.Principal.Should().Be(new ScopePrincipal(personaId, "persona"));

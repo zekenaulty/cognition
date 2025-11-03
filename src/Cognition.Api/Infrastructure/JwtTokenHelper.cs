@@ -38,8 +38,13 @@ public static class JwtTokenHelper
             new("primary_persona", user.PrimaryPersonaId?.ToString() ?? string.Empty),
             new(ClaimTypes.Role, user.Role.ToString())
         };
+        var issuer = string.IsNullOrWhiteSpace(JwtOptions.Issuer) ? null : JwtOptions.Issuer;
+        var audience = string.IsNullOrWhiteSpace(JwtOptions.Audience) ? null : JwtOptions.Audience;
         var token = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience,
             claims: claims,
+            notBefore: DateTime.UtcNow,
             expires: expires,
             signingCredentials: creds
         );

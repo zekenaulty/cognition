@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.Diagnostics;
+using Cognition.Api.Infrastructure.Validation;
 using Microsoft.AspNetCore.Mvc;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Tools;
@@ -36,10 +39,10 @@ public class ChatController : ControllerBase
     }
 
     public record AskRequest(
-        Guid AgentId,
-        Guid ProviderId,
+        [property: NotEmptyGuid] Guid AgentId,
+        [property: NotEmptyGuid] Guid ProviderId,
         Guid? ModelId,
-        string Input);
+        [property: Required, StringLength(4000, MinimumLength = 1)] string Input);
 
     [HttpPost("ask")]
     public async Task<IActionResult> Ask([FromBody] AskRequest req, CancellationToken cancellationToken = default)
@@ -80,10 +83,10 @@ public class ChatController : ControllerBase
     }
 
     public record ChatRequest(
-        Guid ConversationId,
-        Guid ProviderId,
+        [property: NotEmptyGuid] Guid ConversationId,
+        [property: NotEmptyGuid] Guid ProviderId,
         Guid? ModelId,
-        string Input);
+        [property: Required, StringLength(4000, MinimumLength = 1)] string Input);
 
 /*
 
@@ -224,19 +227,19 @@ public class ChatController : ControllerBase
     }
 
     public record AskWithPlanRequest(
-        Guid ConversationId,
-        Guid FictionPlanId,
-        string? BranchSlug,
-        Guid ProviderId,
+        [property: NotEmptyGuid] Guid ConversationId,
+        [property: NotEmptyGuid] Guid FictionPlanId,
+        [property: StringLength(64)] string? BranchSlug,
+        [property: NotEmptyGuid] Guid ProviderId,
         Guid? ModelId,
-        string Input,
-        int MinSteps,
-        int MaxSteps);
+        [property: Required, StringLength(4000, MinimumLength = 1)] string Input,
+        [property: Range(0, 100)] int MinSteps,
+        [property: Range(0, 100)] int MaxSteps);
 
     public record RememberRequest(
         Guid? ConversationId,
         Guid? AgentId,
-        string Content,
+        [property: Required, StringLength(4000, MinimumLength = 1)] string Content,
         Dictionary<string, object?>? Metadata);
 
     [HttpPost("ask-with-plan")]
@@ -291,11 +294,18 @@ public class ChatController : ControllerBase
 
         await _bus.Publish(new UserMessageAppended(req.ConversationId, planFromPersonaId, req.Input));
 
+        var correlationId = HttpContext.GetCorrelationId();
+
         var metadata = new Dictionary<string, object?>
         {
             ["conversationMessageId"] = message.Id,
             ["source"] = "ask-with-plan"
         };
+
+        if (!string.IsNullOrWhiteSpace(correlationId))
+        {
+            metadata["correlationId"] = correlationId;
+        }
 
         await _bus.Publish(new PlanRequested(
             req.ConversationId,
@@ -331,3 +341,9 @@ public class ChatController : ControllerBase
         return Ok(new { ok });
     }
 }
+
+
+
+
+
+

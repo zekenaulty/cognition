@@ -205,7 +205,7 @@ namespace Cognition.Jobs
                 throw new InvalidOperationException($"Unable to resolve tool identifier '{message.Tool}'.");
             }
 
-            var context = new ToolContext(message.AgentId, message.ConversationId, message.PersonaId, _services, cancellationToken);
+            var context = new ToolContext(message.AgentId, message.ConversationId, message.PersonaId, _services, cancellationToken, message.Metadata);
             var (ok, result, error) = await _dispatcher.ExecuteAsync(toolId, context, args, log: true).ConfigureAwait(false);
 
             return (ok, result, error);
@@ -330,6 +330,12 @@ namespace Cognition.Jobs
 
         private static PlannerTelemetryContext BuildTelemetryContext(ToolExecutionRequested message, string plannerKey, IReadOnlyDictionary<string, string>? tags)
         {
+            string? correlationId = null;
+            if (message.Metadata is not null && message.Metadata.TryGetValue("correlationId", out var raw) && raw is not null)
+            {
+                correlationId = raw.ToString();
+            }
+
             return new PlannerTelemetryContext(
                 ToolId: null,
                 PlannerName: plannerKey,
@@ -340,7 +346,8 @@ namespace Cognition.Jobs
                 Environment: null,
                 ScopePath: null,
                 SupportsSelfCritique: false,
-                TelemetryTags: tags);
+                TelemetryTags: tags,
+                CorrelationId: correlationId);
         }
 
         private static IReadOnlyDictionary<string, string>? BuildTelemetryTags(Dictionary<string, object?> metadata, string plannerKey, PlannerQuotaDecision decision)
