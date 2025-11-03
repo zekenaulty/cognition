@@ -21,7 +21,7 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 ## P1 Stabilisation Tasks
 - Fail-fast template seeding: validate every `PlannerMetadata.Step` template exists at startup (`StartupDataSeeder` self-test).
 - OpenSearch schema/mapping guard: boot-time verification of index template dimensions + fields.
-- Harden DTO validation (FluentValidation/DataAnnotations); add integration tests asserting 400s.
+- Harden DTO validation (FluentValidation/DataAnnotations); add integration tests asserting 400s. (In progress – chat/user requests covered in step `alpha_security_observability_hardening_step_20251102_2100_dto_validation.md`.)
 - Anti-abuse headers/CORS defaults for API + Console.
 - Align in-memory vector scoring with cosine similarity so offline harnesses match production ranking.
 - Enforce explicit authorization policies/roles across admin endpoints.
