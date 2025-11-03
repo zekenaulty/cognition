@@ -1,14 +1,17 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.Validation;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Users;
-using Cognition.Api.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cognition.Api.Controllers;
 
@@ -20,26 +23,61 @@ public class PersonasController : ControllerBase
     private readonly CognitionDbContext _db;
     public PersonasController(CognitionDbContext db) => _db = db;
 
-    public record PersonaCreateRequest(string Name, string? Nickname, string? Role, string? Gender, string? Essence,
-        string? Beliefs, string? Background, string? CommunicationStyle, string? EmotionalDrivers,
-        string[]? SignatureTraits, string[]? NarrativeThemes, string[]? DomainExpertise, bool? IsPublic, string? Voice);
-
-    public record VisibilityRequest(bool IsPublic);
-    public record GrantAccessRequest(Guid UserId, bool IsDefault = false, string? Label = null);
-    public record PersonaUpdateRequest(
-        string? Name,
+    public record PersonaCreateRequest(
+        [property: Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
+        string Name,
+        [property: StringLength(128)]
         string? Nickname,
+        [property: StringLength(256)]
         string? Role,
+        [property: StringLength(64)]
         string? Gender,
+        [property: StringLength(4000)]
         string? Essence,
+        [property: StringLength(4000)]
         string? Beliefs,
+        [property: StringLength(4000)]
         string? Background,
+        [property: StringLength(4000)]
         string? CommunicationStyle,
+        [property: StringLength(4000)]
         string? EmotionalDrivers,
         string[]? SignatureTraits,
         string[]? NarrativeThemes,
         string[]? DomainExpertise,
         bool? IsPublic,
+        [property: StringLength(256)]
+        string? Voice);
+
+    public record VisibilityRequest(bool IsPublic);
+    public record GrantAccessRequest(
+        [property: NotEmptyGuid] Guid UserId,
+        bool IsDefault = false,
+        [property: StringLength(128)] string? Label = null);
+    public record PersonaUpdateRequest(
+        [property: StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters when provided.")]
+        string? Name,
+        [property: StringLength(128)]
+        string? Nickname,
+        [property: StringLength(256)]
+        string? Role,
+        [property: StringLength(64)]
+        string? Gender,
+        [property: StringLength(4000)]
+        string? Essence,
+        [property: StringLength(4000)]
+        string? Beliefs,
+        [property: StringLength(4000)]
+        string? Background,
+        [property: StringLength(4000)]
+        string? CommunicationStyle,
+        [property: StringLength(4000)]
+        string? EmotionalDrivers,
+        string[]? SignatureTraits,
+        string[]? NarrativeThemes,
+        string[]? DomainExpertise,
+        bool? IsPublic,
+        [property: StringLength(256)]
         string? Voice,
         Cognition.Data.Relational.Modules.Personas.PersonaType? Type
     );
@@ -93,7 +131,7 @@ public class PersonasController : ControllerBase
             .OrderBy(x => x.Name)
             .Select(x => new { x.Id, x.Name })
             .FirstOrDefaultAsync(cancellationToken);
-        if (p == null) return NotFound();
+        if (p == null) return NotFound(ApiErrorResponse.Create("default_assistant_not_found", "Default assistant persona not found."));
         return Ok(p);
     }
     [HttpGet]
@@ -130,7 +168,7 @@ public class PersonasController : ControllerBase
 public async Task<IActionResult> Update(Guid id, [FromBody] PersonaUpdateRequest req, CancellationToken cancellationToken = default)
 {
     var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-    if (p == null) return NotFound();
+    if (p == null) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
     // Only owner or admin may edit
     var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
     var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
@@ -176,29 +214,53 @@ public async Task<IActionResult> Update(Guid id, [FromBody] PersonaUpdateRequest
         }
         return Forbid();
     }
-    if (req.Name != null) p.Name = req.Name;
-    if (req.Nickname != null) p.Nickname = req.Nickname;
-    if (req.Role != null) p.Role = req.Role;
-    if (req.Gender != null) p.Gender = req.Gender;
-    if (req.Essence != null) p.Essence = req.Essence;
-    if (req.Beliefs != null) p.Beliefs = req.Beliefs;
-    if (req.Background != null) p.Background = req.Background;
-    if (req.CommunicationStyle != null) p.CommunicationStyle = req.CommunicationStyle;
-    if (req.EmotionalDrivers != null) p.EmotionalDrivers = req.EmotionalDrivers;
-    if (req.SignatureTraits != null) p.SignatureTraits = req.SignatureTraits;
-    if (req.NarrativeThemes != null) p.NarrativeThemes = req.NarrativeThemes;
-    if (req.DomainExpertise != null) p.DomainExpertise = req.DomainExpertise;
+    if (req.Name != null) p.Name = req.Name.Trim();
+    if (req.Nickname != null) p.Nickname = string.IsNullOrWhiteSpace(req.Nickname) ? string.Empty : req.Nickname.Trim();
+    if (req.Role != null) p.Role = string.IsNullOrWhiteSpace(req.Role) ? string.Empty : req.Role.Trim();
+    if (req.Gender != null) p.Gender = string.IsNullOrWhiteSpace(req.Gender) ? string.Empty : req.Gender.Trim();
+    if (req.Essence != null) p.Essence = string.IsNullOrWhiteSpace(req.Essence) ? string.Empty : req.Essence.Trim();
+    if (req.Beliefs != null) p.Beliefs = string.IsNullOrWhiteSpace(req.Beliefs) ? string.Empty : req.Beliefs.Trim();
+    if (req.Background != null) p.Background = string.IsNullOrWhiteSpace(req.Background) ? string.Empty : req.Background.Trim();
+    if (req.CommunicationStyle != null) p.CommunicationStyle = string.IsNullOrWhiteSpace(req.CommunicationStyle) ? string.Empty : req.CommunicationStyle.Trim();
+    if (req.EmotionalDrivers != null) p.EmotionalDrivers = string.IsNullOrWhiteSpace(req.EmotionalDrivers) ? string.Empty : req.EmotionalDrivers.Trim();
+    if (req.SignatureTraits != null)
+    {
+        p.SignatureTraits = req.SignatureTraits
+            .Select(s => s?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+    if (req.NarrativeThemes != null)
+    {
+        p.NarrativeThemes = req.NarrativeThemes
+            .Select(s => s?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+    if (req.DomainExpertise != null)
+    {
+        p.DomainExpertise = req.DomainExpertise
+            .Select(s => s?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
     if (req.IsPublic.HasValue) p.IsPublic = req.IsPublic.Value;
-    if (req.Voice != null) p.Voice = req.Voice;
+    if (req.Voice != null) p.Voice = string.IsNullOrWhiteSpace(req.Voice) ? string.Empty : req.Voice.Trim();
     // Persona type guards:
     // - Never allow setting type to User via update
     // - If persona is already User, its type is locked and cannot change
     if (req.Type.HasValue)
     {
         if (req.Type.Value == Cognition.Data.Relational.Modules.Personas.PersonaType.User)
-            return BadRequest("Cannot change persona type to User.");
+            return BadRequest(ApiErrorResponse.Create("persona_type_invalid", "Cannot change persona type to User."));
         if (p.Type == Cognition.Data.Relational.Modules.Personas.PersonaType.User && req.Type.Value != Cognition.Data.Relational.Modules.Personas.PersonaType.User)
-            return BadRequest("User persona type is locked and cannot be changed.");
+            return BadRequest(ApiErrorResponse.Create("persona_type_locked", "User persona type is locked and cannot be changed."));
         p.Type = req.Type.Value;
     }
     p.UpdatedAtUtc = DateTime.UtcNow;
@@ -211,7 +273,7 @@ public async Task<IActionResult> Update(Guid id, [FromBody] PersonaUpdateRequest
 public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
 {
     var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-    if (p == null) return NotFound();
+    if (p == null) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
     _db.Personas.Remove(p);
     await _db.SaveChangesAsync(cancellationToken);
     return NoContent();
@@ -221,7 +283,7 @@ public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationT
 public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken = default)
 {
     var p = await _db.Personas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-    if (p == null) return NotFound();
+    if (p == null) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
     var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
     var isOwner = false;
     if (Guid.TryParse(sub, out var caller) && p.OwnedBy == OwnedBy.User)
@@ -255,22 +317,41 @@ public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToke
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PersonaCreateRequest req, CancellationToken cancellationToken = default)
     {
+        var signatureTraits = req.SignatureTraits?
+            .Select(s => s?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var narrativeThemes = req.NarrativeThemes?
+            .Select(s => s?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var domainExpertise = req.DomainExpertise?
+            .Select(s => s?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         var p = new Persona
         {
-            Name = req.Name,
-            Nickname = req.Nickname ?? string.Empty,
-            Role = req.Role ?? string.Empty,
-            Gender = req.Gender ?? string.Empty,
-            Essence = req.Essence ?? string.Empty,
-            Beliefs = req.Beliefs ?? string.Empty,
-            Background = req.Background ?? string.Empty,
-            CommunicationStyle = req.CommunicationStyle ?? string.Empty,
-            EmotionalDrivers = req.EmotionalDrivers ?? string.Empty,
-            SignatureTraits = req.SignatureTraits,
-            NarrativeThemes = req.NarrativeThemes,
-            DomainExpertise = req.DomainExpertise,
+            Name = req.Name.Trim(),
+            Nickname = string.IsNullOrWhiteSpace(req.Nickname) ? string.Empty : req.Nickname.Trim(),
+            Role = string.IsNullOrWhiteSpace(req.Role) ? string.Empty : req.Role.Trim(),
+            Gender = string.IsNullOrWhiteSpace(req.Gender) ? string.Empty : req.Gender.Trim(),
+            Essence = string.IsNullOrWhiteSpace(req.Essence) ? string.Empty : req.Essence.Trim(),
+            Beliefs = string.IsNullOrWhiteSpace(req.Beliefs) ? string.Empty : req.Beliefs.Trim(),
+            Background = string.IsNullOrWhiteSpace(req.Background) ? string.Empty : req.Background.Trim(),
+            CommunicationStyle = string.IsNullOrWhiteSpace(req.CommunicationStyle) ? string.Empty : req.CommunicationStyle.Trim(),
+            EmotionalDrivers = string.IsNullOrWhiteSpace(req.EmotionalDrivers) ? string.Empty : req.EmotionalDrivers.Trim(),
+            SignatureTraits = signatureTraits,
+            NarrativeThemes = narrativeThemes,
+            DomainExpertise = domainExpertise,
             IsPublic = req.IsPublic ?? false,
-            Voice = req.Voice ?? string.Empty,
+            Voice = string.IsNullOrWhiteSpace(req.Voice) ? string.Empty : req.Voice.Trim(),
             Type = PersonaType.Assistant
         };
         // Set ownership model
@@ -311,7 +392,7 @@ public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToke
     public async Task<IActionResult> SetVisibility(Guid id, [FromBody] VisibilityRequest req, CancellationToken cancellationToken = default)
     {
         var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (p == null) return NotFound();
+        if (p == null) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
@@ -328,8 +409,8 @@ public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToke
     [HttpPost("{id:guid}/access")]
     public async Task<IActionResult> GrantAccess(Guid id, [FromBody] GrantAccessRequest req, CancellationToken cancellationToken = default)
     {
-        if (!await _db.Personas.AnyAsync(p => p.Id == id, cancellationToken)) return NotFound("Persona not found");
-        if (!await _db.Users.AnyAsync(u => u.Id == req.UserId, cancellationToken)) return NotFound("User not found");
+        if (!await _db.Personas.AnyAsync(p => p.Id == id, cancellationToken)) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
+        if (!await _db.Users.AnyAsync(u => u.Id == req.UserId, cancellationToken)) return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
         var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id, cancellationToken);
         var sub2 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role2 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
@@ -342,13 +423,19 @@ public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToke
         var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == req.UserId && x.PersonaId == id, cancellationToken);
         if (link == null)
         {
-            link = new UserPersonas { UserId = req.UserId, PersonaId = id, IsDefault = req.IsDefault, Label = req.Label };
+            link = new UserPersonas
+            {
+                UserId = req.UserId,
+                PersonaId = id,
+                IsDefault = req.IsDefault,
+                Label = string.IsNullOrWhiteSpace(req.Label) ? null : req.Label.Trim()
+            };
             _db.UserPersonas.Add(link);
         }
         else
         {
             link.IsDefault = req.IsDefault;
-            link.Label = req.Label;
+            link.Label = string.IsNullOrWhiteSpace(req.Label) ? null : req.Label.Trim();
             link.UpdatedAtUtc = DateTime.UtcNow;
         }
         await _db.SaveChangesAsync(cancellationToken);
@@ -359,7 +446,7 @@ public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToke
     public async Task<IActionResult> RevokeAccess(Guid id, Guid userId, CancellationToken cancellationToken = default)
     {
         var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == userId && x.PersonaId == id, cancellationToken);
-        if (link == null) return NotFound();
+        if (link == null) return NotFound(ApiErrorResponse.Create("persona_access_link_not_found", "Persona access link not found."));
         var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id, cancellationToken);
         var sub3 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role3 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;

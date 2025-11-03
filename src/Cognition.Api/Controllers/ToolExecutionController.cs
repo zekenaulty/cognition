@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Cognition.Clients.Tools;
 using Microsoft.AspNetCore.Authorization;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Cognition.Api.Controllers;
@@ -27,6 +28,6 @@ public class ToolExecutionController : ControllerBase
         var ctx = new ToolContext(req.AgentId, req.ConversationId, req.PersonaId, _sp, cancellationToken);
         var (ok, result, error) = await _dispatcher.ExecuteAsync(id, ctx, req.Args ?? new Dictionary<string, object?>(), log: true);
         if (ok) return Ok(new { result });
-        return BadRequest(new { code = "tool_execution_failed", message = error ?? "Tool execution failed." });
+        return BadRequest(ApiErrorResponse.Create("tool_execution_failed", error ?? "Tool execution failed."));
     }
 }

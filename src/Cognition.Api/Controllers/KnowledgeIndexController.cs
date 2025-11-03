@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Authorization;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
 
 namespace Cognition.Api.Controllers;
 
@@ -32,7 +33,7 @@ public class KnowledgeIndexController : ControllerBase
     public async Task<IActionResult> Reindex(CancellationToken ct)
     {
         if (!_options.Value.UseEmbeddingPipeline)
-            return BadRequest(new { message = "OpenSearch embedding pipeline disabled; set OpenSearch:Vectors:UseEmbeddingPipeline=true." });
+            return BadRequest(ApiErrorResponse.Create("embedding_pipeline_disabled", "OpenSearch embedding pipeline disabled; set OpenSearch:Vectors:UseEmbeddingPipeline=true."));
 
         const int batchSize = 500;
         var page = 0;

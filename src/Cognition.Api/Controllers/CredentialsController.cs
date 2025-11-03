@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.LLM;
 
@@ -36,7 +37,8 @@ public class CredentialsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateRequest req, CancellationToken cancellationToken)
     {
-        if (!await _db.Providers.AnyAsync(p => p.Id == req.ProviderId, cancellationToken)) return BadRequest("Provider not found");
+        if (!await _db.Providers.AnyAsync(p => p.Id == req.ProviderId, cancellationToken))
+            return BadRequest(ApiErrorResponse.Create("provider_not_found", "Provider not found."));
         var cred = new ApiCredential
         {
             ProviderId = req.ProviderId,
@@ -53,7 +55,7 @@ public class CredentialsController : ControllerBase
     public async Task<IActionResult> Validate(Guid id, CancellationToken cancellationToken)
     {
         var cred = await _db.ApiCredentials.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
-        if (cred == null) return NotFound();
+        if (cred == null) return NotFound(ApiErrorResponse.Create("credential_not_found", "Credential not found."));
         // Minimal validation stub: checks presence of env var only
         var value = Environment.GetEnvironmentVariable(cred.KeyRef);
         cred.LastUsedAtUtc = DateTime.UtcNow;

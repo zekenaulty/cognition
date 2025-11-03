@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Images;
 
@@ -33,7 +34,7 @@ public class ImageStylesController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateStyleRequest req, CancellationToken cancellationToken = default)
     {
         var exists = await _db.ImageStyles.AnyAsync(s => s.Name == req.Name, cancellationToken);
-        if (exists) return Conflict("Style name already exists");
+        if (exists) return Conflict(ApiErrorResponse.Create("image_style_conflict", "Style name already exists."));
         var s = new ImageStyle
         {
             Name = req.Name,

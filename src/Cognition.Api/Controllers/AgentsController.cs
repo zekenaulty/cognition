@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Users;
 using Microsoft.AspNetCore.Authorization;
@@ -48,7 +49,7 @@ public class AgentsController : ControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken = default)
     {
         var a = await _db.Agents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (a == null) return NotFound();
+        if (a == null) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
 
         if (!IsAdmin())
         {
@@ -72,7 +73,7 @@ public class AgentsController : ControllerBase
     public async Task<IActionResult> SetClientProfile(Guid id, [FromBody] Guid clientProfileId, CancellationToken cancellationToken = default)
     {
         var a = await _db.Agents.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (a == null) return NotFound();
+        if (a == null) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
         if (!IsAdmin())
         {
             var callerId = GetCallerUserId();
@@ -80,7 +81,8 @@ public class AgentsController : ControllerBase
             var personaIds = await ResolvePersonaIdsForCallerAsync(callerId.Value, cancellationToken);
             if (!personaIds.Contains(a.PersonaId)) return Forbid();
         }
-        if (!await _db.ClientProfiles.AnyAsync(cp => cp.Id == clientProfileId, cancellationToken)) return BadRequest("ClientProfile not found");
+        if (!await _db.ClientProfiles.AnyAsync(cp => cp.Id == clientProfileId, cancellationToken))
+            return BadRequest(ApiErrorResponse.Create("client_profile_not_found", "Client profile not found."));
         a.ClientProfileId = clientProfileId;
         a.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);

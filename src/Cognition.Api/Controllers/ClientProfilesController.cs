@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.LLM;
 
@@ -45,7 +46,7 @@ public class ClientProfilesController : ControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
     {
         var cp = await _db.ClientProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (cp == null) return NotFound();
+        if (cp == null) return NotFound(ApiErrorResponse.Create("client_profile_not_found", "Client profile not found."));
         return Ok(cp);
     }
 
@@ -55,9 +56,12 @@ public class ClientProfilesController : ControllerBase
         Description = "Creates a new client profile. Example body: {\n  'name':'OpenAI 4o default', 'providerId':'<GUID>', 'modelId':'<GUID>',\n  'maxTokens':8192, 'temperature':0.7, 'topP':0.95, 'stream':true\n}")]
     public async Task<IActionResult> Create([FromBody] CreateRequest req, CancellationToken cancellationToken)
     {
-        if (!await _db.Providers.AnyAsync(p => p.Id == req.ProviderId, cancellationToken)) return BadRequest("Provider not found");
-        if (req.ModelId.HasValue && !await _db.Models.AnyAsync(m => m.Id == req.ModelId.Value, cancellationToken)) return BadRequest("Model not found");
-        if (req.ApiCredentialId.HasValue && !await _db.ApiCredentials.AnyAsync(a => a.Id == req.ApiCredentialId.Value, cancellationToken)) return BadRequest("Credential not found");
+        if (!await _db.Providers.AnyAsync(p => p.Id == req.ProviderId, cancellationToken))
+            return BadRequest(ApiErrorResponse.Create("provider_not_found", "Provider not found."));
+        if (req.ModelId.HasValue && !await _db.Models.AnyAsync(m => m.Id == req.ModelId.Value, cancellationToken))
+            return BadRequest(ApiErrorResponse.Create("model_not_found", "Model not found."));
+        if (req.ApiCredentialId.HasValue && !await _db.ApiCredentials.AnyAsync(a => a.Id == req.ApiCredentialId.Value, cancellationToken))
+            return BadRequest(ApiErrorResponse.Create("credential_not_found", "Credential not found."));
         var cp = new ClientProfile
         {
             Name = req.Name,
@@ -87,15 +91,17 @@ public class ClientProfilesController : ControllerBase
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateRequest req, [FromQuery] bool force = false, CancellationToken cancellationToken = default)
     {
         var cp = await _db.ClientProfiles.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (cp == null) return NotFound();
+        if (cp == null) return NotFound(ApiErrorResponse.Create("client_profile_not_found", "Client profile not found."));
         if (req.ModelId.HasValue)
         {
-            if (!await _db.Models.AnyAsync(m => m.Id == req.ModelId.Value, cancellationToken)) return BadRequest("Model not found");
+            if (!await _db.Models.AnyAsync(m => m.Id == req.ModelId.Value, cancellationToken))
+                return BadRequest(ApiErrorResponse.Create("model_not_found", "Model not found."));
             cp.ModelId = req.ModelId;
         }
         if (req.ApiCredentialId.HasValue)
         {
-            if (!await _db.ApiCredentials.AnyAsync(a => a.Id == req.ApiCredentialId.Value, cancellationToken)) return BadRequest("Credential not found");
+            if (!await _db.ApiCredentials.AnyAsync(a => a.Id == req.ApiCredentialId.Value, cancellationToken))
+                return BadRequest(ApiErrorResponse.Create("credential_not_found", "Credential not found."));
             cp.ApiCredentialId = req.ApiCredentialId;
         }
         cp.UserName = req.UserName ?? cp.UserName;
@@ -110,11 +116,13 @@ public class ClientProfilesController : ControllerBase
         if (req.IsActive.HasValue && req.IsActive.Value == false)
         {
             var inUse = await _db.Tools.AnyAsync(t => t.ClientProfileId == id, cancellationToken) || await _db.Agents.AnyAsync(a => a.ClientProfileId == id, cancellationToken);
-            if (inUse && !force) return BadRequest(new { message = "ClientProfile is in use; set force=true to reassign to default before disabling." });
+            if (inUse && !force)
+                return BadRequest(ApiErrorResponse.Create("client_profile_in_use", "Client profile is in use; set force=true to reassign to default before disabling."));
             if (inUse && force)
             {
                 var def = await ResolveDefaultProfileAsync(cancellationToken);
-                if (def == null) return BadRequest(new { message = "Default profile (OpenAI gpt-4o) not available for reassignment." });
+                if (def == null)
+                    return BadRequest(ApiErrorResponse.Create("default_profile_unavailable", "Default profile (OpenAI gpt-4o) not available for reassignment."));
                 await _db.Tools.Where(t => t.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(t => t.ClientProfileId, def.Value), cancellationToken);
                 await _db.Agents.Where(a => a.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(a => a.ClientProfileId, def.Value), cancellationToken);
             }
@@ -132,14 +140,16 @@ public class ClientProfilesController : ControllerBase
     public async Task<IActionResult> Delete(Guid id, [FromQuery] bool force = false, CancellationToken cancellationToken = default)
     {
         var cp = await _db.ClientProfiles.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (cp == null) return NotFound();
+        if (cp == null) return NotFound(ApiErrorResponse.Create("client_profile_not_found", "Client profile not found."));
         bool inUse = await _db.Tools.AnyAsync(t => t.ClientProfileId == id, cancellationToken)
                       || await _db.Agents.AnyAsync(a => a.ClientProfileId == id, cancellationToken);
-        if (inUse && !force) return BadRequest(new { message = "ClientProfile is in use; set force=true to reassign to default profile before delete." });
+        if (inUse && !force)
+            return BadRequest(ApiErrorResponse.Create("client_profile_in_use", "Client profile is in use; set force=true to reassign to default profile before delete."));
         if (inUse && force)
         {
             var def = await ResolveDefaultProfileAsync(cancellationToken);
-            if (def == null) return BadRequest(new { message = "Default profile (OpenAI gpt-4o) not available for reassignment." });
+            if (def == null)
+                return BadRequest(ApiErrorResponse.Create("default_profile_unavailable", "Default profile (OpenAI gpt-4o) not available for reassignment."));
             await _db.Tools.Where(t => t.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(t => t.ClientProfileId, def.Value), cancellationToken);
             await _db.Agents.Where(a => a.ClientProfileId == id).ExecuteUpdateAsync(setters => setters.SetProperty(a => a.ClientProfileId, def.Value), cancellationToken);
         }

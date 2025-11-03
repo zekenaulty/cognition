@@ -1,9 +1,12 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
+using Cognition.Api.Infrastructure.Validation;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Common;
 using Cognition.Data.Relational.Modules.Conversations;
@@ -23,11 +26,27 @@ public class ConversationsController : ControllerBase
     private readonly IHubContext<ChatHub> _hub;
     public ConversationsController(CognitionDbContext db, IHubContext<ChatHub> hub) { _db = db; _hub = hub; }
 
-    public record CreateConversationRequest(Guid AgentId, string? Title, Guid[] ParticipantIds);
-    public record AddMessageRequest(Guid FromPersonaId, Guid? ToPersonaId, ChatRole Role, string Content, string? Metatype = null);
+    public record CreateConversationRequest(
+        [property: NotEmptyGuid] Guid AgentId,
+        [property: StringLength(256)]
+        string? Title,
+        [property: MaxLength(32)]
+        Guid[]? ParticipantIds);
+    public record AddMessageRequest(
+        [property: NotEmptyGuid] Guid FromPersonaId,
+        [property: NotEmptyGuid] Guid? ToPersonaId,
+        ChatRole Role,
+        [property: Required, StringLength(4000, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Content must contain non-whitespace characters.")]
+        string Content,
+        [property: StringLength(128)]
+        string? Metatype = null);
     public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc, DateTime? UpdatedAtUtc);
-    public record AddVersionRequest(string Content);
-    public record SetActiveVersionRequest(int Index);
+    public record AddVersionRequest(
+        [property: Required, StringLength(4000, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Content must contain non-whitespace characters.")]
+        string Content);
+    public record SetActiveVersionRequest(
+        [property: Range(0, int.MaxValue)]
+        int Index);
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? participantId, [FromQuery] Guid? agentId, CancellationToken cancellationToken = default)
@@ -94,11 +113,19 @@ public class ConversationsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateConversationRequest req, CancellationToken cancellationToken = default)
     {
-        var conv = new Conversation { Title = req.Title, CreatedAtUtc = DateTime.UtcNow, AgentId = req.AgentId };
+        var conv = new Conversation
+        {
+            Title = string.IsNullOrWhiteSpace(req.Title) ? null : req.Title.Trim(),
+            CreatedAtUtc = DateTime.UtcNow,
+            AgentId = req.AgentId
+        };
         _db.Conversations.Add(conv);
         await _db.SaveChangesAsync(cancellationToken);
         // participants (optional)
-        var participants = (req.ParticipantIds ?? Array.Empty<Guid>()).Distinct().ToList();
+        var participants = (req.ParticipantIds ?? Array.Empty<Guid>())
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
         // Always include the caller's primary persona as a participant if available
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (Guid.TryParse(sub, out var caller))
@@ -134,7 +161,7 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken = default)
     {
         var conv = await _db.Conversations.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
-        if (conv == null) return NotFound();
+        if (conv == null) return NotFound(ApiErrorResponse.Create("conversation_not_found", "Conversation not found."));
 
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
@@ -166,7 +193,7 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
-        if (conv == null) return NotFound();
+        if (conv == null) return NotFound(ApiErrorResponse.Create("conversation_not_found", "Conversation not found."));
 
         // Delete related rows explicitly
         var msgIds = await _db.ConversationMessages
@@ -252,7 +279,7 @@ public class ConversationsController : ControllerBase
     [HttpPost("{id:guid}/messages")]
     public async Task<IActionResult> AddMessage(Guid id, [FromBody] AddMessageRequest req, CancellationToken cancellationToken = default)
     {
-        if (!await _db.Conversations.AnyAsync(c => c.Id == id, cancellationToken)) return NotFound("Conversation not found");
+        if (!await _db.Conversations.AnyAsync(c => c.Id == id, cancellationToken)) return NotFound(ApiErrorResponse.Create("conversation_not_found", "Conversation not found."));
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var userId)) return Unauthorized();
 
@@ -261,9 +288,11 @@ public class ConversationsController : ControllerBase
             var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
             if (user == null || user.PrimaryPersonaId == null || user.PrimaryPersonaId.Value != req.FromPersonaId)
             {
-                return BadRequest("User-authored messages must use the user's primary persona.");
+                return BadRequest(ApiErrorResponse.Create("user_persona_mismatch", "User-authored messages must use the user's primary persona."));
             }
         }
+        var content = req.Content.Trim();
+        var metatype = string.IsNullOrWhiteSpace(req.Metatype) ? null : req.Metatype.Trim();
         var fromAgentId = await _db.Agents.AsNoTracking()
             .Where(a => a.PersonaId == req.FromPersonaId)
             .Select(a => a.Id)
@@ -275,10 +304,10 @@ public class ConversationsController : ControllerBase
             FromAgentId = fromAgentId,
             ToPersonaId = req.ToPersonaId,
             Role = req.Role,
-            Content = req.Content,
+            Content = content,
             Timestamp = DateTime.UtcNow,
             CreatedByUserId = userId,
-            Metatype = req.Metatype
+            Metatype = metatype
         };
         _db.ConversationMessages.Add(msg);
         await _db.SaveChangesAsync(cancellationToken);
@@ -287,7 +316,7 @@ public class ConversationsController : ControllerBase
         {
             ConversationMessageId = msg.Id,
             VersionIndex = 0,
-            Content = req.Content,
+            Content = content,
             CreatedAtUtc = DateTime.UtcNow
         };
         _db.ConversationMessageVersions.Add(versionEntity);
@@ -312,19 +341,20 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> AddVersion(Guid conversationId, Guid messageId, [FromBody] AddVersionRequest req, CancellationToken cancellationToken = default)
     {
         var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId, cancellationToken);
-        if (msg == null) return NotFound();
+        if (msg == null) return NotFound(ApiErrorResponse.Create("conversation_message_not_found", "Conversation message not found."));
         var maxIndex = await _db.ConversationMessageVersions.Where(v => v.ConversationMessageId == messageId).Select(v => (int?)v.VersionIndex).MaxAsync(cancellationToken) ?? -1;
         var next = maxIndex + 1;
+        var content = req.Content.Trim();
         var v = new ConversationMessageVersion
         {
             ConversationMessageId = messageId,
             VersionIndex = next,
-            Content = req.Content,
+            Content = content,
             CreatedAtUtc = DateTime.UtcNow
         };
         _db.ConversationMessageVersions.Add(v);
         msg.ActiveVersionIndex = next;
-        msg.Content = req.Content;
+        msg.Content = content;
         await _db.SaveChangesAsync(cancellationToken);
         await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantMessageVersionAppended", new { ConversationId = conversationId, MessageId = messageId, Content = v.Content, VersionIndex = next }, cancellationToken);
         return Ok(new { msg.Id, VersionIndex = next });
@@ -334,9 +364,9 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> SetActiveVersion(Guid conversationId, Guid messageId, [FromBody] SetActiveVersionRequest req, CancellationToken cancellationToken = default)
     {
         var msg = await _db.ConversationMessages.FirstOrDefaultAsync(m => m.Id == messageId && m.ConversationId == conversationId, cancellationToken);
-        if (msg == null) return NotFound();
+        if (msg == null) return NotFound(ApiErrorResponse.Create("conversation_message_not_found", "Conversation message not found."));
         var target = await _db.ConversationMessageVersions.AsNoTracking().FirstOrDefaultAsync(v => v.ConversationMessageId == messageId && v.VersionIndex == req.Index, cancellationToken);
-        if (target == null) return BadRequest("Version index not found");
+        if (target == null) return BadRequest(ApiErrorResponse.Create("version_not_found", "Version index not found."));
         msg.ActiveVersionIndex = req.Index;
         msg.Content = target.Content;
         await _db.SaveChangesAsync(cancellationToken);

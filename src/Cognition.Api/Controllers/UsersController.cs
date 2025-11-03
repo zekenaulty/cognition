@@ -10,6 +10,7 @@ using Cognition.Data.Relational.Modules.Users;
 using Cognition.Api.Infrastructure;
 using Cognition.Api.Infrastructure.Validation;
 using Cognition.Api.Infrastructure.Security;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
 
@@ -46,7 +47,7 @@ public class UsersController : ControllerBase
     {
         var norm = req.Username.Trim().ToUpperInvariant();
         if (await _db.Users.AnyAsync(u => u.NormalizedUsername == norm, cancellationToken))
-            return Conflict("Username already exists");
+            return Conflict(ApiErrorResponse.Create("username_conflict", "Username already exists."));
 
         var (hash, salt, algo, ver) = PasswordHasher.Hash(req.Password);
         var user = new User
@@ -135,7 +136,7 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken = default)
     {
         var u = await _db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (u == null) return NotFound();
+        if (u == null) return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
         return Ok(new { u.Id, u.Username, u.Email, u.PrimaryPersonaId, u.IsActive, u.CreatedAtUtc, u.UpdatedAtUtc });
     }
 
@@ -153,7 +154,7 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> UpdateProfile(Guid id, [FromBody] UpdateProfileRequest req, CancellationToken cancellationToken = default)
     {
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (u == null) return NotFound();
+        if (u == null) return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
         if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
@@ -162,7 +163,7 @@ public class UsersController : ControllerBase
         {
             var norm = req.Username.Trim().ToUpperInvariant();
             var exists = await _db.Users.AnyAsync(x => x.NormalizedUsername == norm && x.Id != id, cancellationToken);
-            if (exists) return Conflict("Username already exists");
+            if (exists) return Conflict(ApiErrorResponse.Create("username_conflict", "Username already exists."));
             u.Username = req.Username.Trim();
             u.NormalizedUsername = norm;
         }
@@ -173,7 +174,7 @@ public class UsersController : ControllerBase
             if (!string.IsNullOrWhiteSpace(req.Email))
             {
                 var taken = await _db.Users.AnyAsync(x => x.NormalizedEmail == normEmail && x.Id != id, cancellationToken);
-                if (taken) return Conflict("Email already in use");
+                if (taken) return Conflict(ApiErrorResponse.Create("email_conflict", "Email already in use."));
             }
             u.Email = string.IsNullOrWhiteSpace(req.Email) ? null : req.Email.Trim();
             u.NormalizedEmail = normEmail;
@@ -187,7 +188,7 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> ChangePassword(Guid id, [FromBody] ChangePasswordRequest req, CancellationToken cancellationToken = default)
     {
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (u == null) return NotFound();
+        if (u == null) return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
         if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
@@ -208,17 +209,17 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> SetPrimaryPersona(Guid id, [FromBody] SetPrimaryPersonaRequest req, CancellationToken cancellationToken = default)
     {
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (u == null) return NotFound();
+        if (u == null) return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
         if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
             return Forbid();
         var persona = await _db.Personas.AsNoTracking().FirstOrDefaultAsync(p => p.Id == req.PersonaId, cancellationToken);
-        if (persona == null) return BadRequest("Persona not found");
+        if (persona == null) return BadRequest(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
         if (persona.Type != Data.Relational.Modules.Personas.PersonaType.User)
-            return BadRequest("Primary persona must be a User persona.");
+            return BadRequest(ApiErrorResponse.Create("primary_persona_type_invalid", "Primary persona must be a User persona."));
         var isOwner = await _db.UserPersonas.AsNoTracking().AnyAsync(up => up.UserId == id && up.PersonaId == req.PersonaId && up.IsOwner, cancellationToken);
-        if (!isOwner) return BadRequest("Primary persona must be owned by the user.");
+        if (!isOwner) return BadRequest(ApiErrorResponse.Create("primary_persona_not_owned", "Primary persona must be owned by the user."));
         u.PrimaryPersonaId = req.PersonaId;
         await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -231,8 +232,8 @@ public class UsersController : ControllerBase
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
         if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
             return Forbid();
-        if (!await _db.Users.AnyAsync(u => u.Id == id, cancellationToken)) return NotFound("User not found");
-        if (!await _db.Personas.AnyAsync(p => p.Id == req.PersonaId, cancellationToken)) return NotFound("Persona not found");
+        if (!await _db.Users.AnyAsync(u => u.Id == id, cancellationToken)) return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
+        if (!await _db.Personas.AnyAsync(p => p.Id == req.PersonaId, cancellationToken)) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
         var link = await _db.UserPersonas.FirstOrDefaultAsync(up => up.UserId == id && up.PersonaId == req.PersonaId, cancellationToken);
         if (link == null)
         {
@@ -257,7 +258,7 @@ public class UsersController : ControllerBase
         if (!Guid.TryParse(sub, out var caller) || (caller != id && role != nameof(UserRole.Administrator)))
             return Forbid();
         var link = await _db.UserPersonas.FirstOrDefaultAsync(up => up.UserId == id && up.PersonaId == personaId, cancellationToken);
-        if (link == null) return NotFound();
+        if (link == null) return NotFound(ApiErrorResponse.Create("persona_link_not_found", "Persona link not found."));
         _db.UserPersonas.Remove(link);
         await _db.SaveChangesAsync(cancellationToken);
         return NoContent();

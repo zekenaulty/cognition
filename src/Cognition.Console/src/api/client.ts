@@ -71,13 +71,15 @@ export class ApiError extends Error {
   url: string
   bodyText?: string
   isNetworkError?: boolean
-  constructor(message: string, url: string, status?: number, bodyText?: string, isNetworkError?: boolean) {
+  code?: string
+  constructor(message: string, url: string, status?: number, bodyText?: string, isNetworkError?: boolean, code?: string) {
     super(message)
     this.name = 'ApiError'
     this.url = url
     this.status = status
     this.bodyText = bodyText
     this.isNetworkError = isNetworkError
+    this.code = code
   }
 }
 
@@ -105,9 +107,29 @@ export async function request<T>(path: string, options: RequestInit = {}, access
   }
   if (!res.ok) {
     let text = ''
-    try { text = await res.text() } catch {}
-    const msg = text || `HTTP ${res.status}`
-    throw new ApiError(msg, url, res.status, text)
+    let code: string | undefined
+    let message = `HTTP ${res.status}`
+    try {
+      text = await res.text()
+      if (text) {
+        try {
+          const parsed = JSON.parse(text)
+          if (parsed && typeof parsed.message === 'string') {
+            message = parsed.message
+          } else if (text) {
+            message = text
+          }
+          if (parsed && typeof parsed.code === 'string') {
+            code = parsed.code
+          }
+        } catch {
+          message = text
+        }
+      }
+    } catch {
+      // ignore
+    }
+    throw new ApiError(message, url, res.status, text, false, code)
   }
   const ct = res.headers.get('content-type') || ''
   if (ct.includes('application/json')) return (await res.json()) as T

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Cognition.Api.Infrastructure.Security;
 using Cognition.Api.Infrastructure.Diagnostics;
 using Cognition.Api.Infrastructure.Validation;
+using Cognition.Api.Infrastructure.ErrorHandling;
 using Microsoft.AspNetCore.Mvc;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Tools;
@@ -53,13 +54,13 @@ public class ChatController : ControllerBase
                 .Where(a => a.Id == req.AgentId)
                 .Select(a => (Guid?)a.PersonaId)
                 .FirstOrDefaultAsync(cancellationToken);
-            if (!personaId.HasValue) return NotFound(new { code = "agent_not_found", message = "Agent not found" });
+            if (!personaId.HasValue) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
             var reply = await _agents.AskAsync(personaId.Value, req.ProviderId, req.ModelId, req.Input, cancellationToken);
             return Ok(new { reply });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { code = "ask_failed", message = ex.Message });
+            return StatusCode(500, ApiErrorResponse.Create("ask_failed", ex.Message));
         }
     }
 
@@ -72,13 +73,13 @@ public class ChatController : ControllerBase
                 .Where(a => a.Id == req.AgentId)
                 .Select(a => (Guid?)a.PersonaId)
                 .FirstOrDefaultAsync(cancellationToken);
-            if (!personaId.HasValue) return NotFound(new { code = "agent_not_found", message = "Agent not found" });
+            if (!personaId.HasValue) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
             var reply = await _agents.AskWithToolsAsync(personaId.Value, req.ProviderId, req.ModelId, req.Input, cancellationToken);
             return Ok(new { reply });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { code = "ask_with_tools_failed", message = ex.Message });
+            return StatusCode(500, ApiErrorResponse.Create("ask_with_tools_failed", ex.Message));
         }
     }
 
@@ -107,11 +108,11 @@ public class ChatController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return NotFound(new { code = "conversation_not_found", message = ex.Message });
+            return NotFound(ApiErrorResponse.Create("conversation_not_found", ex.Message));
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { code = "chat_failed", message = ex.Message });
+            return StatusCode(500, ApiErrorResponse.Create("chat_failed", ex.Message));
         }
     }
 
@@ -125,7 +126,7 @@ public class ChatController : ControllerBase
                 .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => a.PersonaId)
                 .FirstOrDefaultAsync(cancellationToken);
             if (personaId == Guid.Empty)
-                return NotFound(new { code = "conversation_or_agent_not_found", message = "Conversation/Agent not found" });
+                return NotFound(ApiErrorResponse.Create("conversation_or_agent_not_found", "Conversation/Agent not found."));
 
             var assistantContent = await _agents.ChatAsync(req.ConversationId, personaId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
             if (string.IsNullOrWhiteSpace(assistantContent.Reply))
@@ -136,11 +137,11 @@ public class ChatController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return NotFound(new { code = "conversation_not_found", message = ex.Message });
+            return NotFound(ApiErrorResponse.Create("conversation_not_found", ex.Message));
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { code = "ask_chat_v2_failed", message = ex.Message });
+            return StatusCode(500, ApiErrorResponse.Create("ask_chat_v2_failed", ex.Message));
         }
     }
 */
@@ -152,7 +153,7 @@ public class ChatController : ControllerBase
             .Where(c => c.Id == req.ConversationId)
             .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => new { a.Id, a.PersonaId })
             .FirstOrDefaultAsync(cancellationToken);
-        if (agentPersona == null) return NotFound(new { code = "conversation_or_agent_not_found", message = "Conversation/Agent not found" });
+        if (agentPersona == null) return NotFound(ApiErrorResponse.Create("conversation_or_agent_not_found", "Conversation/Agent not found."));
         var fromAgentId = agentPersona.Id;
         var fromPersonaId = agentPersona.PersonaId;
         var message = new ConversationMessage
@@ -250,7 +251,7 @@ public class ChatController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == req.ConversationId, cancellationToken);
         if (conversation is null)
         {
-            return NotFound(new { code = "conversation_not_found", message = "Conversation not found" });
+            return NotFound(ApiErrorResponse.Create("conversation_not_found", "Conversation not found."));
         }
 
         var branchSlug = string.IsNullOrWhiteSpace(req.BranchSlug) ? "main" : req.BranchSlug!.Trim();
@@ -260,7 +261,7 @@ public class ChatController : ControllerBase
             .FirstOrDefaultAsync(p => p.Id == req.FictionPlanId, cancellationToken);
         if (fictionPlan is null)
         {
-            return NotFound(new { code = "fiction_plan_not_found", message = "Fiction plan not found" });
+            return NotFound(ApiErrorResponse.Create("fiction_plan_not_found", "Fiction plan not found."));
         }
 
         var planFromAgentId = conversation.AgentId;
@@ -334,7 +335,7 @@ public class ChatController : ControllerBase
                 .Select(c => (Guid?)c.AgentId)
                 .FirstOrDefaultAsync(cancellationToken);
         }
-        if (!agentId.HasValue) return BadRequest(new { code = "agent_missing", message = "Provide AgentId or a ConversationId bound to an Agent" });
+        if (!agentId.HasValue) return BadRequest(ApiErrorResponse.Create("agent_missing", "Provide AgentId or a ConversationId bound to an Agent."));
 
         var scope = new Cognition.Contracts.ScopeToken(null, null, null, agentId.Value, null, null, null);
         var ok = await retrieval.WriteAsync(scope, req.Content, req.Metadata ?? new(), cancellationToken);
