@@ -21,8 +21,9 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 ## P1 Stabilisation Tasks
 - Fail-fast template seeding: validate every `PlannerMetadata.Step` template exists at startup (`StartupDataSeeder` self-test).
 - OpenSearch schema/mapping guard: boot-time verification of index template dimensions + fields.
-- Harden DTO validation (FluentValidation/DataAnnotations); add integration tests asserting 400s. (In progress – chat/user requests covered in step `alpha_security_observability_hardening_step_20251102_2100_dto_validation.md`.)
+- [ ] Harden DTO validation and API abuse headers. ✅ Attribute coverage landed across Chat/Users/Config/Tools/Personas/Conversations (see lpha_security_observability_hardening_step_20251102_2100_dto_validation.md). Follow-on: finish API abuse headers and assert ApiErrorResponse codes via automated tests.
 - Anti-abuse headers/CORS defaults for API + Console.
+- Standardize API error payloads; publish the contract (docs/api-error-responses.md) and instrument telemetry for high-volume codes.
 - Align in-memory vector scoring with cosine similarity so offline harnesses match production ranking.
 - Enforce explicit authorization policies/roles across admin endpoints.
 - Introduce feature flags for HGTF, sandbox, and canary rollouts.
@@ -47,7 +48,7 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 - [ ] Stand up tool foundry + sandbox orchestration (OOPS worker, enable/approval jobs, HGTF integration tests).
 - [ ] Replace in-memory vector scoring with cosine similarity so local harnesses mirror OpenSearch.
 - [ ] Add template seeding self-test and OpenSearch schema guard.
-- [ ] Harden DTO validation and API abuse headers.
+- [ ] Harden DTO validation and API abuse headers. ✅ Attribute coverage landed across Chat/Users/Config/Tools/Personas/Conversations (see lpha_security_observability_hardening_step_20251102_2100_dto_validation.md). Follow-on: finish API abuse headers and assert ApiErrorResponse codes via automated tests.
 - [ ] Extend PlannerHealth with latency, retry, critique, and SLO aggregates.
 - [ ] Enforce explicit authorization policies/roles across admin endpoints.
 - [ ] Introduce feature flags for HGTF, sandbox, and canary rollouts.
@@ -58,4 +59,4 @@ Context: 2025-10-27 external review highlighted security, quota, observability, 
 ## References
 - External review (2025-10-27) scorecard + recommendations.
 - Existing plans: `plans/planning_the_planner.md`, `plans/scope_token_path_refactor.md`, `plans/_next_session_prompt.md`, `plans/hot_targeted_todo.md`.
-- Relevant code: `src/Cognition.Api/*`, `src/Cognition.Clients/Scope`, `src/Cognition.Clients/Tools/Planning`, `src/Cognition.Jobs/*`, `tests/*`.
+- Relevant code: `src/Cognition.Api/*`, `src/Cognition.Clients/Scope`, `src/Cognition.Clients/Tools/Planning`, `src/Cognition.Jobs/*`, `tests/*`, `docs/api-error-responses.md`.
