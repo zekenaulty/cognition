@@ -6,9 +6,11 @@ using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.LLM;
 using Cognition.Clients.Scope;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Clients.Tools.Planning.Fiction;
+using Cognition.Clients.Tools.Fiction.Authoring;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Agents;
 using Cognition.Data.Relational.Modules.Conversations;
@@ -65,6 +67,19 @@ public class FictionPlannerPipelineTests
             .AddSingleton<IAgentService>(agentService)
             .BuildServiceProvider();
 
+        var lifecycle = Substitute.For<ICharacterLifecycleService>();
+        lifecycle.ProcessAsync(Arg.Any<CharacterLifecycleRequest>(), Arg.Any<CancellationToken>())
+            .Returns(CharacterLifecycleResult.Empty);
+        var authorRegistry = Substitute.For<IAuthorPersonaRegistry>();
+        var authorContext = new AuthorPersonaContext(
+            Guid.NewGuid(),
+            "Author Persona",
+            "Author should write in clipped, tense prose.",
+            new[] { "Remember the ally's oath." },
+            new[] { "Lore: Whisperglass protocol remains secret." });
+        authorRegistry.GetForPlanAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AuthorPersonaContext?>(authorContext));
+
         var visionTool = new VisionPlannerTool(
             agentService,
             NullLoggerFactory.Instance,
@@ -112,11 +127,11 @@ public class FictionPlannerPipelineTests
 
         var runners = new IFictionPhaseRunner[]
         {
-            new VisionPlannerRunner(db, agentService, services, visionTool, NullLogger<VisionPlannerRunner>.Instance, scopePathBuilder),
+            new VisionPlannerRunner(db, agentService, services, lifecycle, visionTool, NullLogger<VisionPlannerRunner>.Instance, scopePathBuilder),
             new IterativePlannerRunner(db, agentService, services, iterativeTool, NullLogger<IterativePlannerRunner>.Instance, scopePathBuilder),
             new ChapterArchitectRunner(db, agentService, services, chapterTool, NullLogger<ChapterArchitectRunner>.Instance, scopePathBuilder),
-            new ScrollRefinerRunner(db, agentService, services, scrollTool, NullLogger<ScrollRefinerRunner>.Instance, scopePathBuilder),
-            new SceneWeaverRunner(db, agentService, services, sceneTool, NullLogger<SceneWeaverRunner>.Instance, scopePathBuilder)
+            new ScrollRefinerRunner(db, agentService, services, lifecycle, authorRegistry, scrollTool, NullLogger<ScrollRefinerRunner>.Instance, scopePathBuilder),
+            new SceneWeaverRunner(db, agentService, services, lifecycle, authorRegistry, sceneTool, NullLogger<SceneWeaverRunner>.Instance, scopePathBuilder)
         };
 
         var jobs = new FictionWeaverJobs(
@@ -126,14 +141,15 @@ public class FictionPlannerPipelineTests
             Substitute.For<IPlanProgressNotifier>(),
             new WorkflowEventLogger(db, enabled: false),
             Substitute.For<IFictionBacklogScheduler>(),
+            scopePathBuilder,
             NullLogger<FictionWeaverJobs>.Instance);
 
         var providerId = Guid.NewGuid();
         var modelId = Guid.NewGuid();
-        var baseMetadata = new Dictionary<string, string>
+        var conversationPlanId = Guid.NewGuid();
+        var baseMetadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["providerId"] = providerId.ToString(),
-            ["modelId"] = modelId.ToString()
+            ["conversationPlanId"] = conversationPlanId.ToString()
         };
 
         await jobs.RunVisionPlannerAsync(
@@ -155,10 +171,16 @@ public class FictionPlannerPipelineTests
             metadata: baseMetadata,
             cancellationToken: CancellationToken.None);
 
-        var chapterMetadata = new Dictionary<string, string>(baseMetadata)
+        Dictionary<string, string> BuildPhaseMetadata(string backlogId)
         {
-            ["backlogItemId"] = "outline-core-conflicts"
-        };
+            return new Dictionary<string, string>(baseMetadata, StringComparer.OrdinalIgnoreCase)
+            {
+                ["backlogItemId"] = backlogId,
+                ["taskId"] = Guid.NewGuid().ToString()
+            };
+        }
+
+        var chapterMetadata = BuildPhaseMetadata("outline-core-conflicts");
         await jobs.RunChapterArchitectAsync(
             graph.PlanId,
             graph.AgentId,
@@ -169,10 +191,7 @@ public class FictionPlannerPipelineTests
             metadata: chapterMetadata,
             cancellationToken: CancellationToken.None);
 
-        var scrollMetadata = new Dictionary<string, string>(baseMetadata)
-        {
-            ["backlogItemId"] = "refine-scroll"
-        };
+        var scrollMetadata = BuildPhaseMetadata("refine-scroll");
         await jobs.RunScrollRefinerAsync(
             graph.PlanId,
             graph.AgentId,
@@ -183,10 +202,7 @@ public class FictionPlannerPipelineTests
             metadata: scrollMetadata,
             cancellationToken: CancellationToken.None);
 
-        var sceneMetadata = new Dictionary<string, string>(baseMetadata)
-        {
-            ["backlogItemId"] = "draft-scene"
-        };
+        var sceneMetadata = BuildPhaseMetadata("draft-scene");
         var sceneResult = await jobs.RunSceneWeaverAsync(
             graph.PlanId,
             graph.AgentId,
@@ -202,6 +218,10 @@ public class FictionPlannerPipelineTests
 
         agentService.TotalCalls.Should().Be(5);
         agentService.RemainingResponses.Should().Be(0);
+        authorRegistry.Received(2).AppendMemoryAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<AuthorPersonaMemoryEntry>(),
+            Arg.Any<CancellationToken>());
 
         var backlog = await db.FictionPlanBacklogItems
             .Where(x => x.FictionPlanId == graph.PlanId)
@@ -238,6 +258,96 @@ public class FictionPlannerPipelineTests
         sceneTranscript.Metadata!.Should().ContainKey("plannerOutcome").WhoseValue.Should().Be("Success");
         sceneTranscript.Metadata!.Should().ContainKey("sceneSlug").WhoseValue.Should().Be("scene-1");
         sceneTranscript.FictionChapterSceneId.Should().Be(graph.SceneId);
+    }
+
+    [Fact]
+    public async Task ScrollRefinerRunner_blocks_when_lore_requirement_missing()
+    {
+        var agentService = new PipelineAgentService(Array.Empty<string>());
+
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new PipelineTestDbContext(options);
+        var graph = await SeedPlanGraphAsync(db);
+
+        db.FictionLoreRequirements.Add(new FictionLoreRequirement
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = graph.PlanId,
+            RequirementSlug = "whisperglass-protocol",
+            Title = "Whisperglass Protocol",
+            Description = "Needs canon before scroll drafting.",
+            Status = FictionLoreRequirementStatus.Planned,
+            ChapterScrollId = graph.ScrollId
+        });
+        await db.SaveChangesAsync();
+
+        var telemetry = new NullPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        var templateRepo = new InMemoryTemplateRepository(new Dictionary<string, string>
+        {
+            ["planner.fiction.scrollRefiner"] = Templates.ScrollRefiner
+        });
+        var critiqueOptions = Options.Create(new PlannerCritiqueOptions());
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
+        var services = new ServiceCollection()
+            .AddSingleton<IAgentService>(agentService)
+            .BuildServiceProvider();
+
+        var lifecycle = Substitute.For<ICharacterLifecycleService>();
+        lifecycle.ProcessAsync(Arg.Any<CharacterLifecycleRequest>(), Arg.Any<CancellationToken>())
+            .Returns(CharacterLifecycleResult.Empty);
+        var authorRegistry = Substitute.For<IAuthorPersonaRegistry>();
+
+        var scrollTool = new ScrollRefinerPlannerTool(
+            agentService,
+            NullLoggerFactory.Instance,
+            telemetry,
+            transcriptStore,
+            templateRepo,
+            critiqueOptions,
+            scopePathBuilder);
+
+        var runners = new IFictionPhaseRunner[]
+        {
+            new ScrollRefinerRunner(db, agentService, services, lifecycle, authorRegistry, scrollTool, NullLogger<ScrollRefinerRunner>.Instance, scopePathBuilder)
+        };
+
+        var jobs = new FictionWeaverJobs(
+            db,
+            runners,
+            Substitute.For<Rebus.Bus.IBus>(),
+            Substitute.For<IPlanProgressNotifier>(),
+            new WorkflowEventLogger(db, enabled: false),
+            Substitute.For<IFictionBacklogScheduler>(),
+            scopePathBuilder,
+            NullLogger<FictionWeaverJobs>.Instance);
+
+        var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["conversationPlanId"] = Guid.NewGuid().ToString(),
+            ["taskId"] = Guid.NewGuid().ToString(),
+            ["backlogItemId"] = "refine-scroll"
+        };
+
+        var result = await jobs.RunScrollRefinerAsync(
+            graph.PlanId,
+            graph.AgentId,
+            graph.ConversationId,
+            graph.ScrollId,
+            providerId,
+            modelId,
+            metadata: metadata,
+            cancellationToken: CancellationToken.None);
+
+        result.Status.Should().Be(FictionPhaseStatus.Blocked);
+        result.Data.Should().ContainKey("blockedLoreRequirements");
+        agentService.TotalCalls.Should().Be(0);
+        authorRegistry.DidNotReceiveWithAnyArgs().AppendMemoryAsync(default, default!, default);
     }
 
     private static async Task<PlanGraph> SeedPlanGraphAsync(CognitionDbContext db)
@@ -381,6 +491,8 @@ public class FictionPlannerPipelineTests
                 typeof(Conversation),
                 typeof(ConversationParticipant),
                 typeof(ConversationMessage),
+                typeof(ConversationPlan),
+                typeof(ConversationTask),
                 typeof(FictionProject),
                 typeof(FictionPlan),
                 typeof(FictionPlanPass),
@@ -390,7 +502,8 @@ public class FictionPlannerPipelineTests
                 typeof(FictionChapterBlueprint),
                 typeof(FictionChapterScroll),
                 typeof(FictionChapterSection),
-                typeof(FictionChapterScene)
+                typeof(FictionChapterScene),
+                typeof(FictionLoreRequirement)
             };
 
             foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
@@ -475,7 +588,7 @@ public class FictionPlannerPipelineTests
     private static class Templates
     {
         public const string Vision =
-            "Project {{projectTitle}}\\nDescription: {{description}}\\nLogline: {{logline}}\\nRespond with the JSON payload defined in the system requirements.";
+            "Project {{projectTitle}}\\nDescription: {{description}}\\nLogline: {{logline}}\\nRespond with the JSON payload defined in the system requirements (authorSummary, bookGoals, coreCast, supportingCast, loreNeeds, planningBacklog, openQuestions, worldSeeds).";
 
         public const string Iterative =
             "Plan {{planName}} iteration {{iterationIndex}} on branch {{branch}}. Summaries: {{existingPasses}}. Respond with the required JSON arrays.";
@@ -497,6 +610,37 @@ public class FictionPlannerPipelineTests
             {
               "authorSummary": "An energetic author voice with cinematic pacing.",
               "bookGoals": ["Deliver a tense mystery arc."],
+              "coreCast": [
+                {
+                  "name": "Detective Mara Iles",
+                  "role": "protagonist",
+                  "track": true,
+                  "importance": "high",
+                  "summary": "Instinctive investigator who masks anxiety with sardonic wit.",
+                  "continuityHooks": ["Owes intel favors to the Black Market Council."]
+                }
+              ],
+              "supportingCast": [
+                {
+                  "name": "Analyst Brek",
+                  "role": "support",
+                  "track": true,
+                  "importance": "medium",
+                  "summary": "Former rival analyst now acting as reluctant partner.",
+                  "notes": "Keep their code phrase 'whisperglass'."
+                }
+              ],
+              "loreNeeds": [
+                {
+                  "title": "Whisperglass Protocol",
+                  "requirementSlug": "whisperglass-protocol",
+                  "status": "planned",
+                  "description": "Spell out how the surveillance dampeners function and fail.",
+                  "requiredFor": ["chapter-blueprint", "chapter-scroll"],
+                  "notes": "Must tie into city lore.",
+                  "track": true
+                }
+              ],
               "planningBacklog": [
                 { "id": "outline-core-conflicts", "description": "Draft chapter conflict blueprint", "status": "pending", "inputs": ["vision-plan"], "outputs": ["chapter-blueprint"] },
                 { "id": "refine-scroll", "description": "Refine chapter scroll", "status": "pending", "inputs": ["chapter-blueprint"], "outputs": ["chapter-scroll"] },

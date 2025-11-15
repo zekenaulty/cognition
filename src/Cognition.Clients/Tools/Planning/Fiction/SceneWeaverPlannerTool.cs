@@ -103,9 +103,10 @@ public sealed class SceneWeaverPlannerTool : PlannerBase<SceneWeaverPlannerParam
         var blueprint = scroll?.FictionChapterBlueprint;
 
         var template = await TemplateRepository.GetTemplateAsync(TemplateId, ct).ConfigureAwait(false);
+        var authorContext = AuthorPersonaPromptContext.FromConversationState(context.ConversationState);
         var prompt = template is { Length: > 0 } resolvedTemplate
-            ? BuildPromptFromTemplate(resolvedTemplate, plan, executionContext, scene, section, scroll, blueprint)
-            : BuildFallbackPrompt(plan, executionContext, scene, section, scroll, blueprint);
+            ? BuildPromptFromTemplate(resolvedTemplate, plan, executionContext, scene, section, scroll, blueprint, authorContext)
+            : BuildFallbackPrompt(plan, executionContext, scene, section, scroll, blueprint, authorContext);
 
         var stopwatch = Stopwatch.StartNew();
 
@@ -161,7 +162,8 @@ public sealed class SceneWeaverPlannerTool : PlannerBase<SceneWeaverPlannerParam
         FictionChapterScene scene,
         FictionChapterSection? section,
         FictionChapterScroll? scroll,
-        FictionChapterBlueprint? blueprint)
+        FictionChapterBlueprint? blueprint,
+        AuthorPersonaPromptContext authorContext)
     {
         var tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -173,7 +175,11 @@ public sealed class SceneWeaverPlannerTool : PlannerBase<SceneWeaverPlannerParam
             ["sceneMetadata"] = SerializeJson(scene.Metadata) ?? "(none)",
             ["sectionSummary"] = BuildSectionSummary(section),
             ["scrollSynopsis"] = BuildScrollSynopsis(scroll),
-            ["blueprintStructure"] = SerializeJson(blueprint?.Structure) ?? "(blueprint structure unavailable)"
+            ["blueprintStructure"] = SerializeJson(blueprint?.Structure) ?? "(blueprint structure unavailable)",
+            ["authorPersonaName"] = authorContext.PersonaName ?? "(author persona not set)",
+            ["authorPersonaSummary"] = authorContext.SummaryText,
+            ["authorPersonaMemories"] = authorContext.MemoriesText,
+            ["authorWorldNotes"] = authorContext.WorldNotesText
         };
 
         var result = template;
@@ -191,11 +197,21 @@ public sealed class SceneWeaverPlannerTool : PlannerBase<SceneWeaverPlannerParam
         FictionChapterScene scene,
         FictionChapterSection? section,
         FictionChapterScroll? scroll,
-        FictionChapterBlueprint? blueprint)
+        FictionChapterBlueprint? blueprint,
+        AuthorPersonaPromptContext authorContext)
     {
         var branch = string.IsNullOrWhiteSpace(context.BranchSlug) ? "main" : context.BranchSlug!;
         var builder = new StringBuilder();
         builder.AppendLine($"You are writing the full narrative scene \"{scene.Title}\" (slug {scene.SceneSlug}) for branch \"{branch}\" in project \"{plan.Name}\".");
+        builder.AppendLine();
+        builder.AppendLine("Author persona summary:");
+        builder.AppendLine(authorContext.SummaryText);
+        builder.AppendLine();
+        builder.AppendLine("Recent persona memories to honor:");
+        builder.AppendLine(authorContext.MemoriesText);
+        builder.AppendLine();
+        builder.AppendLine("World-bible obligations:");
+        builder.AppendLine(authorContext.WorldNotesText);
         builder.AppendLine();
         builder.AppendLine("Scene description:");
         builder.AppendLine(string.IsNullOrWhiteSpace(scene.Description) ? "(no description captured)" : scene.Description!);

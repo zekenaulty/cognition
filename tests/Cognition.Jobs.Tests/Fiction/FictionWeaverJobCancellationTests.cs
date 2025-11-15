@@ -8,6 +8,7 @@ using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Jobs;
+using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -73,6 +74,7 @@ public class FictionWeaverJobCancellationTests
         await db.SaveChangesAsync();
 
         var runner = new BlockingRunner(FictionPhase.VisionPlanner);
+        var scopePaths = ScopePathBuilderTestHelper.CreateBuilder();
         var jobs = new FictionWeaverJobs(
             db,
             new IFictionPhaseRunner[] { runner },
@@ -80,6 +82,7 @@ public class FictionWeaverJobCancellationTests
             Substitute.For<IPlanProgressNotifier>(),
             new WorkflowEventLogger(db, enabled: false),
             Substitute.For<IFictionBacklogScheduler>(),
+            scopePaths,
             NullLogger<FictionWeaverJobs>.Instance);
 
         var metadata = new Dictionary<string, string>
@@ -90,7 +93,7 @@ public class FictionWeaverJobCancellationTests
         };
 
         using var cts = new CancellationTokenSource();
-        var execution = jobs.RunVisionPlannerAsync(planId, agentId, conversationId, providerId, metadata: metadata, cancellationToken: cts.Token);
+        var execution = jobs.RunVisionPlannerAsync(planId, agentId, conversationId, providerId, Guid.NewGuid(), metadata: metadata, cancellationToken: cts.Token);
 
         await runner.WaitUntilStartedAsync().WaitAsync(TimeSpan.FromSeconds(2));
         cts.Cancel();

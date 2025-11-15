@@ -71,10 +71,14 @@ namespace Cognition.Jobs
             }
 
             var args = ParseArgs(nextTask.ArgsJson);
+            if (!args.ContainsKey("planId"))
+            {
+                args["planId"] = message.FictionPlanId;
+            }
             nextTask.Status = "Requested";
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-            var metadata = BuildMetadata(message.Metadata, conversationPlan.Id, nextTask, branchSlug, args);
+            var metadata = BuildMetadata(message.Metadata, conversationPlan.Id, nextTask, branchSlug, args, message.FictionPlanId);
 
             await _logger.LogAsync(message.ConversationId, nameof(PlanReady), JObject.FromObject(new
             {
@@ -124,7 +128,13 @@ namespace Cognition.Jobs
             }
         }
 
-        private static Dictionary<string, object?> BuildMetadata(Dictionary<string, object?>? source, Guid conversationPlanId, ConversationTask task, string branchSlug, IReadOnlyDictionary<string, object?> args)
+        private static Dictionary<string, object?> BuildMetadata(
+            Dictionary<string, object?>? source,
+            Guid conversationPlanId,
+            ConversationTask task,
+            string branchSlug,
+            IReadOnlyDictionary<string, object?> args,
+            Guid planId)
         {
             var metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
@@ -133,7 +143,8 @@ namespace Cognition.Jobs
                 ["stepNumber"] = task.StepNumber,
                 ["branchSlug"] = branchSlug,
                 ["toolName"] = task.ToolName,
-                ["goal"] = task.Goal
+                ["goal"] = task.Goal,
+                ["planId"] = planId.ToString("D")
             };
 
             if (!string.IsNullOrWhiteSpace(task.Thought))

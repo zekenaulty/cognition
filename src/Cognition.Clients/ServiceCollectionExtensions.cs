@@ -3,6 +3,8 @@ using Cognition.Clients.LLM;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Clients.Tools.Fiction.Weaver;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
+using Cognition.Clients.Tools.Fiction.Authoring;
 using Microsoft.Extensions.DependencyInjection;
 using Cognition.Clients.Agents;
 using Polly;
@@ -37,6 +39,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFictionPhaseRunner, ChapterArchitectRunner>();
         services.AddScoped<IFictionPhaseRunner, ScrollRefinerRunner>();
         services.AddScoped<IFictionPhaseRunner, SceneWeaverRunner>();
+        services.AddScoped<ICharacterLifecycleService, CharacterLifecycleService>();
+        services.AddOptions<AuthorPersonaOptions>();
+        services.AddScoped<IAuthorPersonaRegistry, AuthorPersonaRegistry>();
         services.AddSingleton<IScopePathDiagnostics, ScopePathDiagnostics>();
         services.AddSingleton<IScopePathBuilder, ScopePathBuilder>();
         return services;

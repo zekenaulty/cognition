@@ -240,6 +240,7 @@ public class ChatController : ControllerBase
     public record RememberRequest(
         Guid? ConversationId,
         Guid? AgentId,
+        Guid? FictionPlanId,
         [property: Required, StringLength(4000, MinimumLength = 1)] string Content,
         Dictionary<string, object?>? Metadata);
 
@@ -337,7 +338,35 @@ public class ChatController : ControllerBase
         }
         if (!agentId.HasValue) return BadRequest(ApiErrorResponse.Create("agent_missing", "Provide AgentId or a ConversationId bound to an Agent."));
 
-        var scope = new Cognition.Contracts.ScopeToken(null, null, null, agentId.Value, null, null, null);
+        var fictionPlanId = req.FictionPlanId;
+
+        if (!fictionPlanId.HasValue && req.ConversationId.HasValue)
+        {
+            var conversationPlanId = await _db.ConversationPlans.AsNoTracking()
+                .Where(cp => cp.ConversationId == req.ConversationId.Value)
+                .OrderByDescending(cp => cp.CreatedAt)
+                .Select(cp => (Guid?)cp.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (conversationPlanId.HasValue)
+            {
+                fictionPlanId = await _db.Set<FictionPlan>()
+                    .AsNoTracking()
+                    .Where(fp => fp.CurrentConversationPlanId == conversationPlanId.Value)
+                    .Select(fp => (Guid?)fp.Id)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+        }
+
+        var scope = new Cognition.Contracts.ScopeToken(
+            TenantId: null,
+            AppId: null,
+            PersonaId: null,
+            AgentId: agentId.Value,
+            ConversationId: req.ConversationId,
+            PlanId: fictionPlanId,
+            ProjectId: null,
+            WorldId: null);
         var ok = await retrieval.WriteAsync(scope, req.Content, req.Metadata ?? new(), cancellationToken);
         return Ok(new { ok });
     }

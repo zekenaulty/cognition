@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Planning.Fiction;
-using Cognition.Contracts;
-using Cognition.Contracts.Scopes;
+using Cognition.Clients.Tools.Fiction.Authoring;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -21,17 +21,23 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ScrollRefinerPlannerTool _planner;
+    private readonly ICharacterLifecycleService _lifecycleService;
+    private readonly IAuthorPersonaRegistry _authorRegistry;
 
     public ScrollRefinerRunner(
         CognitionDbContext db,
         IAgentService agentService,
         IServiceProvider serviceProvider,
+        ICharacterLifecycleService lifecycleService,
+        IAuthorPersonaRegistry authorRegistry,
         ScrollRefinerPlannerTool planner,
         ILogger<ScrollRefinerRunner> logger,
         IScopePathBuilder scopePathBuilder)
         : base(db, agentService, logger, FictionPhase.ScrollRefiner, scopePathBuilder)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _lifecycleService = lifecycleService ?? throw new ArgumentNullException(nameof(lifecycleService));
+        _authorRegistry = authorRegistry ?? throw new ArgumentNullException(nameof(authorRegistry));
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
     }
 
@@ -90,26 +96,189 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
             _serviceProvider,
             cancellationToken);
 
-        ScopePath? scopePath = null;
-        if (ScopePathBuilder.TryBuild(new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null), out var builtPath))
+        var scopePath = ResolveScopePath(context);
+        var resolvedScrollId = context.ChapterScrollId ?? existingScroll?.Id;
+        var blocking = await GetBlockingLoreRequirementsAsync(plan.Id, resolvedScrollId, cancellationToken).ConfigureAwait(false);
+        if (blocking.Count > 0)
         {
-            scopePath = builtPath;
+            return BuildBlockedResult(context, blocking);
         }
+
+        var authorContext = await _authorRegistry.GetForPlanAsync(plan.Id, cancellationToken).ConfigureAwait(false);
+        var conversationState = BuildConversationState(plan, context, resolvedScrollId, blueprint, authorContext);
 
         var plannerContext = PlannerContext.FromToolContext(
             toolContext,
             scopePath,
             primaryAgentId: context.AgentId,
-            conversationState: new Dictionary<string, object?>
-            {
-                ["planId"] = plan.Id,
-                ["branch"] = context.BranchSlug,
-                ["chapterScrollId"] = context.ChapterScrollId,
-                ["chapterBlueprintId"] = context.ChapterBlueprintId ?? blueprint?.Id
-            });
+            conversationState: conversationState);
 
         var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        await ProcessLifecycleAsync(plan, context, resolvedScrollId, plannerResult, cancellationToken).ConfigureAwait(false);
+        await AppendAuthorPersonaMemoryAsync(plan, context, blueprint, existingScroll, resolvedScrollId, authorContext, plannerResult, cancellationToken).ConfigureAwait(false);
         return ToPhaseResult(plannerResult, context);
+    }
+
+    private async Task<IReadOnlyList<FictionLoreRequirement>> GetBlockingLoreRequirementsAsync(
+        Guid planId,
+        Guid? scrollId,
+        CancellationToken cancellationToken)
+    {
+        var query = DbContext.Set<FictionLoreRequirement>()
+            .AsNoTracking()
+            .Where(r => r.FictionPlanId == planId && r.Status != FictionLoreRequirementStatus.Ready && r.ChapterSceneId == null);
+
+        if (scrollId.HasValue)
+        {
+            query = query.Where(r => r.ChapterScrollId == scrollId);
+        }
+        else
+        {
+            query = query.Where(r => r.ChapterScrollId == null);
+        }
+
+        return await query.ToListAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private FictionPhaseResult BuildBlockedResult(
+        FictionPhaseExecutionContext context,
+        IReadOnlyList<FictionLoreRequirement> blocking)
+    {
+        foreach (var requirement in blocking)
+        {
+            Logger.LogWarning(
+                "FictionLoreRequirementBlocked plan={PlanId} requirement={Slug} status={Status}",
+                requirement.FictionPlanId,
+                requirement.RequirementSlug,
+                requirement.Status);
+        }
+
+        var summary = $"Scroll blocked by {blocking.Count} lore requirement(s).";
+        var data = new Dictionary<string, object?>
+        {
+            ["blockedLoreRequirements"] = blocking.Select(r => new Dictionary<string, object?>
+            {
+                ["slug"] = r.RequirementSlug,
+                ["status"] = r.Status.ToString(),
+                ["title"] = r.Title,
+                ["notes"] = r.Notes,
+                ["description"] = r.Description
+            }).ToList()
+        };
+
+        return BuildResult(
+            FictionPhaseStatus.Blocked,
+            summary,
+            context,
+            requestPayload: string.Empty,
+            responsePayload: string.Empty,
+            conversationMessageId: null,
+            data);
+    }
+
+    private static Dictionary<string, object?> BuildConversationState(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        Guid? scrollId,
+        FictionChapterBlueprint? blueprint,
+        AuthorPersonaContext? authorContext)
+    {
+        var state = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["planId"] = plan.Id,
+            ["branch"] = context.BranchSlug,
+            ["chapterScrollId"] = scrollId,
+            ["chapterBlueprintId"] = context.ChapterBlueprintId ?? blueprint?.Id
+        };
+
+        AuthorPersonaPromptContext.ApplyToConversationState(state, authorContext);
+        return state;
+    }
+
+    private async Task ProcessLifecycleAsync(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        Guid? scrollId,
+        PlannerResult result,
+        CancellationToken cancellationToken)
+    {
+        if (!result.Artifacts.TryGetValue("parsed", out var parsedArtifact))
+        {
+            return;
+        }
+
+        var token = LifecyclePayloadParser.TryConvertToToken(parsedArtifact);
+        if (token is null)
+        {
+            return;
+        }
+
+        var characters = LifecyclePayloadParser.ExtractCharacters(token);
+        var loreRequirements = LifecyclePayloadParser.ExtractLoreRequirements(token, scrollId, context.ChapterSceneId);
+
+        if (characters.Count == 0 && loreRequirements.Count == 0)
+        {
+            return;
+        }
+
+        var request = new CharacterLifecycleRequest(
+            plan.Id,
+            context.ConversationId,
+            PlanPassId: null,
+            characters,
+            loreRequirements,
+            Source: "scroll");
+
+        await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task AppendAuthorPersonaMemoryAsync(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        FictionChapterBlueprint? blueprint,
+        FictionChapterScroll? existingScroll,
+        Guid? scrollId,
+        AuthorPersonaContext? authorContext,
+        PlannerResult result,
+        CancellationToken cancellationToken)
+    {
+        if (authorContext is null)
+        {
+            return;
+        }
+
+        if (result.Outcome != PlannerOutcome.Success)
+        {
+            return;
+        }
+
+        var title = blueprint is null
+            ? $"Scroll revision for {plan.Name}"
+            : $"Scroll revision: {blueprint.Title}";
+        var content = BuildScrollMemoryContent(plan, context, blueprint, existingScroll);
+        var entry = new AuthorPersonaMemoryEntry(
+            title,
+            content,
+            plan.Id,
+            scrollId,
+            SceneId: null,
+            SourcePhase: "scroll");
+
+        await _authorRegistry.AppendMemoryAsync(authorContext.PersonaId, entry, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string BuildScrollMemoryContent(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        FictionChapterBlueprint? blueprint,
+        FictionChapterScroll? existingScroll)
+    {
+        var branch = string.IsNullOrWhiteSpace(context.BranchSlug) ? "main" : context.BranchSlug;
+        var synopsis = string.IsNullOrWhiteSpace(blueprint?.Synopsis)
+            ? "(no synopsis captured)"
+            : blueprint!.Synopsis!;
+        var sectionCount = existingScroll?.Sections?.Count ?? 0;
+        return $"Refined scroll for branch \"{branch}\" on plan \"{plan.Name}\". Blueprint summary: {synopsis}. Prior sections tracked: {sectionCount}.";
     }
 
     private static FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)

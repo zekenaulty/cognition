@@ -18,10 +18,6 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
     private const string DefaultBranch = "main";
     private const string DefaultWorldBibleDomain = "core";
 
-    private static readonly string[] BlueprintOutputs = { OutputTokens.ChapterBlueprint };
-    private static readonly string[] ScrollOutputs = { OutputTokens.ChapterScroll };
-    private static readonly string[] SceneOutputs = { OutputTokens.SceneDraft, OutputTokens.Scene };
-
     private readonly CognitionDbContext _db;
     private readonly IFictionWeaverJobClient _jobs;
     private readonly ILogger<FictionBacklogScheduler> _logger;
@@ -85,6 +81,16 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         var metadata = BuildMetadata(context.Metadata, readyItem);
+        var taskId = await ResolveConversationTaskIdAsync(plan, readyItem, cancellationToken).ConfigureAwait(false);
+        if (taskId.HasValue)
+        {
+            metadata["taskId"] = taskId.Value.ToString();
+        }
+
+        if (plan.CurrentConversationPlanId.HasValue)
+        {
+            metadata["conversationPlanId"] = plan.CurrentConversationPlanId.Value.ToString();
+        }
         EnqueuePhase(phase.Value, plan.Id, context, providerId, modelId, branch, readyItem, metadata);
     }
 
@@ -141,44 +147,7 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
     }
 
     private static FictionPhase? ResolvePhase(FictionPlanBacklogItem item)
-    {
-        if (item.Outputs is null || item.Outputs.Length == 0)
-        {
-            return null;
-        }
-
-        if (item.Outputs.Any(o => BlueprintOutputs.Contains(o, StringComparer.OrdinalIgnoreCase)))
-        {
-            return FictionPhase.ChapterArchitect;
-        }
-
-        if (item.Outputs.Any(o => ScrollOutputs.Contains(o, StringComparer.OrdinalIgnoreCase)))
-        {
-            return FictionPhase.ScrollRefiner;
-        }
-
-        if (item.Outputs.Any(o => SceneOutputs.Contains(o, StringComparer.OrdinalIgnoreCase)))
-        {
-            return FictionPhase.SceneWeaver;
-        }
-
-        if (item.Outputs.Any(o => string.Equals(o, OutputTokens.WorldBible, StringComparison.OrdinalIgnoreCase)))
-        {
-            return FictionPhase.WorldBibleManager;
-        }
-
-        if (item.Outputs.Any(o => string.Equals(o, OutputTokens.VisionPlan, StringComparison.OrdinalIgnoreCase)))
-        {
-            return FictionPhase.VisionPlanner;
-        }
-
-        if (item.Outputs.Any(o => string.Equals(o, OutputTokens.IterationPlan, StringComparison.OrdinalIgnoreCase)))
-        {
-            return FictionPhase.IterativePlanner;
-        }
-
-        return null;
-    }
+        => FictionBacklogPhaseResolver.ResolvePhase(item);
 
     private async Task EnsureTargetsAsync(
         Guid planId,
@@ -470,7 +439,7 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         item.UpdatedAtUtc = DateTime.UtcNow;
     }
 
-    private static IReadOnlyDictionary<string, string> BuildMetadata(IReadOnlyDictionary<string, string>? contextMetadata, FictionPlanBacklogItem item)
+    private static Dictionary<string, string> BuildMetadata(IReadOnlyDictionary<string, string>? contextMetadata, FictionPlanBacklogItem item)
     {
         var metadata = contextMetadata is null
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -484,6 +453,20 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         TryAddOutputMetadata(item, metadata, MetadataKeys.WorldBibleId);
         TryAddOutputMetadata(item, metadata, MetadataKeys.IterationIndex);
         return metadata;
+    }
+
+    private async Task<Guid?> ResolveConversationTaskIdAsync(FictionPlan plan, FictionPlanBacklogItem item, CancellationToken cancellationToken)
+    {
+        if (!plan.CurrentConversationPlanId.HasValue || string.IsNullOrWhiteSpace(item.BacklogId))
+        {
+            return null;
+        }
+
+        return await _db.ConversationTasks
+            .Where(t => t.ConversationPlanId == plan.CurrentConversationPlanId.Value && t.BacklogItemId == item.BacklogId)
+            .Select(t => (Guid?)t.Id)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private void EnqueuePhase(
@@ -685,17 +668,6 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         public const string ChapterSceneId = "chapterSceneId";
         public const string WorldBibleId = "worldBibleId";
         public const string IterationIndex = "iterationIndex";
-    }
-
-    private static class OutputTokens
-    {
-        public const string ChapterBlueprint = "chapter-blueprint";
-        public const string ChapterScroll = "chapter-scroll";
-        public const string SceneDraft = "scene-draft";
-        public const string Scene = "scene";
-        public const string WorldBible = "world-bible";
-        public const string VisionPlan = "vision-plan";
-        public const string IterationPlan = "iteration-plan";
     }
 
     private static string NormalizeSlug(string? value)

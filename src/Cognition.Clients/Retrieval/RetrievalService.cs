@@ -70,6 +70,10 @@ public sealed class RetrievalService : IRetrievalService
             {
                 ["ConversationId"] = scope.ConversationId.Value.ToString()
             };
+            if (scope.PlanId.HasValue)
+            {
+                f["PlanId"] = scope.PlanId.Value.ToString();
+            }
             var convHits = await _store.SimilaritySearchAsync(embedding, k, tenantKey, f, kind: null, ct).ConfigureAwait(false);
             foreach (var h in convHits)
             {
@@ -85,6 +89,10 @@ public sealed class RetrievalService : IRetrievalService
             {
                 ["AgentId"] = scope.AgentId.Value.ToString()
             };
+            if (scope.PlanId.HasValue)
+            {
+                f["PlanId"] = scope.PlanId.Value.ToString();
+            }
             var agentHits = await _store.SimilaritySearchAsync(embedding, need, tenantKey, f, kind: null, ct).ConfigureAwait(false);
             foreach (var h in agentHits)
             {
@@ -199,6 +207,7 @@ public sealed class RetrievalService : IRetrievalService
         Add("PersonaId", scope.PersonaId?.ToString());
         Add("AgentId", scope.AgentId?.ToString());
         Add("ConversationId", scope.ConversationId?.ToString());
+        Add("PlanId", scope.PlanId?.ToString());
         Add("ProjectId", scope.ProjectId?.ToString());
         Add("WorldId", scope.WorldId?.ToString());
 
@@ -239,6 +248,7 @@ public sealed class RetrievalService : IRetrievalService
             AddLegacy("AppId", scope.AppId);
             AddLegacy("AgentId", scope.AgentId);
             AddLegacy("ConversationId", scope.ConversationId);
+            AddLegacy("PlanId", scope.PlanId);
             AddLegacy("ProjectId", scope.ProjectId);
             AddLegacy("WorldId", scope.WorldId);
         }

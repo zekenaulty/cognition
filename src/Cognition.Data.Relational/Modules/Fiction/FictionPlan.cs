@@ -1,4 +1,5 @@
 using Cognition.Data.Relational.Modules.Common;
+using Cognition.Data.Relational.Modules.Conversations;
 
 namespace Cognition.Data.Relational.Modules.Fiction;
 
@@ -19,6 +20,10 @@ public class FictionPlan : BaseEntity
     public List<FictionPlanTranscript> Transcripts { get; set; } = [];
     public List<FictionStoryMetric> StoryMetrics { get; set; } = [];
     public List<FictionWorldBible> WorldBibles { get; set; } = [];
+    public List<FictionCharacter> Characters { get; set; } = [];
+    public List<FictionLoreRequirement> LoreRequirements { get; set; } = [];
+    public Guid? CurrentConversationPlanId { get; set; }
+    public ConversationPlan? CurrentConversationPlan { get; set; }
 }
 
 public enum FictionPlanStatus

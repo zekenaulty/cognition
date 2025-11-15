@@ -46,20 +46,20 @@ public class RetrievalServiceHelperTests
     [Fact]
     public void ResolveTenantKey_ShouldPreferTenantThenApp()
     {
-        var scopeWithTenant = new ScopeToken(Guid.NewGuid(), Guid.NewGuid(), null, null, null, null, null);
+        var scopeWithTenant = new ScopeToken(Guid.NewGuid(), Guid.NewGuid(), null, null, null, null, null, null);
         Invoke<string>(ResolveTenantKeyMethod, scopeWithTenant).Should().Be(scopeWithTenant.TenantId!.Value.ToString());
 
-        var scopeWithApp = new ScopeToken(null, Guid.NewGuid(), null, null, null, null, null);
+        var scopeWithApp = new ScopeToken(null, Guid.NewGuid(), null, null, null, null, null, null);
         Invoke<string>(ResolveTenantKeyMethod, scopeWithApp).Should().Be(scopeWithApp.AppId!.Value.ToString());
 
-        var defaultScope = new ScopeToken(null, null, null, null, null, null, null);
+        var defaultScope = new ScopeToken(null, null, null, null, null, null, null, null);
         Invoke<string>(ResolveTenantKeyMethod, defaultScope).Should().Be("default");
     }
 
     [Fact]
     public void BuildScopeMetadata_ShouldCaptureScopeAndExtras()
     {
-        var scope = new ScopeToken(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var scope = new ScopeToken(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var extra = new Dictionary<string, object?>
         {
             ["Custom"] = "value",
@@ -69,6 +69,7 @@ public class RetrievalServiceHelperTests
         var metadata = Invoke<Dictionary<string, object>>(BuildScopeMetadataMethod, scope, extra);
 
         metadata["TenantId"].Should().Be(scope.TenantId!.Value.ToString());
+        metadata["PlanId"].Should().Be(scope.PlanId!.Value.ToString());
         metadata["AgentId"].Should().Be("override");
         metadata.Should().ContainKey("Custom");
     }
@@ -76,7 +77,7 @@ public class RetrievalServiceHelperTests
     [Fact]
     public void ComputeContentHash_ShouldIncludeTrimmedContentAndScope_WhenLegacyMode()
     {
-        var scope = new ScopeToken(Guid.NewGuid(), Guid.NewGuid(), null, Guid.NewGuid(), null, null, null);
+        var scope = new ScopeToken(Guid.NewGuid(), Guid.NewGuid(), null, Guid.NewGuid(), null, null, null, null);
         var metadata = new Dictionary<string, object>
         {
             ["Source"] = "manual",
@@ -93,8 +94,23 @@ public class RetrievalServiceHelperTests
     [Fact]
     public void ComputeContentHash_ShouldChange_WhenScopeDiffers()
     {
-        var scopeA = new ScopeToken(Guid.NewGuid(), null, null, null, null, null, null);
-        var scopeB = new ScopeToken(Guid.NewGuid(), null, null, null, null, null, null);
+        var scopeA = new ScopeToken(Guid.NewGuid(), null, null, null, null, null, null, null);
+        var scopeB = new ScopeToken(Guid.NewGuid(), null, null, null, null, null, null, null);
+        var metadata = new Dictionary<string, object>();
+
+        var hashA = Invoke<string>(ComputeContentHashMethod, "content", scopeA, metadata, false);
+        var hashB = Invoke<string>(ComputeContentHashMethod, "content", scopeB, metadata, false);
+
+        hashA.Should().NotBe(hashB);
+    }
+
+    [Fact]
+    public void ComputeContentHash_ShouldChange_WhenPlanDiffers_InLegacyMode()
+    {
+        var planA = Guid.NewGuid();
+        var planB = Guid.NewGuid();
+        var scopeA = new ScopeToken(null, null, null, null, null, planA, null, null);
+        var scopeB = new ScopeToken(null, null, null, null, null, planB, null, null);
         var metadata = new Dictionary<string, object>();
 
         var hashA = Invoke<string>(ComputeContentHashMethod, "content", scopeA, metadata, false);
@@ -109,7 +125,7 @@ public class RetrievalServiceHelperTests
         var tenantId = Guid.NewGuid();
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
-        var scope = new ScopeToken(tenantId, null, null, agentId, conversationId, null, null);
+        var scope = new ScopeToken(tenantId, null, null, agentId, conversationId, null, null, null);
         var metadata = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
         {
             ["Source"] = "path-aware"
@@ -142,7 +158,7 @@ public class RetrievalServiceHelperTests
     {
         var builder = new RecordingScopePathBuilder();
         var service = CreateService(builder);
-        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), Guid.NewGuid(), null, null);
+        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), Guid.NewGuid(), null, null, null);
         var metadata = new Dictionary<string, object>();
 
         var hash = (string)ComputeContentHashMethod.Invoke(service, new object[] { "payload", scope, metadata, true })!;
@@ -156,7 +172,7 @@ public class RetrievalServiceHelperTests
     {
         var builder = new RecordingScopePathBuilder();
         var service = CreateService(builder);
-        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), null, null, null);
+        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), null, null, null, null);
         var metadata = new Dictionary<string, object>();
 
         _ = (string)ComputeContentHashMethod.Invoke(service, new object[] { "payload", scope, metadata, false })!;
@@ -269,12 +285,13 @@ public class RetrievalServiceHelperTests
             Guid? personaId,
             Guid? agentId,
             Guid? conversationId,
+            Guid? planId,
             Guid? projectId,
             Guid? worldId,
             out ScopePath scopePath)
         {
             TryBuildCalls++;
-            return _inner.TryBuild(tenantId, appId, personaId, agentId, conversationId, projectId, worldId, out scopePath);
+            return _inner.TryBuild(tenantId, appId, personaId, agentId, conversationId, planId, projectId, worldId, out scopePath);
         }
 
         public ScopePath AppendSegment(ScopePath scopePath, ScopeSegment segment)

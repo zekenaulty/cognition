@@ -1,6 +1,7 @@
 using Cognition.Jobs;
 using Cognition.Data.Relational;
 using Cognition.Clients;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Planning;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -83,6 +84,7 @@ builder.Services.AddOptions<PlannerQuotaOptions>()
 
 var workflowEventsEnabled = builder.Configuration.GetValue("WorkflowEvents:Enabled", true);
 builder.Services.AddScoped(sp => new WorkflowEventLogger(sp.GetRequiredService<CognitionDbContext>(), workflowEventsEnabled));
+builder.Services.AddScoped<IFictionLifecycleTelemetry, FictionLifecycleWorkflowTelemetry>();
 
 
 // Register example + concrete jobs and recurring registration

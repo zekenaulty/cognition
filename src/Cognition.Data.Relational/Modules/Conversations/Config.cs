@@ -130,20 +130,28 @@ public class ConversationTaskConfiguration : IEntityTypeConfiguration<Conversati
         b.HasKey(x => x.Id).HasName("pk_conversation_tasks");
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.ConversationPlanId).HasColumnName("conversation_plan_id");
-        b.HasOne(x => x.ConversationPlan).WithMany(p => p.Tasks).HasForeignKey(x => x.ConversationPlanId).HasConstraintName("fk_conversation_tasks_plan");
-    b.Property(x => x.StepNumber).HasColumnName("step_number");
-    b.Property(x => x.Thought).HasColumnName("thought");
-    b.Property(x => x.Goal).HasColumnName("goal");
-    b.Property(x => x.Rationale).HasColumnName("rationale");
-    b.Property(x => x.ToolId).HasColumnName("tool_id");
-    b.Property(x => x.ToolName).HasColumnName("tool_name");
-    b.Property(x => x.ArgsJson).HasColumnName("args_json").HasColumnType("jsonb");
-    b.Property(x => x.Observation).HasColumnName("observation");
-    b.Property(x => x.Error).HasColumnName("error");
-    b.Property(x => x.Finish).HasColumnName("finish");
-    b.Property(x => x.FinalAnswer).HasColumnName("final_answer");
-    b.Property(x => x.Status).HasColumnName("status");
-    b.Property(x => x.CreatedAt).HasColumnName("created_at");
+        b.HasOne(x => x.ConversationPlan)
+            .WithMany(p => p.Tasks)
+            .HasForeignKey(x => x.ConversationPlanId)
+            .HasConstraintName("fk_conversation_tasks_plan");
+        b.Property(x => x.StepNumber).HasColumnName("step_number");
+        b.Property(x => x.Thought).HasColumnName("thought");
+        b.Property(x => x.Goal).HasColumnName("goal");
+        b.Property(x => x.Rationale).HasColumnName("rationale");
+        b.Property(x => x.ToolId).HasColumnName("tool_id");
+        b.Property(x => x.ToolName).HasColumnName("tool_name");
+        b.Property(x => x.ArgsJson).HasColumnName("args_json").HasColumnType("jsonb");
+        b.Property(x => x.Observation).HasColumnName("observation");
+        b.Property(x => x.Error).HasColumnName("error");
+        b.Property(x => x.Finish).HasColumnName("finish");
+        b.Property(x => x.FinalAnswer).HasColumnName("final_answer");
+        b.Property(x => x.Status).HasColumnName("status");
+        b.Property(x => x.CreatedAt).HasColumnName("created_at");
+        b.Property(x => x.BacklogItemId).HasColumnName("backlog_item_id").HasMaxLength(128);
+        b.HasIndex(x => new { x.ConversationPlanId, x.BacklogItemId })
+            .HasDatabaseName("ux_conversation_tasks_plan_backlog")
+            .IsUnique()
+            .HasFilter("backlog_item_id IS NOT NULL");
     }
 }
 

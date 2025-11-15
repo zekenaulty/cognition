@@ -18,7 +18,7 @@ public class ScopePathTests
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
 
-        var token = new ScopeToken(tenantId, appId, personaId, agentId, conversationId, null, null);
+        var token = new ScopeToken(tenantId, appId, personaId, agentId, conversationId, null, null, null);
 
         var builder = ScopePathBuilderTestHelper.CreateBuilder();
         var path = builder.Build(token);
@@ -38,7 +38,7 @@ public class ScopePathTests
         var personaId = Guid.NewGuid();
         var projectId = Guid.NewGuid();
 
-        var token = new ScopeToken(null, null, personaId, null, null, projectId, null);
+        var token = new ScopeToken(null, null, personaId, null, null, null, projectId, null);
 
         var builder = ScopePathBuilderTestHelper.CreateBuilder();
         var path = builder.Build(token);
@@ -46,6 +46,21 @@ public class ScopePathTests
         path.Principal.Should().Be(new ScopePrincipal(personaId, "persona"));
         path.Segments.Should().ContainSingle(s => s.Key == "project" && s.Value == projectId.ToString("D"));
         path.Canonical.Should().Be($"persona:{personaId:D}/project={projectId:D}");
+    }
+
+    [Fact]
+    public void ToScopePath_ShouldIncludePlanSegment_WhenProvided()
+    {
+        var agentId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
+
+        var token = new ScopeToken(null, null, null, agentId, null, planId, null, null);
+        var builder = ScopePathBuilderTestHelper.CreateBuilder();
+        var path = builder.Build(token);
+
+        path.Principal.Should().Be(new ScopePrincipal(agentId, "agent"));
+        path.Segments.Should().ContainSingle(s => s.Key == "plan" && s.Value == planId.ToString("D"));
+        path.Canonical.Should().Contain($"plan={planId:D}");
     }
 
     [Fact]

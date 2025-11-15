@@ -6,10 +6,9 @@ using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Clients.Tools.Planning.Fiction;
-using Cognition.Contracts;
-using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -21,17 +20,20 @@ public class VisionPlannerRunner : FictionPhaseRunnerBase
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly VisionPlannerTool _planner;
+    private readonly ICharacterLifecycleService _lifecycleService;
 
     public VisionPlannerRunner(
         CognitionDbContext db,
         IAgentService agentService,
         IServiceProvider serviceProvider,
+        ICharacterLifecycleService lifecycleService,
         VisionPlannerTool planner,
         ILogger<VisionPlannerRunner> logger,
         IScopePathBuilder scopePathBuilder)
         : base(db, agentService, logger, FictionPhase.VisionPlanner, scopePathBuilder)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _lifecycleService = lifecycleService ?? throw new ArgumentNullException(nameof(lifecycleService));
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
     }
 
@@ -53,11 +55,7 @@ public class VisionPlannerRunner : FictionPhaseRunnerBase
             _serviceProvider,
             cancellationToken);
 
-        ScopePath? scopePath = null;
-        if (ScopePathBuilder.TryBuild(new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null), out var builtPath))
-        {
-            scopePath = builtPath;
-        }
+        var scopePath = ResolveScopePath(context);
 
         var plannerContext = PlannerContext.FromToolContext(
             toolContext,
@@ -70,7 +68,52 @@ public class VisionPlannerRunner : FictionPhaseRunnerBase
             });
 
         var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        await ProcessLifecycleAsync(plan, context, plannerResult, cancellationToken).ConfigureAwait(false);
         return ToPhaseResult(plannerResult, context);
+    }
+
+    private async Task ProcessLifecycleAsync(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        PlannerResult result,
+        CancellationToken cancellationToken)
+    {
+        if (!result.Artifacts.TryGetValue("parsed", out var parsedArtifact))
+        {
+            return;
+        }
+
+        var token = LifecyclePayloadParser.TryConvertToToken(parsedArtifact);
+        if (token is null)
+        {
+            return;
+        }
+
+        var characters = LifecyclePayloadParser.ExtractCharacters(token);
+        var loreRequirements = LifecyclePayloadParser.ExtractLoreRequirements(token);
+
+        if (characters.Count == 0 && loreRequirements.Count == 0)
+        {
+            return;
+        }
+
+        var request = new CharacterLifecycleRequest(
+            plan.Id,
+            context.ConversationId,
+            PlanPassId: null,
+            characters,
+            loreRequirements,
+            Source: "vision");
+
+        var lifecycleResult = await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
+        if (lifecycleResult.CreatedCharacters.Count > 0 || lifecycleResult.UpsertedLoreRequirements.Count > 0)
+        {
+            Logger.LogInformation(
+                "Vision lifecycle processed for plan {PlanId}: {Characters} characters, {Lore} lore requirements.",
+                plan.Id,
+                lifecycleResult.CreatedCharacters.Count,
+                lifecycleResult.UpsertedLoreRequirements.Count);
+        }
     }
 
     private FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)

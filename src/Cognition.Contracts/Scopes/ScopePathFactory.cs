@@ -8,13 +8,14 @@ internal static class ScopePathFactory
     public static ScopePath Create(in ScopeToken scopeToken)
     {
         var principal = scopeToken.ResolvePrincipal();
-        var segments = new List<ScopeSegment>(8);
+        var segments = new List<ScopeSegment>(9);
 
         AddSegment("tenant", scopeToken.TenantId, principal, includeEvenIfPrincipal: false, segments);
         AddSegment("app", scopeToken.AppId, principal, includeEvenIfPrincipal: false, segments);
         AddSegment("persona", scopeToken.PersonaId, principal, includeEvenIfPrincipal: false, segments);
         AddSegment("agent", scopeToken.AgentId, principal, includeEvenIfPrincipal: false, segments);
         AddSegment("conversation", scopeToken.ConversationId, principal, includeEvenIfPrincipal: true, segments);
+        AddSegment("plan", scopeToken.PlanId, principal, includeEvenIfPrincipal: true, segments);
         AddSegment("project", scopeToken.ProjectId, principal, includeEvenIfPrincipal: true, segments);
         AddSegment("world", scopeToken.WorldId, principal, includeEvenIfPrincipal: true, segments);
 

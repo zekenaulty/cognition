@@ -1,161 +1,186 @@
 # Fiction Iteration Phase 001
 
-## Objective
-- Port and expand the `iterate-book` orchestration into Cognition so fiction projects can plan, branch, and write inside the shared toolchain without losing existing capability.
-- Stand up a durable, multi-tier chain-of-thought graph (vision -> blueprint -> scroll -> woven prose) that supports branching, replay, and audit across assistants.
-- Move world knowledge, checkpoints, metrics, and transcripts from ad hoc files into first-class relational entities with tooling hooks.
+## Objective (Pre-Alpha Reality)
+- This is a pre-alpha fiction weaver. Only work that unblocks the living story loop (personas, lore, planners, author UX) is worth doing; no table migrations or dashboards unless they directly support that loop.
+- Run the entire `iterate-book` chain (vision ? iterative passes ? blueprint ? scroll ? woven prose ? world bible updates) inside Cognition with the same guardrails as the Python prototype.
+- Persist every phase's chain-of-thought, checkpoints, transcripts, metrics, and branch lineage so assistants can resume or fork safely.
+- Treat characters and lore as first-class data: planning phases must declare them up front, mint personas/agents immediately, and keep canon in sync.
+- Keep author personas, tool prompts, and world bible data under configuration so the experience is reproducible across jobs, consoles, and assistants.
 
-## Current State Insights
-- **Python Weaver** (`reference/iterate-book.py`) already expresses the end-to-end flow: checkpointed phases, blueprint refinement, recursive scene writing, and world grimoire updates. Strengths include schema validation, attentional gates, retry policies, and context caching, but persistence is file based and concurrency unsafe.
-- **Cognition Fiction Tools** (Outliner, SceneDraft, LoreKeeper, Worldbuilder, FactChecker) are data-first; they depend on `CognitionDbContext`, capture annotations/metrics, and expect minified JSON responses from LLMs. They currently operate independently and do not share a unified planning graph or checkpoints.
-- **Data Layer** provides outline nodes, draft segments, canon rules, glossary, timelines, and world assets. Missing are plan tiers, iterative passes, scroll structures, knowledge updates tied to writing, transcript storage, and a managed prompt catalog (the Prompts module is empty).
-- **Agent platform** has shipped agent-centric IDs and tooling, but residual persona fallbacks still exist outside Image Lab and retrieval policies need guardrails to prevent cross-agent bleed.
-- **Generated manuscripts** (e.g., reference/grimoire-of-the-fragmented.md) retain redundant draft passes and duplicated scene transitions; entire beats repeat because prompt orchestration never selects a canonical take nor enforces cleanup.
-- **Legacy fiction data/tooling** (OutlineNode, Draft, PlotOutline, WorldAsset, LoreKeeper, etc.) remain prototypes; we either polish them against the new plan graph or retire them once replacements ship.
+## Current Architecture Snapshot (Nov 2025)
+- **Phase runners** live in `src/Cognition.Clients/Tools/Fiction/Weaver/` (VisionPlannerRunner, IterativePlannerRunner, ChapterArchitectRunner, ScrollRefinerRunner, SceneWeaverRunner, WorldBibleManagerRunner) and inherit from `FictionPhaseRunnerBase` for logging + validations.
+- **Job orchestration** is handled by `FictionWeaverJobs`/`FictionWeaverJobClient` (Hangfire). They lock checkpoints (`FictionPlanCheckpoint`), publish `FictionPhaseProgressed` events, and write transcripts via `FictionPlanTranscript`.
+- **AgentService** backs every LLM call (persona-aware chat, instruction stages, SignalR logging). Personas exist, but new fiction characters are not minted automatically yet.
+- **Data layer** already includes the plan graph tables (`FictionPlan*`, chapter structures, story metrics, world bible entries). World-bible payloads are stored as structured JSON and linked to scrolls/scenes.
+- **Reference spec** (`reference/iterate-book.py`) remains the parity oracle for prompts, schemas, retry semantics, and scene rewrites.
+- **Character/lore lifecycle plan** lives in `plans/fiction/phase-001/character_persona_lifecycle.md` and describes how planners must promote characters + lore into personas/agents/world-bible entries.
 
-- **Prompts module** within `Cognition.Data.Relational.Modules.Prompts` is empty; we need it to host versioned prompt templates and plays once templating lands.
+## State of Play
+- C# runners + Hangfire orchestration are still live end-to-end, but we now have structured vision payloads (core/supporting cast + lore arrays with `track` flags) and schema validation/tests to back them.
+- `CharacterLifecycleService` handles persona/world-bible promotion and scroll + scene runners refuse to run when `FictionLoreRequirement` entries remain `Planned`, so lore gaps surface before prose is attempted.
+- Author persona context now flows through an `AuthorPersonaRegistry`; scroll/scene prompts load persona summaries + memories/world notes and automatically append new `PersonaMemory` entries after each pass.
+- FictionWeaver jobs enforce backlog metadata contracts (conversationPlanId, provider/model IDs, backlog task IDs) and fail early if clients omit them, keeping Hangfire + UI in sync.
+- Remaining gaps sit in tooling (UI/console still needs backlog/task plumbing), world-bible provenance wiring, and surfacing of tracked characters/lore inside author dashboards.
 
 ## Success Criteria
-- All five Python phases (vision, world grimoires, iterative passes, blueprint, refine, write) run inside Cognition with parity and ergonomic branching.
-- Book projects persist CoT nodes, locks, metrics, and transcripts transactionally so assistants can resume reliably.
-- Fiction tools consume and update the shared plan graph (e.g., SceneDraft uses scroll metadata, LoreKeeper writes directly into world bible tables).
+- Vision/iterative planners emit detailed `characters[]` and `lore[]` payloads, flag importance, and automatically spin up personas/agents/memories when needed.
+- Every fiction phase records its context (prompt template, instruction set, scope path) plus branch lineage so branches can resume/fork safely.
+- Scroll/scene writers refuse to run unless required lore + character assets exist (or they create them via the lifecycle service).
+- Author personas always speak with their stored memories; new prose automatically appends memories, world bible diffs, and canon obligations.
+- Consoles/agents can inspect characters, lore, checkpoints, branches, and transcripts via API.
 
-## Milestones & Tracks
+## Immediate User-Facing Priorities (Nov 2025)
+1. **Backlog-driven orchestration + resume UX:** Server-side guardrails now reject missing `conversationPlanId`/provider/model/task IDs; finish the `FictionPlanBacklog` work so Hangfire jobs and `ConversationTask` scheduling derive entirely from backlog state and ensure front-ends always send the required metadata (`phase-001_step_20250926_2327_inventory.md`, `hot_targeted_todo.md`). This keeps console progress, transcripts, and auto-resume flows aligned with what users initiated.
+   - _User impact:_ Authors see phase cards progress exactly in the order they kicked off, resumes land in the right scene, and transcripts stop drifting from backlog truth.
+   - _Work to land:_ Wire backlog state into `FictionWeaverJobs` enqueueing + `ConversationTask` scheduling, update UI/API contracts to require plan/provider/model IDs, migrate existing backlog items, and add guardrails that fail jobs lacking metadata.
+   - _Proof/telemetry:_ Dashboards comparing backlog status vs `FictionPhaseProgressed` events, resume-success counters, and alerting when UI posts missing identifiers.
+2. **Character & lore lifecycle enforcement:** Structured vision output, lifecycle service hooks, and scroll/scene gating are in place; next is wiring world-bible manager + UI so any `track=true` payload immediately surfaces personas/agents/memories/world-bible entries with provenance (`character_persona_lifecycle.md`). Authors should see a living roster with provenance instead of guessing which assets exist.
+   - _User impact:_ Character sheets, lore pillars, and drafting prerequisites become visible before prose starts, preventing canon drift and surprise failures mid-scroll.
+   - _Work to land:_ EF migrations + service implementation, runner integrations (Vision, WorldBible, Scroll, Scene), provenance metadata, lore requirement enforcement/auto-fill, and deterministic tests proving persona creation.
+   - _Proof/telemetry:_ Console roster fed by new APIs, lifecycle logs per character, blocking errors when prerequisites missing, and test snapshots attached to Milestone H.
+3. **Author persona context hydration:** Inject author persona memories (baseline prompt + latest `PersonaMemory` window + recent world-bible deltas) into every writing call and append memories after each pass so prose keeps a consistent voice and exposes obligations for subsequent edits.
+   - _User impact:_ Writers experience a stable tone/voice per author persona; edits carry previous obligations and world bible reminders without manual copy-paste.
+   - _Work to land:_ Author persona registry, AgentService prompt hook, memory window selection, automatic memory append after each pass, and console surfacing of newest obligations.
+   - _Proof/telemetry:_ Persona-memory diff logs per SceneWeaver run, regression tests swapping personas, and UX validation clips showing tone consistency.
+4. **Console/API surfacing for canon assets:** Build the `/projects/{id}/characters` and lore requirement endpoints plus console tabs/dashboards that show character status, first appearance, pending lore, and branch lineage. This is the first tangible UI the author will use to trust the lifecycle plumbing.
+   - _User impact:_ Authors can inspect who is tracked, whether lore is missing, and which branch each asset belongs to without digging through raw transcripts.
+   - _Work to land:_ API controllers/DTOs, lineage queries, console tabs/cards, and alert banners that link missing requirements back to lifecycle enforcement.
+   - _Proof/telemetry:_ Usage metrics on the new tabs, health checks confirming roster vs DB parity, and author-reported issues dropping in console feedback.
 
-### Milestone 0 - Snapshot & Guardrails
-1. Take a fresh arc snapshot + git tag of the current state; record feature flags and environment knobs.
-2. Default fiction weaver feature flags to off; design rollout plan for staged enablement.
-3. Catalog residual persona-based flows and schedule their removal or shims before fiction runs.
-4. Define operational guardrails (retry budgets, max token spend) and document escalation contacts.
+## Author-Facing Acceptance Scenarios
+1. **"Resume right where I left off" rehearsal**
+   - Setup: start a plan, pause after Blueprint, capture `FictionPlanBacklog` + console state.
+   - Expectation: backlog + `FictionPhaseProgressed` stay in sync, resume button requeues the correct `ConversationTask`, and telemetry shows matching plan/provider/model IDs.
+   - Evidence: console recording, Hangfire job log, and resume-success metric incrementing.
+2. **"Characters exist before prose" roster check**
+   - Setup: run Vision -> WorldBible while flagging `track=true` on two characters and one lore pillar.
+   - Expectation: CharacterLifecycleService mints personas/agents/memories, `FictionLoreRequirement` rows appear, and ScrollRefiner refuses to start until requirements mark Ready.
+   - Evidence: API `/projects/{id}/characters` response, console roster screenshot, failing validator log before requirements satisfied, passing log after fulfillment.
+3. **"Author voice stays consistent" tone pass**
+   - Setup: select two author personas, run SceneWeaver twice on the same scene with each persona.
+   - Expectation: prompts show the correct memory window, outputs include the persona’s tone notes, and persona memories append deltas after each run.
+   - Evidence: AgentService prompt trace, PersonaMemory table diff, UX review highlighting tone differences.
+4. **"Show me canon health" dashboard walkthrough**
+   - Setup: open new console tabs for Characters and Lore Requirements on an active plan with branches.
+   - Expectation: cards list status (Planned/In Draft/Ready), first appearance, linked branch IDs, and highlight missing lore with actionable CTAs.
+   - Evidence: analytics events for tab usage, screenshot of alert banner, API log proving roster/DB parity check succeeded.
 
-### Milestone A - Baseline Capture and Invariants
-_Status: Complete â€” see step note `phase-001_step_20250926_2327_inventory.md` for follow-ups._
-1. Inventory Python prompts, schema validators, retry rules, attentional gates, and file outputs (`_context`, `story.json`, markdown scenes).
-2. Document current metrics (metrics.csv), checkpoints (iterate_state.json), and lock semantics; flag gaps vs. transactional needs.
-3. Produce sample project archive (arc snapshot + Git tag) for regression and migration dry runs.
-4. Identify reusable prompt scaffolds (focus Phase-001 on OpenAI + Gemini); log Ollama-only spicy rewrites as deferred, narrow-scope plays.
+## Coordination & Kickoff Tasks (Nov 2025)
+1. **Hangfire + front-end backlog metadata contract (blocks Scenario #1):**
+   - Deliverables: shared spec doc for `ConversationTask` payload (planId, backlogItemId, provider, model, resumeToken), API contract changes for console, and job-queue validation that rejects missing metadata.
+   - Owners: Hangfire orchestration lead + Console/UX lead; schedule a joint design review and a sandbox rehearsal capturing console + job logs.
+   - Telemetry hooks: emit `FictionBacklogContractMissing` events when metadata absent, add resume-success/timeout counters, and annotate dashboards with backlog vs `FictionPhaseProgressed` drift.
+2. **CharacterLifecycleService + lore requirement migrations (blocks Scenarios #2 & #4):**
+   - Deliverables: EF migrations for `FictionCharacter` + `FictionLoreRequirement`, service implementation with provenance logging, runner integrations (Vision, WorldBible, Scroll, Scene), and initial telemetry events (`FictionCharacterPromoted`, `FictionLoreRequirementBlocked`).
+   - Owners: Data/EF engineer + Fiction runner engineer + Console/API engineer for roster endpoints.
+   - Telemetry hooks: add structured logs when personas/lore are minted, counters for blocked scroll/scene runs, and console analytics for roster tab usage.
 
-### Milestone B - Data Model & Persistence Evolution
-_Current status: EF POCOs drafted for plan graph/world bible tables; configuration scaffolding under review._
-1. Design ERD for multi-tier planning: `FictionPlan`, `FictionPlanPass`, `FictionChapterBlueprint`, `FictionChapterScroll`, `FictionChapterSection`, `FictionChapterScene`, `FictionPlanCheckpoint`, `FictionPlanTranscript`, `FictionStoryMetric`.
-2. Define world bible expansion tables (`FictionWorldBible`, `FictionWorldBibleEntry`) mapped to existing glossary/canon concepts; plan migration paths.
-3. Draft EF Core migrations, indexes, and constraints (slug uniqueness, lineage references, branch versioning metadata). _(ðŸš§ `20250928173755_AddFictionPlanGraph` covers core tables; checkpoint resume/cancel migration still pending rollout.)_
-4. Specify storage for LLM call transcripts and schema validation errors (for audit and replay). (All agent/tool LLM calls will be treated as conversations and traced we will need audit/xref metadata table to link the agent conversations to the phase/step data of the plan/process.)
-5. Author importer spec for `_context` artifacts -> relational tables (idempotent, resumable, produces discrepancy logs). (Nice-to-have; parity fallback, lowest priority.)
-6. ✅ **Template guard rail:** `PlannerBase` now validates each step's `TemplateId` before execution (unit-tested in `PlannerInfrastructureTests`).
-6. Generate seed data for a sample project and validate referential integrity + branching metadata.
-7. Reconcile existing fiction tables (PlotOutline, Draft, WorldAsset, etc.) and tool scaffolding with the plan graph; capture keep/polish vs retire decisions in the legacy action list.
+### Backlog Metadata Contract ? Spec Draft
+| Field | Source of Truth | Required? | Validation & Notes |
+| --- | --- | --- | --- |
+| `planId` | `FictionPlan` | Yes | Must exist + match backlog item; reject otherwise. |
+| `backlogItemId` | `FictionPlanBacklogItem` | Yes | Status transitions enforced (Pending -> InProgress -> Complete). |
+| `provider` | Console request | Yes | Must be in allowed provider list per environment. |
+| `model` | Console request | Yes | Must map to provider; persisted for telemetry. |
+| `resumeToken` | Hangfire | Optional (Resume only) | Required when resuming mid-phase; tied to checkpoint id. |
+| `authorPersonaId` | Console/Project | Optional (writing phases) | Validated against project registry; ensures memory hydration. |
 
-### Milestone C - Weaver Orchestration Service (Hangfire + Agent conversations)
-1. Host phase runners as Hangfire jobs; coordinate progress/events via bus and AgentService conversations (initial wrappers exist in `Cognition.Jobs/FictionWeaverJobs` for checkpoint-aware execution, and `IFictionWeaverJobClient` now passes provider/model metadata so jobs resolve LLM bindings deterministically).
-2. Model per-phase runners mirroring Python functions (`VisionPlanner`, `WorldBibleManager`, `IterativePlanner`, `ChapterArchitect`, `ScrollRefiner`, `SceneWeaver`).
-3. Implement checkpoint/lock manager backed by `FictionPlanCheckpoint` (phase status, progress counters, timestamps, resume metadata). Initial Hangfire wrapper (`FictionWeaverJobs`) now drives `Cancelled` state + branch resume/cancel hooks, but an EF migration is still required.
-4. Port schema validation, slug sanitization, attentional gates, and retry backoff helpers to shared libraries.
-5. Build transcript logger capturing system/user prompts, responses, validation diagnostics, metrics, and AgentService conversation IDs. FictionWeaverJobs now stores `FictionPlanTranscript` rows, publishes `FictionPhaseProgressed` events, and all phase runners call AgentService to capture real prompts + replies (token accounting still pending).
-6. Provide branching API (clone/fork tiers, compare/merge alternates, mark active branch) callable from jobs and UI.
+- API updates: `POST /api/fiction/plans/{id}/tasks` accepts the full payload and responds with the derived backlog state.
+- Job queue guard: `FictionWeaverJobs` fails fast if any required field missing/mismatched and emits `FictionBacklogContractMissing`.
+- Console UX: disable run/resume buttons until client gathers metadata; show inline errors sourced from the new API response.
+- Telemetry: dashboard tile comparing backlog item counts vs Hangfire queue, plus alert when drift >1 item for >5 minutes.
 
-### Milestone D - Tool Alignment & Workflow Glue
-1. Update OutlinerTool to read/write `FictionChapterBlueprint` beats and expose branch selection.
-2. Update SceneDraftTool to pull section/scene metadata from `FictionChapterScroll` and report metrics back to `FictionStoryMetric`.
-3. Extend LoreKeeperTool and WorldbuilderTool to operate on `FictionWorldBible` entries with lineage to chapters/sections.
-4. Introduce FactChecker/NPC pipelines that consume plan nodes, annotate results, and feed timeline/canon updates.
-5. Provide administrative commands (start phase, resume, branch, lock override) exposed via tool interfaces or API endpoints.
+### CharacterLifecycleService & Lore Requirement Kickoff
+1. **EF migrations**
+   - Add `FictionCharacter` (PersonaId, AgentId, PlanId, WorldBibleEntryId, FirstSceneId, CreatedInPass, Slug, ProvenanceJson).
+   - Add `FictionLoreRequirement` (PlanId, ScrollId/SceneId nullable, RequirementSlug, Status enum, WorldBibleEntryId, CreatedByPass, Notes).
+   - Seed statuses (`Planned`, `Blocked`, `Ready`), indexes on PlanId + Slug.
+2. **Service contract**
+   - `CharacterLifecycleService.ProcessAsync(FictionPlan plan, IEnumerable<CharacterPayload> characters, LifecycleContext context)`.
+   - Responsibilities: slug normalization, persona lookup/creation, agent binding, PersonaMemory bootstrap, telemetry emit.
+3. **Runner integrations**
+   - Vision + WorldBible: call service immediately after payload validation.
+   - Scroll/Scene: query `FictionLoreRequirement`; if any `Blocked`, raise actionable exception and/or auto-trigger lore tool.
+4. **API/Console surfacing**
+   - `/api/fiction/projects/{id}/characters` + `/lore-requirements` endpoints returning lineage + status.
+   - Console tabs consume these endpoints; highlight pending requirements required for Scenario #4.
+5. **Telemetry & testing**
+   - Emit `FictionCharacterPromoted`, `FictionCharacterUpdated`, `FictionLoreRequirementBlocked/Ready` events.
+   - Deterministic tests verifying persona creation + lore gating before enabling feature flag.
 
-### Milestone E - Knowledge, Reflection, and Branching Intelligence
-1. Port chapter memory summaries into relational storage; expose helpers for fetching recent memories (with windowing instead of truncated arrays).
-2. Implement world grimoire update loops using structured diffing so we track additions/changes per chapter.
-3. Encode branching heuristics (e.g., create alternate blueprint when attentional gate fails or metrics regress) and enable manual branch creation.
-4. Plan for timeline synchronization: map scene metadata to `TimelineEvent` entries with bidirectional references.
-5. Add a mandatory focused rewriting/consolidation phase that consumes the refined scroll, de-duplicates repeated beats, and emits the post-processed manuscript.
+## Milestones & Tracks (Pre-Alpha gating)
 
-### Milestone F - Retrieval Guardrails & Observability
-1. Enforce ScopeToken usage across phase runners and tools; ensure all retrieval queries filter by `AgentId` + `ConversationId` (and project/world identifiers when present).
-2. Provide a policy toggle to disallow Agent-level fallback for isolation-critical conversations; document defaults per environment.
-3. Remove remaining persona-based adapters outside Image Lab and update events/payloads to be Agent-first.
-4. Build metrics dashboards for phase durations, retries, schema failures, embedding writes/searches, and token consumption.
-5. Create integration tests using deterministic LLM stubs to exercise each phase end-to-end.
-6. Add contract tests for tool I/O schemas plus isolation tests verifying no cross-conversation bleed without promotion.
-7. Document operational runbooks (feature flags, rollback, recovery) and share with assistants + humans.
+### Milestone 0 ? Snapshot & Guardrails _(Complete)_
+1. ? arc snapshot + git tag recorded for Phase 001 baseline.
+2. ? Feature flags (`Fiction.Weaver.*`) defaulted off; rollout doc in `planning_the_planner_rollout_recipe.md`.
+3. ? Persona-based fallbacks catalogued; migration plan tracked in scope-token refactor doc.
+4. ? Operational guardrails (retry budgets, token caps, escalation contacts) captured alongside Hangfire job sheet.
 
-### Milestone G - Prompt Playbook & Templating
-### Legacy Fiction Integration Action List
-- Audit existing relational POCOs (`PlotOutline`, `Draft`, `WorldAsset`, `Timeline`, `StyleGuide`) for overlap with new plan entities; mark keep/polish vs retire.
-- Map current tools (Outliner, SceneDraft, LoreKeeper, Worldbuilder, FactChecker, Rewriter) to plan graph responsibilities and note required refactors.
-- Decide whether to repurpose `PlotOutline` as long-form meta attached to `FictionPlan` or archive it once blueprints/scrolls ship.
-- Ensure the Prompts module hosts shared templates for all retained tools, versioned with play identifiers.
-- Record outcomes in milestone step notes and feed follow-up tasks into the backlog.
+### Milestone A ? Baseline Capture _(Complete)_
+- Prompts, schema validators, retry rules, attentional gates, metrics, and python artifacts inventoried (`phase-001_step_20250926_2327_inventory.md`).
 
-1. Audit Python and tool prompts; extract them into PromptTemplate records (versioned, tagged, provider-aware).
-2. Design "Prompt Play" schema (e.g., Play, PlayStep, PlayBinding) linking templates to orchestrator phases and agent roles.
-3. Implement templating engine adapters (start with Razor/RazorLight; allow fallback string interpolation) with token resolution, partials, and environment overrides.
-4. Encode scene-transition discipline inside plays (explicit guidance on recap vs. advance, track last-output hashes) to prevent duplicated openings/endings.
-5. Build prompt simulation and preview tooling (render with sample tokens, diff against legacy prompts, capture token counts).
-6. Wire plays into Weaver phase runners and Fiction tools so each agent call selects a play + template and logs usage.
-7. Establish prompt governance workflows (status, approvals, experiments) and telemetry on prompt effectiveness.
+### Milestone B ? Data Model & Persistence _(Complete)_
+1. ? ERD + EF POCOs (`FictionPlan*`, world bible, checkpoints, transcripts, story metrics).
+2. ? Migrations deployed (plan graph + checkpoint resume/cancel).
+3. ? Transcript storage + validation diagnostics wired through `FictionWeaverJobs`.
+4. ? Optional `_context` importer (backlog / nice-to-have).
+5. ? Legacy fiction tables reconciliation (PlotOutline, Draft, WorldAsset) still pending decision.
 
-## Deliverables
-- Post-processing pipeline that collapses duplicate scenes and enforces scene-transition QA.
-- Updated docs/runbooks covering agent-centric APIs, weaver operations, and recovery procedures.
-- Detailed architecture spec and sequence diagrams for the Fiction Weaver service and branching model.
-- EF Core migrations + seed/import scripts covering plan tiers, world bible, metrics, transcripts.
-- Shared C# libraries for schema validation, attentional gates, slug/prompt utilities.
-- Updated Fiction tools aligned with the shared graph and metrics reporting.
-- (Optional) Importer utility for legacy `_context` projects with reconciliation report (nice-to-have; only needed if additional Python-era books surface).
-- Prompt playbook catalog with templated prompts, plays, and preview tooling.
-- Regression test suite and telemetry dashboards.
+### Milestone C ? Weaver Orchestration Service _(In progress)_
+1. ? Hangfire jobs + `IFictionWeaverJobClient` enqueued per phase with provider/model metadata.
+2. ? Phase runners audit prompts + validations; transcripts stored per attempt.
+3. ? Checkpoint resume/cancel path operational; branch metadata recorded.
+4. ? Persona/lore lifecycle hooks still missing; see Milestone H.
+5. ? SceneWeaver prose validation + telemetry gating (token spend, retries) still open.
+6. ? Backlog-driven `ConversationTask` scheduling + front-end resume metadata capture so UI progress mirrors plan backlog state (supports Immediate Priority #1; blocked until backlog + UI contracts land).
 
-## Migration & Rollout Strategy
-1. Run importer against archived sample projects, reconcile discrepancies, iterate until clean.
-2. Deploy Weaver service behind feature flag; run parallel with Python pipeline using clone projects.
-3. Validate parity (plan structures, world bible content, prose output) and capture anomalies.
-4. Incrementally onboard active projects, providing rollback via snapshot + Git tag.
-5. Decommission Python pipeline after parity sign-off; archive legacy artifacts.
+### Milestone D ? Tool Alignment & Workflow Glue _(Blocked by Milestone H)_
+1. Update Outliner/Chapter tools to read/write `FictionChapterBlueprint` beats.
+2. Update SceneDraftTool to consume scroll metadata and emit `FictionStoryMetric`.
+3. Wire LoreKeeper/Worldbuilder to `FictionWorldBible` entries (with lineage UI).
+4. Introduce FactChecker/NPC pipelines that annotate canon and feed timelines.
+5. Surface admin/branch operations in API + console tooling, including the character/lore dashboards called out under Immediate Priority #4.
 
-## Risks & Mitigations
-- **LLM schema drift**: enforce strict validators, maintain canned fixtures, add continuous prompt tests.
-- **Data migration gaps**: dry runs with checksum reports, maintain reversible scripts, keep `_context` copies until acceptance.
-- **Concurrency/race conditions**: design checkpoint manager with row-level locking and optimistic concurrency tokens.
-- **Cost/performance regressions**: cache persona/style summaries, reuse system prompts, monitor token usage.
-- **Tool contract breakage**: introduce interface-level tests and staged rollout with feature flags.
+### Milestone E ? Knowledge, Reflection, Branching _(Not started)_
+1. Persist chapter memory summaries + persona memories with windowing helpers.
+2. Structured world-bible diffing per chapter.
+3. Branch heuristics + automatic fork/merge helpers.
+4. Timeline synchronization tied to scenes/scrolls.
+5. Mandatory rewrite/consolidation phase that cleans duplicated beats.
 
-## Worklog Protocol
-- Step notes live at `plans/fiction/phase-001_step_YYYYMMDD_HHMM_<slug>.md` and capture goal, context, commands, files touched, tests, outcome, next actions (use `O` for open, `X` for done).
-- Record ad hoc thoughts in `plans/_scratch/` with timestamp headers; promote decisions into step notes before closing.
-- Each milestone completion should reference supporting commits, migrations, and validation outputs.
+### Milestone F ? Retrieval Guardrails & Observability _(Ongoing)_
+1. Enforce ScopeToken usage across all runners/tools (agent + conversation isolation).
+2. Policy toggles for agent fallback + default behavior documented.
+3. Remove residual persona-ID routes in API (Image Lab done; others pending).
+4. Build dashboards for phase duration, retries, schema failures, embeddings, token spend.
+5. Deterministic integration tests (LLM stubs) covering each phase.
 
-## Checklist
-- [ ] Retrieval policies enforce ScopeToken + Agent isolation with environment toggles recorded.
-- [ ] Agent-centric APIs free of persona fallbacks (except intentional legacy cases) with documented runbooks.
-- [ ] Rewriting/consolidation phase eliminates duplicate beats in generated manuscripts.
-- [ ] Address ASP0023 route conflicts in `ClientProfilesController` (run API analyzers and align route templates).
-- [ ] Resolve CS8619/CS8620 nullability warnings in RetrievalService/KnowledgeIndexingService (decide harden vs suppression).
-- [x] Planner template guard rails enforced in PlannerBase (2025-10-18) with regression coverage.
-- [ ] Baseline Python prompts, schemas, checkpoints, metrics, and sample artifacts documented.
-- [ ] ERD + migrations for multi-tier plan, world bible, checkpoints, transcripts authored.
-- [ ] Weaver service scaffolding with phase runners, checkpoints, and transcript logging implemented.
-- [ ] Branching model (clone/fork/merge) operational with lineage tracking.
-- [ ] (Optional) Legacy `_context` importer produces reconciliation report (nice-to-have; very low priority).
-- [ ] Prompt catalog populated, templating engine in place, and plays wired into orchestration.
-- [ ] Fiction tools updated to consume shared plan graph and emit telemetry.
-- [ ] Regression harness + observability dashboards live, with parity sign-off for first migrated project.
+### Milestone G ? Prompt Playbook & Templating _(Not started)_
+1. Populate `Cognition.Data.Relational.Modules.Prompts` with versioned templates and plays.
+2. Wire templating engine so runners pull prompts by ID + version.
+3. Provide tooling to diff/promote prompt versions.
 
+### Milestone H ? Character & Lore Lifecycle _(New)_
+- Reference: `plans/fiction/phase-001/character_persona_lifecycle.md`.
+1. Vision planner emits detailed character + lore payloads with track flags.
+2. CharacterLifecycleService mints/upgrades personas, agents, persona memories, and world-bible entries with provenance (Immediate Priority #2).
+3. Lore requirements tracked per scroll/scene; writers block until satisfied and expose actionable errors/auto-fill options to the author consoles (Immediate Priority #2 + #4).
+4. Author persona registry + memory hydration wired into scroll/scene prompts, including automatic memory append + surfacing in the console UI (Immediate Priority #3).
+5. Tests assert persona/lore creation + author memory updates.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+## Open Issues & Checklist
+- [ ] `_context` importer + reconciliation report.
+- [ ] Legacy fiction table reconciliation / migration or retirement plan.
+- [ ] Persona/lore lifecycle (Milestone H) implemented and hooked into Vision/WorldBible runners (vision/scroll/scene hooks landed; world-bible + roster surfacing still open).
+- [ ] SceneWeaver prose validation + telemetry gating (token budgets, retries, metrics).
+- [ ] Tool alignment (Milestone D) ? Outliner, SceneDraft, LoreKeeper, Worldbuilder wired to new tables.
+- [ ] Knowledge/branching intelligence (Milestone E) ? memories, diffing, rewrite pass, timeline mapping.
+- [ ] Retrieval guardrails ? ensure ScopeToken usage + remaining persona routes removed.
+- [ ] Prompt playbook/templating landed with versioned prompts + promotion pipeline.
+- [ ] Backlog-driven orchestration + resume UX polish so user-facing progress, resumes, and dashboards stay authoritative (server-side guardrails landed; UI/console + telemetry still pending).
+- [x] Author persona context hydration + automatic memory append validated end-to-end (Immediate Priority #3 / Milestone H).
+- [ ] Console/API surfacing for tracked characters + lore requirements with branch lineage (Immediate Priority #4 / Milestone D).
+- [ ] Hangfire + front-end backlog metadata contract signed off, telemetry hooks live, and Scenario #1 rehearsal recorded.
+- [ ] CharacterLifecycleService + lore requirement migrations landed with telemetry (`FictionCharacterPromoted`, `FictionLoreRequirementBlocked`) and Scenarios #2/#4 ready to run.
+- [ ] Acceptance scenarios 1-4 rehearsed with artifacts (videos/logs) attached to the Phase 001 completion report.
+- [ ] ruthlessly drop/defer tasks that do not unblock personas/lore/planners/writer UX (no more 'migrate empty table' work).

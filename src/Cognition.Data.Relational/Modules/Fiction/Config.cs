@@ -32,10 +32,15 @@ public class FictionPlanConfiguration : IEntityTypeConfiguration<FictionPlan>
         b.Property(x => x.Status).HasColumnName("status").HasConversion<string>();
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        b.Property(x => x.CurrentConversationPlanId).HasColumnName("current_conversation_plan_id");
         b.HasOne(x => x.FictionProject)
             .WithMany(p => p.FictionPlans)
             .HasForeignKey(x => x.FictionProjectId)
             .HasConstraintName("fk_fiction_plans_project");
+        b.HasOne(x => x.CurrentConversationPlan)
+            .WithMany()
+            .HasForeignKey(x => x.CurrentConversationPlanId)
+            .HasConstraintName("fk_fiction_plans_conversation_plan");
         b.HasIndex(x => new { x.FictionProjectId, x.Name }).HasDatabaseName("ix_fiction_plans_project_name");
         b.HasMany(x => x.Backlog)
             .WithOne(x => x.FictionPlan)
@@ -84,6 +89,117 @@ public class FictionPlanBacklogItemConfiguration : IEntityTypeConfiguration<Fict
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.HasIndex(x => new { x.FictionPlanId, x.BacklogId }).IsUnique().HasDatabaseName("ux_fiction_plan_backlog_plan_backlog_id");
+    }
+}
+
+public class FictionCharacterConfiguration : IEntityTypeConfiguration<FictionCharacter>
+{
+    public void Configure(EntityTypeBuilder<FictionCharacter> b)
+    {
+        b.ToTable("fiction_characters");
+        b.HasKey(x => x.Id).HasName("pk_fiction_characters");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.FictionPlanId).HasColumnName("fiction_plan_id");
+        b.Property(x => x.PersonaId).HasColumnName("persona_id");
+        b.Property(x => x.AgentId).HasColumnName("agent_id");
+        b.Property(x => x.WorldBibleEntryId).HasColumnName("world_bible_entry_id");
+        b.Property(x => x.FirstSceneId).HasColumnName("first_scene_id");
+        b.Property(x => x.CreatedByPlanPassId).HasColumnName("created_by_plan_pass_id");
+        b.Property(x => x.Slug).HasColumnName("slug").HasMaxLength(128);
+        b.Property(x => x.DisplayName).HasColumnName("display_name").HasMaxLength(256);
+        b.Property(x => x.Role).HasColumnName("role").HasMaxLength(128);
+        b.Property(x => x.Importance).HasColumnName("importance").HasMaxLength(64);
+        b.Property(x => x.Summary).HasColumnName("summary").HasMaxLength(2048);
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2048);
+        b.Property(x => x.ProvenanceJson).HasColumnName("provenance_json").HasColumnType("jsonb");
+        b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+        b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+        b.HasOne(x => x.FictionPlan)
+            .WithMany(p => p.Characters)
+            .HasForeignKey(x => x.FictionPlanId)
+            .HasConstraintName("fk_fiction_characters_plan");
+
+        b.HasOne(x => x.Persona)
+            .WithMany()
+            .HasForeignKey(x => x.PersonaId)
+            .HasConstraintName("fk_fiction_characters_persona");
+
+        b.HasOne(x => x.Agent)
+            .WithMany()
+            .HasForeignKey(x => x.AgentId)
+            .HasConstraintName("fk_fiction_characters_agent");
+
+        b.HasOne(x => x.WorldBibleEntry)
+            .WithMany()
+            .HasForeignKey(x => x.WorldBibleEntryId)
+            .HasConstraintName("fk_fiction_characters_world_bible_entry");
+
+        b.HasOne(x => x.FirstScene)
+            .WithMany()
+            .HasForeignKey(x => x.FirstSceneId)
+            .HasConstraintName("fk_fiction_characters_first_scene");
+
+        b.HasOne(x => x.CreatedByPlanPass)
+            .WithMany()
+            .HasForeignKey(x => x.CreatedByPlanPassId)
+            .HasConstraintName("fk_fiction_characters_created_pass");
+
+        b.HasIndex(x => new { x.FictionPlanId, x.Slug })
+            .IsUnique()
+            .HasDatabaseName("ux_fiction_characters_plan_slug");
+    }
+}
+
+public class FictionLoreRequirementConfiguration : IEntityTypeConfiguration<FictionLoreRequirement>
+{
+    public void Configure(EntityTypeBuilder<FictionLoreRequirement> b)
+    {
+        b.ToTable("fiction_lore_requirements");
+        b.HasKey(x => x.Id).HasName("pk_fiction_lore_requirements");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.FictionPlanId).HasColumnName("fiction_plan_id");
+        b.Property(x => x.ChapterScrollId).HasColumnName("chapter_scroll_id");
+        b.Property(x => x.ChapterSceneId).HasColumnName("chapter_scene_id");
+        b.Property(x => x.CreatedByPlanPassId).HasColumnName("created_by_plan_pass_id");
+        b.Property(x => x.WorldBibleEntryId).HasColumnName("world_bible_entry_id");
+        b.Property(x => x.RequirementSlug).HasColumnName("requirement_slug").HasMaxLength(128);
+        b.Property(x => x.Title).HasColumnName("title").HasMaxLength(256);
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<string>();
+        b.Property(x => x.Description).HasColumnName("description").HasMaxLength(2048);
+        b.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(2048);
+        b.Property(x => x.MetadataJson).HasColumnName("metadata_json").HasColumnType("jsonb");
+        b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+        b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+        b.HasOne(x => x.FictionPlan)
+            .WithMany(p => p.LoreRequirements)
+            .HasForeignKey(x => x.FictionPlanId)
+            .HasConstraintName("fk_fiction_lore_requirements_plan");
+
+        b.HasOne(x => x.ChapterScroll)
+            .WithMany()
+            .HasForeignKey(x => x.ChapterScrollId)
+            .HasConstraintName("fk_fiction_lore_requirements_scroll");
+
+        b.HasOne(x => x.ChapterScene)
+            .WithMany()
+            .HasForeignKey(x => x.ChapterSceneId)
+            .HasConstraintName("fk_fiction_lore_requirements_scene");
+
+        b.HasOne(x => x.CreatedByPlanPass)
+            .WithMany()
+            .HasForeignKey(x => x.CreatedByPlanPassId)
+            .HasConstraintName("fk_fiction_lore_requirements_created_pass");
+
+        b.HasOne(x => x.WorldBibleEntry)
+            .WithMany()
+            .HasForeignKey(x => x.WorldBibleEntryId)
+            .HasConstraintName("fk_fiction_lore_requirements_world_bible_entry");
+
+        b.HasIndex(x => new { x.FictionPlanId, x.RequirementSlug })
+            .IsUnique()
+            .HasDatabaseName("ux_fiction_lore_requirements_plan_slug");
     }
 }
 

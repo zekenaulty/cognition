@@ -19,6 +19,7 @@ using Xunit;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Testing.Utilities;
 
 namespace Cognition.Jobs.Tests
 {
@@ -30,9 +31,10 @@ namespace Cognition.Jobs.Tests
             await using var db = CreateDbContext();
             var conversationId = Guid.NewGuid();
             var personaId = Guid.NewGuid();
-            var planId = Guid.NewGuid();
+            var conversationPlanId = Guid.NewGuid();
             var agentId = Guid.NewGuid();
             var worldBibleId = Guid.NewGuid();
+            var fictionPlanId = Guid.NewGuid();
             var args = new Dictionary<string, object?>
             {
                 ["planId"] = Guid.NewGuid(),
@@ -46,7 +48,7 @@ namespace Cognition.Jobs.Tests
 
             var conversationPlan = new ConversationPlan
             {
-                Id = planId,
+                Id = conversationPlanId,
                 ConversationId = conversationId,
                 PersonaId = personaId,
                 Title = "Backlog Plan",
@@ -57,7 +59,7 @@ namespace Cognition.Jobs.Tests
             conversationPlan.Tasks.Add(new ConversationTask
             {
                 Id = Guid.NewGuid(),
-                ConversationPlanId = planId,
+                ConversationPlanId = conversationPlanId,
                 StepNumber = 1,
                 ToolName = "fiction.weaver.chapterArchitect",
                 ArgsJson = System.Text.Json.JsonSerializer.Serialize(args),
@@ -87,8 +89,8 @@ namespace Cognition.Jobs.Tests
                 Guid.NewGuid(),
                 null,
                 new ToolPlan("{}"),
-                planId,
-                Guid.NewGuid(),
+                conversationPlanId,
+                fictionPlanId,
                 "main",
                 new Dictionary<string, object?>());
 
@@ -98,6 +100,80 @@ namespace Cognition.Jobs.Tests
             published!.Metadata.Should().ContainKey("backlogItemId").WhoseValue.Should().Be("outline-core-conflicts");
             published.Metadata.Should().ContainKey("worldBibleId").WhoseValue.Should().Be(worldBibleId.ToString());
             published.Metadata.Should().ContainKey("iterationIndex").WhoseValue.Should().Be("2");
+            published.Metadata.Should().ContainKey("planId").WhoseValue.Should().Be(fictionPlanId.ToString("D"));
+            published.Args.Should().ContainKey("planId");
+            published.Args["planId"]!.ToString().Should().Be(args["planId"]?.ToString());
+        }
+
+        [Fact]
+        public async Task PlanReadyHandler_injects_planId_when_missing_from_args()
+        {
+            await using var db = CreateDbContext();
+            var conversationId = Guid.NewGuid();
+            var personaId = Guid.NewGuid();
+            var conversationPlanId = Guid.NewGuid();
+            var agentId = Guid.NewGuid();
+            var fictionPlanId = Guid.NewGuid();
+            var args = new Dictionary<string, object?>
+            {
+                ["agentId"] = agentId,
+                ["conversationId"] = conversationId,
+                ["providerId"] = Guid.NewGuid()
+            };
+
+            var conversationPlan = new ConversationPlan
+            {
+                Id = conversationPlanId,
+                ConversationId = conversationId,
+                PersonaId = personaId,
+                Title = "Backlog Plan",
+                CreatedAt = DateTime.UtcNow,
+                Tasks = new List<ConversationTask>
+                {
+                    new()
+                    {
+                        Id = Guid.NewGuid(),
+                        ConversationPlanId = conversationPlanId,
+                        StepNumber = 1,
+                        ToolName = "fiction.weaver.chapterArchitect",
+                        ArgsJson = System.Text.Json.JsonSerializer.Serialize(args),
+                        Status = "Pending",
+                        CreatedAt = DateTime.UtcNow
+                    }
+                }
+            };
+
+            db.ConversationPlans.Add(conversationPlan);
+            await db.SaveChangesAsync();
+
+            var bus = Substitute.For<IBus>();
+            ToolExecutionRequested? published = null;
+            bus.Publish(Arg.Any<object>()).Returns(Task.CompletedTask).AndDoes(ci =>
+            {
+                if (ci.Arg<object>() is ToolExecutionRequested request)
+                {
+                    published = request;
+                }
+            });
+
+            var handler = new PlanReadyHandler(db, bus, new WorkflowEventLogger(db, false));
+            var planReady = new PlanReady(
+                conversationId,
+                agentId,
+                personaId,
+                Guid.NewGuid(),
+                null,
+                new ToolPlan("{}"),
+                conversationPlanId,
+                fictionPlanId,
+                "main",
+                new Dictionary<string, object?>());
+
+            await handler.Handle(planReady);
+
+            published.Should().NotBeNull();
+            published!.Args.Should().ContainKey("planId").WhoseValue.Should().Be(fictionPlanId);
+            published.Metadata.Should().ContainKey("planId").WhoseValue.Should().Be(fictionPlanId.ToString("D"));
         }
 
         [Fact]
@@ -442,6 +518,7 @@ namespace Cognition.Jobs.Tests
             var runner = new StubPhaseRunner(FictionPhase.IterativePlanner, (_, _) =>
                 Task.FromResult(FictionPhaseResult.Success(FictionPhase.IterativePlanner, "done")));
 
+            var scopePaths = ScopePathBuilderTestHelper.CreateBuilder();
             var jobs = new FictionWeaverJobs(
                 db,
                 new[] { runner },
@@ -449,14 +526,10 @@ namespace Cognition.Jobs.Tests
                 Substitute.For<IPlanProgressNotifier>(),
                 new WorkflowEventLogger(db, enabled: false),
                 Substitute.For<IFictionBacklogScheduler>(),
+                scopePaths,
                 NullLogger<FictionWeaverJobs>.Instance);
 
-            var metadata = new Dictionary<string, string>
-            {
-                ["backlogItemId"] = "outline-core-conflicts"
-            };
-
-            await jobs.RunIterativePlannerAsync(planId, agentId, conversationId, 1, Guid.NewGuid(), metadata: metadata);
+            await jobs.RunIterativePlannerAsync(planId, agentId, conversationId, 1, Guid.NewGuid(), Guid.NewGuid(), metadata: BuildMetadata("outline-core-conflicts"));
 
             var backlog = await db.FictionPlanBacklogItems.SingleAsync(x => x.BacklogId == "outline-core-conflicts");
             backlog.Status.Should().Be(FictionPlanBacklogStatus.Complete);
@@ -497,6 +570,7 @@ namespace Cognition.Jobs.Tests
             var runner = new StubPhaseRunner(FictionPhase.IterativePlanner, (_, _) =>
                 Task.FromException<FictionPhaseResult>(new InvalidOperationException("boom")));
 
+            var scopePaths = ScopePathBuilderTestHelper.CreateBuilder();
             var jobs = new FictionWeaverJobs(
                 db,
                 new[] { runner },
@@ -504,14 +578,10 @@ namespace Cognition.Jobs.Tests
                 Substitute.For<IPlanProgressNotifier>(),
                 new WorkflowEventLogger(db, enabled: false),
                 Substitute.For<IFictionBacklogScheduler>(),
+                scopePaths,
                 NullLogger<FictionWeaverJobs>.Instance);
 
-            var metadata = new Dictionary<string, string>
-            {
-                ["backlogItemId"] = "outline-core-conflicts"
-            };
-
-            await FluentActions.Invoking(() => jobs.RunIterativePlannerAsync(planId, agentId, conversationId, 1, Guid.NewGuid(), metadata: metadata))
+            await FluentActions.Invoking(() => jobs.RunIterativePlannerAsync(planId, agentId, conversationId, 1, Guid.NewGuid(), Guid.NewGuid(), metadata: BuildMetadata("outline-core-conflicts")))
                 .Should().ThrowAsync<InvalidOperationException>();
 
             var backlog = await db.FictionPlanBacklogItems.SingleAsync(x => x.BacklogId == "outline-core-conflicts");
@@ -520,7 +590,17 @@ namespace Cognition.Jobs.Tests
             backlog.CompletedAtUtc.Should().BeNull();
         }
 
-        private static ConversationTask SeedConversationTask(PlannerBacklogTestDbContext db, Guid planId, int stepNumber, string toolName, Guid conversationId, Dictionary<string, object?> args)
+    private static Dictionary<string, string> BuildMetadata(string backlogId)
+    {
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["conversationPlanId"] = Guid.NewGuid().ToString(),
+            ["taskId"] = Guid.NewGuid().ToString(),
+            ["backlogItemId"] = backlogId
+        };
+    }
+
+    private static ConversationTask SeedConversationTask(PlannerBacklogTestDbContext db, Guid planId, int stepNumber, string toolName, Guid conversationId, Dictionary<string, object?> args)
         {
             var personaId = Guid.NewGuid();
             var plan = new ConversationPlan

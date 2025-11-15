@@ -27,13 +27,14 @@ public class AgentRememberToolTests
     {
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
         var services = new ServiceCollection().BuildServiceProvider();
 
         var store = new InMemoryVectorStore();
         var retrieval = CreateRetrieval(store, new ScriptedEmbeddingsClient(), dualWrite: false);
         var tool = new AgentRememberTool(retrieval);
         var ctx = new ToolContext(agentId, conversationId, PersonaId: null, Services: services, Ct: CancellationToken.None);
-        var args = new Dictionary<string, object?> { ["text"] = "Keep this forever" };
+        var args = new Dictionary<string, object?> { ["text"] = "Keep this forever", ["planId"] = planId };
 
         var first = await tool.ExecuteAsync(ctx, args);
         var firstSnapshot = store.Snapshot();
@@ -49,6 +50,8 @@ public class AgentRememberToolTests
         item.Metadata.Should().NotBeNull();
         item.Metadata.Should().ContainKey("AgentId");
         item.Metadata.Should().NotContainKey("ConversationId");
+        item.Metadata.Should().ContainKey("PlanId");
+        item.Metadata!["PlanId"].Should().Be(planId.ToString("D"));
         item.Metadata!["Source"].Should().Be("tool_remember");
 
         secondSnapshot.Should().HaveCount(1);
@@ -59,6 +62,7 @@ public class AgentRememberToolTests
     public async Task AgentRememberTool_dual_write_populates_scope_metadata()
     {
         var agentId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
         var services = new ServiceCollection().BuildServiceProvider();
         var store = new InMemoryVectorStore();
         var retrieval = CreateRetrieval(store, new ScriptedEmbeddingsClient(), dualWrite: true);
@@ -66,7 +70,7 @@ public class AgentRememberToolTests
         var conversationId = Guid.NewGuid();
         var ctx = new ToolContext(agentId, conversationId, PersonaId: null, Services: services, Ct: CancellationToken.None);
 
-        await tool.ExecuteAsync(ctx, new Dictionary<string, object?> { ["text"] = "Remember dual write" });
+        await tool.ExecuteAsync(ctx, new Dictionary<string, object?> { ["text"] = "Remember dual write", ["planId"] = planId });
 
         var snapshot = store.Snapshot();
         snapshot.Should().HaveCount(1);
@@ -75,6 +79,8 @@ public class AgentRememberToolTests
         item.ScopePrincipalType.Should().Be("agent");
         item.ScopePrincipalId.Should().Be(agentId.ToString("D"));
         item.ScopeSegments.Should().NotBeNull();
+        item.ScopeSegments.Should().ContainKey("plan");
+        item.ScopeSegments!["plan"].Should().Be(planId.ToString("D"));
         item.Metadata.Should().ContainKey("ScopePath");
         if (item.ScopeSegments!.Count > 0)
         {
@@ -85,6 +91,27 @@ public class AgentRememberToolTests
             item.Metadata.Should().NotContainKey("ScopeSegments");
         }
         item.Metadata.Should().ContainKey("ScopePrincipalType");
+    }
+
+    [Fact]
+    public async Task AgentRememberTool_reads_planId_from_context_metadata()
+    {
+        var agentId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
+        var services = new ServiceCollection().BuildServiceProvider();
+        var store = new InMemoryVectorStore();
+        var retrieval = CreateRetrieval(store, new ScriptedEmbeddingsClient(), dualWrite: false);
+        var tool = new AgentRememberTool(retrieval);
+        var ctxMetadata = new Dictionary<string, object?> { ["planId"] = planId };
+        var ctx = new ToolContext(agentId, ConversationId: null, PersonaId: null, Services: services, Ct: CancellationToken.None, Metadata: ctxMetadata);
+
+        await tool.ExecuteAsync(ctx, new Dictionary<string, object?> { ["text"] = "Remember metadata-inferred plan" });
+
+        var snapshot = store.Snapshot();
+        snapshot.Should().HaveCount(1);
+        var item = snapshot.Single();
+        item.Metadata.Should().ContainKey("PlanId");
+        item.Metadata!["PlanId"].Should().Be(planId.ToString("D"));
     }
 
     private static RetrievalService CreateRetrieval(InMemoryVectorStore store, IEmbeddingsClient embeddings, bool dualWrite)

@@ -105,6 +105,7 @@ public class ToolDispatcher : IToolDispatcher
                     personaId: plannerContext.ToolContext.PersonaId,
                     agentId: plannerContext.ToolContext.AgentId,
                     conversationId: plannerContext.ToolContext.ConversationId,
+                    planId: null,
                     projectId: null,
                     worldId: null,
                     out var inferredPath))

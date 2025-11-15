@@ -95,6 +95,8 @@ public class CognitionDbContext : DbContext
     public DbSet<FictionStoryMetric> FictionStoryMetrics => Set<FictionStoryMetric>();
     public DbSet<FictionWorldBible> FictionWorldBibles => Set<FictionWorldBible>();
     public DbSet<FictionWorldBibleEntry> FictionWorldBibleEntries => Set<FictionWorldBibleEntry>();
+    public DbSet<FictionCharacter> FictionCharacters => Set<FictionCharacter>();
+    public DbSet<FictionLoreRequirement> FictionLoreRequirements => Set<FictionLoreRequirement>();
     public DbSet<PlannerExecution> PlannerExecutions => Set<PlannerExecution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

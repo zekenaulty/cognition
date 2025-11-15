@@ -273,7 +273,7 @@ public class ToolDispatcherScopeTests
         planner.Contexts.Should().HaveCount(1);
         var recordedContext = planner.Contexts.Single();
         recordedContext.ScopePath.Should().NotBeNull();
-        var expectedScope = scopePathBuilder.Build(new ScopeToken(null, null, personaId, null, conversationId, null, null)).Canonical;
+        var expectedScope = scopePathBuilder.Build(new ScopeToken(null, null, personaId, null, conversationId, null, null, null)).Canonical;
         recordedContext.ScopePath!.Canonical.Should().Be(expectedScope);
         telemetry.Started.Should().HaveCount(1);
         telemetry.Completed.Should().HaveCount(1);
@@ -438,7 +438,7 @@ public class ToolDispatcherScopeTests
         planner.Contexts.Should().HaveCount(1);
         var recordedContext = planner.Contexts.Single();
         recordedContext.ScopePath.Should().NotBeNull();
-        var expectedScope = scopePathBuilder.Build(new ScopeToken(null, null, personaId, null, conversationId, null, null)).Canonical;
+        var expectedScope = scopePathBuilder.Build(new ScopeToken(null, null, personaId, null, conversationId, null, null, null)).Canonical;
         recordedContext.ScopePath!.Canonical.Should().Be(expectedScope);
         telemetry.Started.Should().HaveCount(1);
         telemetry.Completed.Should().BeEmpty();
@@ -523,7 +523,7 @@ public class ToolDispatcherScopeTests
         public Task<object?> ExecuteAsync(ToolContext ctx, IDictionary<string, object?> args)
         {
             var text = args.TryGetValue("text", out var raw) ? raw?.ToString() ?? string.Empty : string.Empty;
-            var scope = new ScopeToken(null, null, ctx.PersonaId, ctx.AgentId, ctx.ConversationId, null, null);
+            var scope = new ScopeToken(null, null, ctx.PersonaId, ctx.AgentId, ctx.ConversationId, null, null, null);
             return ExecuteInternalAsync(scope, text, ctx.Ct);
         }
 

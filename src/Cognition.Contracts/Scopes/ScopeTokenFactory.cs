@@ -19,15 +19,23 @@ public static class ScopeTokenFactory
         var personaId = TryGetGuid(metadata, "personaId", "PersonaId");
         var agentId = TryGetGuid(metadata, "agentId", "AgentId");
         var conversationId = TryGetGuid(metadata, "conversationId", "ConversationId");
+        var planId = TryGetGuid(metadata, "planId", "PlanId");
         var projectId = TryGetGuid(metadata, "projectId", "ProjectId");
         var worldId = TryGetGuid(metadata, "worldId", "WorldId");
 
-        if (tenantId is null && appId is null && personaId is null && agentId is null && conversationId is null && projectId is null && worldId is null)
+        if (tenantId is null &&
+            appId is null &&
+            personaId is null &&
+            agentId is null &&
+            conversationId is null &&
+            planId is null &&
+            projectId is null &&
+            worldId is null)
         {
             return false;
         }
 
-        scope = new ScopeToken(tenantId, appId, personaId, agentId, conversationId, projectId, worldId);
+        scope = new ScopeToken(tenantId, appId, personaId, agentId, conversationId, planId, projectId, worldId);
         return true;
     }
 

@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Planning.Fiction;
-using Cognition.Contracts;
-using Cognition.Contracts.Scopes;
+using Cognition.Clients.Tools.Fiction.Authoring;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -21,17 +21,23 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly SceneWeaverPlannerTool _planner;
+    private readonly ICharacterLifecycleService _lifecycleService;
+    private readonly IAuthorPersonaRegistry _authorRegistry;
 
     public SceneWeaverRunner(
         CognitionDbContext db,
         IAgentService agentService,
         IServiceProvider serviceProvider,
+        ICharacterLifecycleService lifecycleService,
+        IAuthorPersonaRegistry authorRegistry,
         SceneWeaverPlannerTool planner,
         ILogger<SceneWeaverRunner> logger,
         IScopePathBuilder scopePathBuilder)
         : base(db, agentService, logger, FictionPhase.SceneWeaver, scopePathBuilder)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _lifecycleService = lifecycleService ?? throw new ArgumentNullException(nameof(lifecycleService));
+        _authorRegistry = authorRegistry ?? throw new ArgumentNullException(nameof(authorRegistry));
         _planner = planner ?? throw new ArgumentNullException(nameof(planner));
     }
 
@@ -63,6 +69,17 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             throw new InvalidOperationException($"Scene {context.ChapterSceneId} was not found.");
         }
 
+        var section = scene.FictionChapterSection;
+        var scrollEntity = section?.FictionChapterScroll;
+        var resolvedScrollId = context.ChapterScrollId ?? scrollEntity?.Id ?? section?.FictionChapterScrollId;
+        var blocking = await GetBlockingLoreRequirementsAsync(plan.Id, resolvedScrollId, context.ChapterSceneId.Value, cancellationToken).ConfigureAwait(false);
+        if (blocking.Count > 0)
+        {
+            return BuildBlockedResult(context, blocking);
+        }
+
+        var authorContext = await _authorRegistry.GetForPlanAsync(plan.Id, cancellationToken).ConfigureAwait(false);
+
         var parameters = SceneWeaverPlannerParameters.Create(
             plan,
             conversation,
@@ -78,20 +95,8 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             _serviceProvider,
             cancellationToken);
 
-        ScopePath? scopePath = null;
-        if (ScopePathBuilder.TryBuild(new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null), out var builtPath))
-        {
-            scopePath = builtPath;
-        }
-
-        var conversationState = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["planId"] = plan.Id,
-            ["branch"] = context.BranchSlug,
-            ["chapterSceneId"] = context.ChapterSceneId,
-            ["chapterScrollId"] = context.ChapterScrollId ?? scene.FictionChapterSection.FictionChapterScrollId,
-            ["chapterBlueprintId"] = context.ChapterBlueprintId ?? scene.FictionChapterSection.FictionChapterScroll?.FictionChapterBlueprintId
-        };
+        var scopePath = ResolveScopePath(context);
+        var conversationState = BuildConversationState(plan, context, resolvedScrollId, scrollEntity, authorContext);
 
         var plannerContext = PlannerContext.FromToolContext(
             toolContext,
@@ -100,7 +105,163 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             conversationState: conversationState);
 
         var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        await ProcessLifecycleAsync(plan, context, resolvedScrollId, plannerResult, cancellationToken).ConfigureAwait(false);
+        await AppendAuthorPersonaMemoryAsync(plan, scene, context, resolvedScrollId, authorContext, plannerResult, cancellationToken).ConfigureAwait(false);
         return ToPhaseResult(plannerResult, context);
+    }
+
+    private async Task<IReadOnlyList<FictionLoreRequirement>> GetBlockingLoreRequirementsAsync(
+        Guid planId,
+        Guid? scrollId,
+        Guid sceneId,
+        CancellationToken cancellationToken)
+    {
+        var query = DbContext.Set<FictionLoreRequirement>()
+            .AsNoTracking()
+            .Where(r => r.FictionPlanId == planId && r.Status != FictionLoreRequirementStatus.Ready);
+
+        query = query.Where(r =>
+            r.ChapterSceneId == sceneId ||
+            (r.ChapterSceneId == null && scrollId.HasValue && r.ChapterScrollId == scrollId));
+
+        return await query.ToListAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private FictionPhaseResult BuildBlockedResult(
+        FictionPhaseExecutionContext context,
+        IReadOnlyList<FictionLoreRequirement> blocking)
+    {
+        foreach (var requirement in blocking)
+        {
+            Logger.LogWarning(
+                "FictionLoreRequirementBlocked plan={PlanId} requirement={Slug} status={Status}",
+                requirement.FictionPlanId,
+                requirement.RequirementSlug,
+                requirement.Status);
+        }
+
+        var summary = $"Scene blocked by {blocking.Count} lore requirement(s).";
+        var data = new Dictionary<string, object?>
+        {
+            ["blockedLoreRequirements"] = blocking.Select(r => new Dictionary<string, object?>
+            {
+                ["slug"] = r.RequirementSlug,
+                ["status"] = r.Status.ToString(),
+                ["title"] = r.Title,
+                ["notes"] = r.Notes,
+                ["description"] = r.Description
+            }).ToList()
+        };
+
+        return BuildResult(
+            FictionPhaseStatus.Blocked,
+            summary,
+            context,
+            requestPayload: string.Empty,
+            responsePayload: string.Empty,
+            conversationMessageId: null,
+            data);
+    }
+
+    private static Dictionary<string, object?> BuildConversationState(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        Guid? scrollId,
+        FictionChapterScroll? scroll,
+        AuthorPersonaContext? authorContext)
+    {
+        var state = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["planId"] = plan.Id,
+            ["branch"] = context.BranchSlug,
+            ["chapterSceneId"] = context.ChapterSceneId,
+            ["chapterScrollId"] = scrollId,
+            ["chapterBlueprintId"] = context.ChapterBlueprintId ?? scroll?.FictionChapterBlueprintId
+        };
+
+        AuthorPersonaPromptContext.ApplyToConversationState(state, authorContext);
+        return state;
+    }
+
+    private async Task ProcessLifecycleAsync(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        Guid? scrollId,
+        PlannerResult result,
+        CancellationToken cancellationToken)
+    {
+        if (!result.Artifacts.TryGetValue("parsed", out var parsedArtifact))
+        {
+            return;
+        }
+
+        var token = LifecyclePayloadParser.TryConvertToToken(parsedArtifact);
+        if (token is null)
+        {
+            return;
+        }
+
+        var characters = LifecyclePayloadParser.ExtractCharacters(token);
+        var loreRequirements = LifecyclePayloadParser.ExtractLoreRequirements(token, scrollId, context.ChapterSceneId);
+
+        if (characters.Count == 0 && loreRequirements.Count == 0)
+        {
+            return;
+        }
+
+        var request = new CharacterLifecycleRequest(
+            plan.Id,
+            context.ConversationId,
+            PlanPassId: null,
+            characters,
+            loreRequirements,
+            Source: "scene");
+
+        await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task AppendAuthorPersonaMemoryAsync(
+        FictionPlan plan,
+        FictionChapterScene scene,
+        FictionPhaseExecutionContext context,
+        Guid? scrollId,
+        AuthorPersonaContext? authorContext,
+        PlannerResult result,
+        CancellationToken cancellationToken)
+    {
+        if (authorContext is null)
+        {
+            return;
+        }
+
+        if (result.Outcome != PlannerOutcome.Success)
+        {
+            return;
+        }
+
+        var section = scene.FictionChapterSection;
+        var scroll = section?.FictionChapterScroll;
+        var branch = string.IsNullOrWhiteSpace(context.BranchSlug) ? "main" : context.BranchSlug;
+        var title = $"Scene draft: {scene.Title}";
+        var sectionLabel = section is null
+            ? "(section not captured)"
+            : $"{section.SectionSlug} â€” {section.Title}";
+        var scrollLabel = scroll is null
+            ? "(scroll not captured)"
+            : $"{scroll.ScrollSlug} â€” {scroll.Title}";
+        var description = string.IsNullOrWhiteSpace(scene.Description)
+            ? "(no scene description recorded)"
+            : scene.Description!;
+        var content = $"Drafted scene \"{scene.Title}\" for branch \"{branch}\" ({sectionLabel}, scroll {scrollLabel}). Track obligations: {description}";
+        var entry = new AuthorPersonaMemoryEntry(
+            title,
+            content,
+            plan.Id,
+            scrollId,
+            scene.Id,
+            SourcePhase: "scene");
+
+        await _authorRegistry.AppendMemoryAsync(authorContext.PersonaId, entry, cancellationToken).ConfigureAwait(false);
     }
 
     private static FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)
@@ -218,4 +379,3 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             : FictionTranscriptValidationStatus.Unknown;
     }
 }
-

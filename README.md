@@ -251,7 +251,7 @@ public sealed class OutlinePlannerTool : PlannerBase<OutlineParameters>
             return PlannerContext.FromToolContext(ctx, scopePath, supportsSelfCritique: true);
         }
 
-        if (_scopePaths.TryBuild(null, null, ctx.PersonaId, ctx.AgentId, ctx.ConversationId, null, null, out var inferred))
+        if (_scopePaths.TryBuild(null, null, ctx.PersonaId, ctx.AgentId, ctx.ConversationId, null, null, null, out var inferred))
         {
             return PlannerContext.FromToolContext(ctx, inferred, supportsSelfCritique: true);
         }

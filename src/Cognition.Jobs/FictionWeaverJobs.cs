@@ -1,11 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Contracts;
 using Cognition.Contracts.Events;
+using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -26,6 +30,11 @@ public class FictionWeaverJobs
     private readonly IPlanProgressNotifier _planNotifier;
     private readonly WorkflowEventLogger _workflowLogger;
     private readonly IFictionBacklogScheduler _backlogScheduler;
+    private readonly IScopePathBuilder _scopePaths;
+    private static readonly JsonSerializerOptions MetadataSerializerOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = false
+    };
 
     public FictionWeaverJobs(
         CognitionDbContext db,
@@ -34,6 +43,7 @@ public class FictionWeaverJobs
         IPlanProgressNotifier notifier,
         WorkflowEventLogger workflowLogger,
         IFictionBacklogScheduler backlogScheduler,
+        IScopePathBuilder scopePathBuilder,
         ILogger<FictionWeaverJobs> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -43,6 +53,7 @@ public class FictionWeaverJobs
         _planNotifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
         _workflowLogger = workflowLogger ?? throw new ArgumentNullException(nameof(workflowLogger));
         _backlogScheduler = backlogScheduler ?? throw new ArgumentNullException(nameof(backlogScheduler));
+        _scopePaths = scopePathBuilder ?? throw new ArgumentNullException(nameof(scopePathBuilder));
     }
 
     public Task<FictionPhaseResult> RunVisionPlannerAsync(
@@ -190,7 +201,9 @@ public class FictionWeaverJobs
         }
 
         var effectiveContext = NormalizeContext(context, plan.PrimaryBranchSlug);
+        effectiveContext = AttachScopeContext(effectiveContext, plan);
         var backlogItemId = GetBacklogItemId(effectiveContext);
+        EnsureExecutionMetadata(phase, effectiveContext, backlogItemId);
         var conversationTask = await FindConversationTaskAsync(effectiveContext, cancellationToken).ConfigureAwait(false);
 
         if (plan.Status == FictionPlanStatus.Draft)
@@ -431,6 +444,46 @@ public class FictionWeaverJobs
                 context.Metadata);
     }
 
+    private FictionPhaseExecutionContext AttachScopeContext(FictionPhaseExecutionContext context, FictionPlan plan)
+    {
+        var token = context.ScopeToken ?? new ScopeToken(
+            TenantId: null,
+            AppId: null,
+            PersonaId: null,
+            AgentId: context.AgentId,
+            ConversationId: context.ConversationId,
+            PlanId: plan.Id,
+            ProjectId: plan.FictionProjectId,
+            WorldId: null);
+
+        ScopePath? scopePath = context.ScopePath;
+        if (scopePath is null && _scopePaths.TryBuild(token, out var builtPath))
+        {
+            scopePath = builtPath;
+        }
+
+        var metadata = context.Metadata is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(context.Metadata, StringComparer.OrdinalIgnoreCase);
+
+        if (scopePath is not null)
+        {
+            metadata["scopePath"] = scopePath.Canonical;
+            if (!scopePath.Principal.IsEmpty)
+            {
+                metadata["scopePrincipalType"] = scopePath.Principal.PrincipalType;
+                metadata["scopePrincipalId"] = scopePath.Principal.RootId.ToString("D");
+            }
+        }
+
+        return context with
+        {
+            ScopeToken = token,
+            ScopePath = scopePath,
+            Metadata = metadata
+        };
+    }
+
     private static bool IsMetadataFlagSet(FictionPhaseExecutionContext context, string key)
     {
         if (context.Metadata is null)
@@ -458,6 +511,46 @@ public class FictionWeaverJobs
         return context.Metadata.TryGetValue("backlogItemId", out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : null;
+    }
+
+    private void EnsureExecutionMetadata(
+        FictionPhase phase,
+        FictionPhaseExecutionContext context,
+        string? backlogItemId)
+    {
+        var metadata = context.Metadata;
+        if (metadata is null)
+        {
+            ThrowMetadataException(phase, context.PlanId, "metadata payload");
+            return;
+        }
+
+        if (!metadata.ContainsKey("conversationPlanId"))
+        {
+            ThrowMetadataException(phase, context.PlanId, "conversationPlanId");
+        }
+
+        if (!metadata.ContainsKey("providerId"))
+        {
+            ThrowMetadataException(phase, context.PlanId, "providerId");
+        }
+
+        if (!metadata.ContainsKey("modelId"))
+        {
+            ThrowMetadataException(phase, context.PlanId, "modelId");
+        }
+
+        if (!string.IsNullOrWhiteSpace(backlogItemId) && !metadata.ContainsKey("taskId"))
+        {
+            ThrowMetadataException(phase, context.PlanId, $"taskId for backlog item {backlogItemId}");
+        }
+    }
+
+    private void ThrowMetadataException(FictionPhase phase, Guid planId, string missingField)
+    {
+        var message = $"Cannot execute phase {phase} for plan {planId}: required metadata '{missingField}' is missing.";
+        _logger.LogError(message);
+        throw new InvalidOperationException(message);
     }
 
     private static Guid? GetWorldBibleId(FictionPhaseExecutionContext context)
@@ -490,6 +583,7 @@ public class FictionWeaverJobs
 
         var now = DateTime.UtcNow;
         var incomingIds = new HashSet<string>(backlog.Select(b => b.Id), StringComparer.OrdinalIgnoreCase);
+        var conversationPlanId = await GetConversationPlanIdAsync(planId, cancellationToken).ConfigureAwait(false);
 
         foreach (var entity in existing.ToList())
         {
@@ -546,6 +640,11 @@ public class FictionWeaverJobs
             {
                 RecordBacklogTelemetry(planId, existingItem.BacklogId, phase, existingItem.Status, context, "vision-sync", previousStatus);
             }
+
+            if (conversationPlanId.HasValue)
+            {
+                await EnsureConversationTaskForBacklogAsync(conversationPlanId, planId, existingItem, phase, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -599,7 +698,101 @@ public class FictionWeaverJobs
 
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
+        var conversationPlanId = await GetConversationPlanIdAsync(planId, cancellationToken).ConfigureAwait(false);
+
         RecordBacklogTelemetry(planId, backlogId, phase, status, context, reason, previousStatus);
+        await UpdateConversationTaskStatusAsync(conversationPlanId, planId, backlogId, status, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<Guid?> GetConversationPlanIdAsync(Guid planId, CancellationToken cancellationToken)
+    {
+        return await _db.FictionPlans
+            .Where(p => p.Id == planId)
+            .Select(p => p.CurrentConversationPlanId)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<Guid?> EnsureConversationTaskForBacklogAsync(
+        Guid? conversationPlanId,
+        Guid planId,
+        FictionPlanBacklogItem backlogItem,
+        FictionPhase producingPhase,
+        CancellationToken cancellationToken)
+    {
+        if (!conversationPlanId.HasValue || string.IsNullOrWhiteSpace(backlogItem.BacklogId))
+        {
+            return null;
+        }
+
+        var backlogId = backlogItem.BacklogId;
+        var task = await _db.ConversationTasks
+            .FirstOrDefaultAsync(t => t.ConversationPlanId == conversationPlanId.Value && t.BacklogItemId == backlogId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (task is not null)
+        {
+            task.Status = MapBacklogStatusToTaskStatus(backlogItem.Status);
+            return task.Id;
+        }
+
+        var goal = string.IsNullOrWhiteSpace(backlogItem.Description) ? backlogId : backlogItem.Description!;
+        var phase = FictionBacklogPhaseResolver.ResolvePhase(backlogItem) ?? producingPhase;
+        var toolName = MapPhaseToTool(phase);
+        var argsJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            planId,
+            backlogItemId = backlogId
+        }, MetadataSerializerOptions);
+
+        var nextStep = await _db.ConversationTasks
+            .Where(t => t.ConversationPlanId == conversationPlanId.Value)
+            .Select(t => (int?)t.StepNumber)
+            .MaxAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var conversationTask = new ConversationTask
+        {
+            Id = Guid.NewGuid(),
+            ConversationPlanId = conversationPlanId.Value,
+            StepNumber = (nextStep ?? 0) + 1,
+            Thought = goal,
+            Goal = goal,
+            ToolName = toolName,
+            ArgsJson = argsJson,
+            Status = MapBacklogStatusToTaskStatus(backlogItem.Status),
+            CreatedAt = DateTime.UtcNow,
+            BacklogItemId = backlogId
+        };
+
+        _db.ConversationTasks.Add(conversationTask);
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return conversationTask.Id;
+    }
+
+    private async Task UpdateConversationTaskStatusAsync(
+        Guid? conversationPlanId,
+        Guid planId,
+        string backlogId,
+        FictionPlanBacklogStatus status,
+        CancellationToken cancellationToken)
+    {
+        if (!conversationPlanId.HasValue || string.IsNullOrWhiteSpace(backlogId))
+        {
+            return;
+        }
+
+        var task = await _db.ConversationTasks
+            .FirstOrDefaultAsync(t => t.ConversationPlanId == conversationPlanId.Value && t.BacklogItemId == backlogId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (task is null)
+        {
+            return;
+        }
+
+        task.Status = MapBacklogStatusToTaskStatus(status);
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static FictionPlanBacklogStatus MapPlannerStatus(PlannerBacklogStatus status) => status switch
@@ -613,6 +806,24 @@ public class FictionWeaverJobs
     {
         FictionPhaseStatus.Completed => FictionPlanBacklogStatus.Complete,
         _ => FictionPlanBacklogStatus.Pending
+    };
+
+    private static string MapBacklogStatusToTaskStatus(FictionPlanBacklogStatus status) => status switch
+    {
+        FictionPlanBacklogStatus.InProgress => "Running",
+        FictionPlanBacklogStatus.Complete => "Completed",
+        _ => "Pending"
+    };
+
+    private static string MapPhaseToTool(FictionPhase phase) => phase switch
+    {
+        FictionPhase.VisionPlanner => "fiction.weaver.visionPlanner",
+        FictionPhase.WorldBibleManager => "fiction.weaver.worldBibleManager",
+        FictionPhase.IterativePlanner => "fiction.weaver.iterativePlanner",
+        FictionPhase.ChapterArchitect => "fiction.weaver.chapterArchitect",
+        FictionPhase.ScrollRefiner => "fiction.weaver.scrollRefiner",
+        FictionPhase.SceneWeaver => "fiction.weaver.sceneWeaver",
+        _ => string.Empty
     };
 
     private static IReadOnlyList<PlannerBacklogItem> ExtractPlannerBacklog(FictionPhaseResult result)
@@ -653,7 +864,7 @@ public class FictionWeaverJobs
 
             return list;
         }
-        catch (JsonException)
+        catch (Newtonsoft.Json.JsonException)
         {
             return Array.Empty<PlannerBacklogItem>();
         }
@@ -816,6 +1027,23 @@ public class FictionWeaverJobs
             {
                 metadata["chapterScrollId"] = entry.ChapterScrollId.Value;
             }
+            if (context.Metadata is not null)
+            {
+                if (context.Metadata.TryGetValue("scopePath", out var metadataScopePath) && !string.IsNullOrWhiteSpace(metadataScopePath))
+                {
+                    metadata["scopePath"] = metadataScopePath;
+                }
+
+                if (context.Metadata.TryGetValue("scopePrincipalType", out var principalType) && !string.IsNullOrWhiteSpace(principalType))
+                {
+                    metadata["scopePrincipalType"] = principalType;
+                }
+
+                if (context.Metadata.TryGetValue("scopePrincipalId", out var principalId) && !string.IsNullOrWhiteSpace(principalId))
+                {
+                    metadata["scopePrincipalId"] = principalId;
+                }
+            }
 
             var transcript = new FictionPlanTranscript
             {
@@ -920,6 +1148,24 @@ public class FictionWeaverJobs
             ["agentId"] = context.AgentId,
             ["conversationId"] = context.ConversationId,
         };
+
+        if (context.Metadata is not null)
+        {
+            if (context.Metadata.TryGetValue("scopePath", out var metadataScopePath) && !string.IsNullOrWhiteSpace(metadataScopePath))
+            {
+                snapshot["scopePath"] = metadataScopePath;
+            }
+
+            if (context.Metadata.TryGetValue("scopePrincipalType", out var principalType) && !string.IsNullOrWhiteSpace(principalType))
+            {
+                snapshot["scopePrincipalType"] = principalType;
+            }
+
+            if (context.Metadata.TryGetValue("scopePrincipalId", out var principalId) && !string.IsNullOrWhiteSpace(principalId))
+            {
+                snapshot["scopePrincipalId"] = principalId;
+            }
+        }
 
         var backlogItemId = GetBacklogItemId(context);
         if (!string.IsNullOrEmpty(backlogItemId))

@@ -1,23 +1,20 @@
-Prompt for next session (2025-11-02)
------------------------------------
+Prompt for next session (2025-11-10)
+------------------------------------
 
 Status recap
-- World-bible telemetry now emits warnings/alerts and Ops payloads thread correlation IDs end-to-end (planning_the_planner_step_20251102_1500_world_bible_alerts_impl.md).
-- ScopePath factory enforcement is guarded by analyzers; correlation IDs propagate across API, jobs, and planner telemetry (TRACK-482).
-- Chat, Users, Config, Tools, Personas, and Conversations DTOs now enforce attribute-based validation with regression tests (see alpha_security_observability_hardening_step_20251102_2100_dto_validation.md).
-- Config/Tools/Personas/Conversations endpoints emit structured ApiErrorResponse payloads (code/message[/details]) for validation and not-found scenarios.
-- Api error contract captured in docs/api-error-responses.md and the console client now surfaces server-provided codes/messages.
-- Nullable reference types enabled solution-wide; in-memory vector store scores and sorts by cosine before trimming 	opK.
+- Vision planner template + validator now emit structured `coreCast`/`supportingCast`/`loreNeeds` payloads with deterministic tests, and lifecycle parsers consume them.
+- Scroll + scene runners enforce lore requirements up front; blocked runs emit `FictionLoreRequirementBlocked` telemetry instead of silently drafting.
+- A new `AuthorPersonaRegistry` hydrates scroll/scene prompts with persona summaries + recent memories/world notes and appends new `PersonaMemory` entries after each pass.
+- FictionWeaver jobs now enforce `conversationPlanId` + provider/model/task metadata so Hangfire, backlog items, and console resumes share the same authoritative contract (tests updated).
 
 Next targets
-1. Socialize the API error response contract (docs/api-error-responses.md) with client teams, add telemetry on high-volume codes, and backstop with API tests.
-2. Close remaining alpha security P0s: rate-limit regressions, Ops webhook multi-channel routing, explicit admin policies.
-3. Catalogue/plan non-fiction planner migrations and retire legacy runner scaffolding.
-4. Implement OpenSearch schema guard + template self-test before broadening planner rollout.
-5. Extend planner health dashboards + Ops routing to surface new world-bible alerts downstream.
+1. Finish wiring CharacterLifecycleService + world-bible provenance so tracked characters/lore surface through API/console dashboards (`plans/fiction/phase-001/plan-first-draft.md`, `character_persona_lifecycle.md`).
+2. Update console + front-end flows to always pass the metadata contract (conversationPlanId/provider/model/task/backlog IDs) and add telemetry for the UI path.
+3. Extend backlog scheduling/resume UX: have Hangfire enqueue strictly off backlog state and expose plan/backlog progress via API.
+4. Document and expose author persona context in the consoles (new memories, world notes, tracked obligations) so writers can inspect what the registry is appending.
+5. Keep building tests around lifecycle + backlog enforcement (world-bible manager, resume scenarios) before moving to Milestone D tooling.
 
 Getting started
-- Review plans/alpha_security_observability_hardening.md and latest step notes for outstanding security tasks.
-- Draft rollout notes for the new error codes (docs/api-error-responses.md), update integration tests, and capture validation touchpoints in the alpha hardening plan.
-- Inventory non-fiction planners/job orchestrators under src/Cognition.Clients/Tools and src/Cognition.Jobs for migration matrix.
-- Sketch Ops multi-channel routing (Slack/PagerDuty) leveraging the new world-bible alert ids.
+- Read `plans/fiction/phase-001/plan-first-draft.md` + `plans/fiction/phase-001/character_persona_lifecycle.md` for the refreshed context/checklists.
+- Audit the console/UI backlog flows to ensure they populate the new metadata contract; capture gaps in `plans/hot_targeted_todo.md`.
+- Plan the remaining lifecycle hooks (world-bible provenance + roster APIs) and note the work under the same plan so world-bible + author console teams can consume it next session.

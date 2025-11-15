@@ -213,6 +213,65 @@ public static class FictionResponseValidator
         var optionalStringArray = new JSchema { Type = JSchemaType.Array };
         optionalStringArray.Items.Add(new JSchema { Type = JSchemaType.String, MinimumLength = 3 });
 
+        var stringArray = new JSchema { Type = JSchemaType.Array };
+        stringArray.Items.Add(new JSchema { Type = JSchemaType.String, MinimumLength = 2 });
+
+        var characterSchema = new JSchema
+        {
+            Type = JSchemaType.Object,
+            AllowAdditionalProperties = false
+        };
+        characterSchema.Properties.Add("name", new JSchema { Type = JSchemaType.String, MinimumLength = 2 });
+        characterSchema.Properties.Add("slug", new JSchema { Type = JSchemaType.String, MinimumLength = 2 });
+        characterSchema.Properties.Add("role", new JSchema { Type = JSchemaType.String, MinimumLength = 3 });
+        characterSchema.Properties.Add("importance", new JSchema { Type = JSchemaType.String, MinimumLength = 3 });
+        characterSchema.Properties.Add("track", new JSchema { Type = JSchemaType.Boolean });
+        characterSchema.Properties.Add("summary", new JSchema { Type = JSchemaType.String, MinimumLength = 10 });
+        characterSchema.Properties.Add("motivation", new JSchema { Type = JSchemaType.String, MinimumLength = 5 });
+        characterSchema.Properties.Add("arcBeats", stringArray);
+        characterSchema.Properties.Add("continuityHooks", stringArray);
+        characterSchema.Properties.Add("notes", new JSchema { Type = JSchemaType.String });
+        characterSchema.Properties.Add("planPassId", new JSchema { Type = JSchemaType.String });
+        characterSchema.Required.Add("name");
+        characterSchema.Required.Add("role");
+        characterSchema.Required.Add("track");
+        characterSchema.Required.Add("importance");
+        characterSchema.Required.Add("summary");
+
+        var coreCastSchema = new JSchema
+        {
+            Type = JSchemaType.Array,
+            MinimumItems = 1
+        };
+        coreCastSchema.Items.Add(characterSchema);
+
+        var supportingCastSchema = new JSchema { Type = JSchemaType.Array };
+        supportingCastSchema.Items.Add(characterSchema);
+
+        var loreRequirementSchema = new JSchema
+        {
+            Type = JSchemaType.Object,
+            AllowAdditionalProperties = false
+        };
+        loreRequirementSchema.Properties.Add("title", new JSchema { Type = JSchemaType.String, MinimumLength = 3 });
+        loreRequirementSchema.Properties.Add("requirementSlug", new JSchema { Type = JSchemaType.String, MinimumLength = 3 });
+        loreRequirementSchema.Properties.Add("status", new JSchema
+        {
+            Type = JSchemaType.String,
+            Enum = { new JValue("planned"), new JValue("ready"), new JValue("missing") }
+        });
+        loreRequirementSchema.Properties.Add("description", new JSchema { Type = JSchemaType.String, MinimumLength = 10 });
+        loreRequirementSchema.Properties.Add("requiredFor", stringArray);
+        loreRequirementSchema.Properties.Add("notes", new JSchema { Type = JSchemaType.String });
+        loreRequirementSchema.Properties.Add("track", new JSchema { Type = JSchemaType.Boolean });
+        loreRequirementSchema.Required.Add("title");
+        loreRequirementSchema.Required.Add("requirementSlug");
+        loreRequirementSchema.Required.Add("status");
+        loreRequirementSchema.Required.Add("description");
+
+        var loreNeedsSchema = new JSchema { Type = JSchemaType.Array, MinimumItems = 1 };
+        loreNeedsSchema.Items.Add(loreRequirementSchema);
+
         var schema = new JSchema
         {
             Type = JSchemaType.Object,
@@ -220,11 +279,17 @@ public static class FictionResponseValidator
         };
         schema.Properties.Add("authorSummary", new JSchema { Type = JSchemaType.String, MinimumLength = 10 });
         schema.Properties.Add("bookGoals", goalsSchema);
+        schema.Properties.Add("coreCast", coreCastSchema);
+        schema.Properties.Add("supportingCast", supportingCastSchema);
+        schema.Properties.Add("loreNeeds", loreNeedsSchema);
         schema.Properties.Add("planningBacklog", backlogSchema);
         schema.Properties.Add("openQuestions", optionalStringArray);
         schema.Properties.Add("worldSeeds", optionalStringArray);
         schema.Required.Add("authorSummary");
         schema.Required.Add("bookGoals");
+        schema.Required.Add("coreCast");
+        schema.Required.Add("supportingCast");
+        schema.Required.Add("loreNeeds");
         schema.Required.Add("planningBacklog");
         return schema;
     }

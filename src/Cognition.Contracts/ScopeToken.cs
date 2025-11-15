@@ -8,6 +8,7 @@ public readonly partial record struct ScopeToken(
     Guid? PersonaId,
     Guid? AgentId,
     Guid? ConversationId,
+    Guid? PlanId,
     Guid? ProjectId,
     Guid? WorldId
 )

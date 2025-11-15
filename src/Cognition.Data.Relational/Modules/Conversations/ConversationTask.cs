@@ -20,4 +20,5 @@ public class ConversationTask : BaseEntity
     public string? FinalAnswer { get; set; }
     public string? Status { get; set; } // Pending/Success/Failure
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? BacklogItemId { get; set; }
 }

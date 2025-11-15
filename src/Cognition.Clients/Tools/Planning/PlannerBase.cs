@@ -147,6 +147,7 @@ public abstract class PlannerBase<TParameters> : IPlannerTool where TParameters 
                      personaId: ctx.PersonaId,
                      agentId: ctx.AgentId,
                      conversationId: ctx.ConversationId,
+                     planId: null,
                      projectId: null,
                      worldId: null,
                      out var inferred))

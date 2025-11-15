@@ -117,17 +117,50 @@ Return minified JSON:
 {
   ""authorSummary"": ""string describing the author persona voice, tone, pacing, and stylistic edges"",
   ""bookGoals"": [""goal 1"", ""goal 2"", ""goal 3""],
+  ""coreCast"": [
+    {
+      ""name"": ""string"",
+      ""role"": ""protagonist|antagonist|ally"",
+      ""track"": true,
+      ""importance"": ""high|medium|low"",
+      ""summary"": ""2-3 sentences covering motivation, flaw, stakes, POV"",
+      ""continuityHooks"": [""obligation"", ""callback""]
+    }
+  ],
+  ""supportingCast"": [
+    {
+      ""name"": ""string"",
+      ""role"": ""support"",
+      ""track"": true,
+      ""importance"": ""medium"",
+      ""summary"": ""sentence"",
+      ""notes"": ""continuity notes""
+    }
+  ],
+  ""loreNeeds"": [
+    {
+      ""title"": ""string"",
+      ""requirementSlug"": ""friendly-slug"",
+      ""status"": ""planned|ready|missing"",
+      ""description"": ""what canon or system must exist"",
+      ""requiredFor"": [""vision-plan"", ""chapter-blueprint"", ""chapter-scroll"", ""chapter-scene""],
+      ""track"": true
+    }
+  ],
   ""planningBacklog"": [
     {
       ""id"": ""outline-core-conflicts"",
       ""description"": ""Define the headline conflicts and stakes"",
-      ""status"": ""pending""
+      ""status"": ""pending"",
+      ""inputs"": [],
+      ""outputs"": []
     }
   ],
   ""openQuestions"": [""unknown or risky assumptions""],
   ""worldSeeds"": [""worldbuilding seeds to expand later""]
 }
 
+Flag every persona or lore pillar that must persist by setting ""track"": true.
 Ensure backlog entries capture still-needed planner passes rather than a finished story outline.
 Respond with JSON only.";
         var templateRepository = new StubTemplateRepository(template);
@@ -197,6 +230,8 @@ Respond with JSON only.";
         prompt.Should().Contain("Project Starfall");
         prompt.Should().Contain("draft");
         prompt.Should().NotContain("{{projectTitle}}");
+        prompt.Should().Contain("coreCast");
+        prompt.Should().Contain("loreNeeds");
         prompt.Should().Contain("planningBacklog");
         prompt.Should().Contain("Ensure backlog entries capture still-needed planner passes");
         result.Artifacts.Should().ContainKey("prompt");
@@ -204,6 +239,299 @@ Respond with JSON only.";
         result.Backlog.Should().HaveCount(2);
         result.Backlog.Select(b => b.Id).Should().Contain("outline-arcs");
         result.Backlog.Should().OnlyContain(b => b.Status == PlannerBacklogStatus.Pending);
+    }
+
+    [Fact]
+    public async Task SceneWeaverPlannerTool_includes_author_persona_context_in_prompt()
+    {
+        var agentService = new StubAgentService();
+        var telemetry = new SpyPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        const string sceneTemplate = @"Author summary:
+{{authorPersonaSummary}}
+
+Memories:
+{{authorPersonaMemories}}
+
+World notes:
+{{authorWorldNotes}}
+
+Scene description:
+{{sceneDescription}}";
+        var templateRepository = new StubTemplateRepository(sceneTemplate);
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
+        var tool = new SceneWeaverPlannerTool(
+            agentService,
+            NullLoggerFactory.Instance,
+            telemetry,
+            transcriptStore,
+            templateRepository,
+            Options.Create(new PlannerCritiqueOptions()),
+            scopePathBuilder);
+
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            Name = "Author Context Plan",
+            Description = "Plan with persona context."
+        };
+
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var conversation = new Conversation { Id = conversationId, AgentId = agentId };
+        var executionContext = FictionPhaseExecutionContext.ForPlan(plan.Id, agentId, conversationId, branchSlug: "author-branch");
+        executionContext = executionContext with { ChapterSceneId = Guid.NewGuid() };
+
+        var blueprint = new FictionChapterBlueprint
+        {
+            Id = Guid.NewGuid(),
+            ChapterSlug = "chapter-1",
+            Title = "Test Chapter",
+            Synopsis = "Chapter synopsis",
+            Structure = new Dictionary<string, object?>()
+        };
+
+        var scroll = new FictionChapterScroll
+        {
+            Id = Guid.NewGuid(),
+            ScrollSlug = "scroll-1",
+            Title = "Scroll Title",
+            FictionChapterBlueprint = blueprint
+        };
+
+        var section = new FictionChapterSection
+        {
+            Id = Guid.NewGuid(),
+            SectionSlug = "section-1",
+            Title = "Section Title",
+            FictionChapterScroll = scroll
+        };
+
+        var scene = new FictionChapterScene
+        {
+            Id = executionContext.ChapterSceneId.Value,
+            SceneSlug = "scene-1",
+            Title = "Scene Title",
+            Description = "Scene description",
+            FictionChapterSection = section
+        };
+
+        var parameters = SceneWeaverPlannerParameters.Create(
+            plan,
+            conversation,
+            executionContext,
+            providerId: Guid.NewGuid(),
+            modelId: Guid.NewGuid(),
+            scene);
+
+        var services = new ServiceCollection().BuildServiceProvider();
+        var contextState = new Dictionary<string, object?>
+        {
+            ["planId"] = plan.Id,
+            ["chapterSceneId"] = scene.Id,
+            ["authorPersonaSummary"] = "Summarize the lyrical, introspective author voice.",
+            ["authorPersonaMemories"] = new[] { "Memory alpha", "Memory beta" },
+            ["authorWorldNotes"] = new[] { "Lore: Keep the Whisperglass protocol consistent." }
+        };
+        var toolContext = new ToolContext(agentId, conversationId, null, services, CancellationToken.None);
+        var plannerContext = PlannerContext.FromToolContext(toolContext, toolId: Guid.NewGuid(), conversationState: contextState);
+
+        _ = await tool.PlanAsync(plannerContext, parameters, CancellationToken.None);
+
+        agentService.Requests.Should().HaveCount(1);
+        var prompt = agentService.Requests.Single().Prompt;
+        prompt.Should().Contain("Summarize the lyrical, introspective author voice.");
+        prompt.Should().Contain("Memory alpha");
+        prompt.Should().Contain("Whisperglass protocol");
+    }
+
+    [Fact]
+    public async Task SceneWeaverPlannerTool_prompt_changes_when_author_persona_changes()
+    {
+        var agentService = new StubAgentService();
+        var telemetry = new SpyPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        const string sceneTemplate = @"Author summary:
+{{authorPersonaSummary}}
+
+Memories:
+{{authorPersonaMemories}}
+
+World notes:
+{{authorWorldNotes}}";
+        var templateRepository = new StubTemplateRepository(sceneTemplate);
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
+        var tool = new SceneWeaverPlannerTool(
+            agentService,
+            NullLoggerFactory.Instance,
+            telemetry,
+            transcriptStore,
+            templateRepository,
+            Options.Create(new PlannerCritiqueOptions()),
+            scopePathBuilder);
+
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Plan", Description = "Desc" };
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var conversation = new Conversation { Id = conversationId, AgentId = agentId };
+        var executionContext = FictionPhaseExecutionContext.ForPlan(plan.Id, agentId, conversationId);
+        executionContext = executionContext with { ChapterSceneId = Guid.NewGuid() };
+
+        var scene = new FictionChapterScene
+        {
+            Id = executionContext.ChapterSceneId.Value,
+            SceneSlug = "scene-ctx",
+            Title = "Scene",
+            FictionChapterSection = new FictionChapterSection
+            {
+                Id = Guid.NewGuid(),
+                SectionSlug = "section",
+                Title = "Section",
+                FictionChapterScroll = new FictionChapterScroll
+                {
+                    Id = Guid.NewGuid(),
+                    ScrollSlug = "scroll",
+                    Title = "Scroll",
+                    FictionChapterBlueprint = new FictionChapterBlueprint
+                    {
+                        Id = Guid.NewGuid(),
+                        ChapterSlug = "chapter",
+                        Title = "Chapter",
+                        Structure = new Dictionary<string, object?>()
+                    }
+                }
+            }
+        };
+
+        var parameters = SceneWeaverPlannerParameters.Create(
+            plan,
+            conversation,
+            executionContext,
+            providerId: Guid.NewGuid(),
+            modelId: Guid.NewGuid(),
+            scene);
+
+        var services = new ServiceCollection().BuildServiceProvider();
+        var baseContext = new ToolContext(agentId, conversationId, null, services, CancellationToken.None);
+
+        var firstState = new Dictionary<string, object?>
+        {
+            ["authorPersonaSummary"] = "First persona summary.",
+            ["authorPersonaMemories"] = new[] { "First memory" },
+            ["authorWorldNotes"] = new[] { "First lore" }
+        };
+        var firstPlannerContext = PlannerContext.FromToolContext(baseContext, conversationState: firstState);
+        await tool.PlanAsync(firstPlannerContext, parameters, CancellationToken.None);
+
+        var secondState = new Dictionary<string, object?>
+        {
+            ["authorPersonaSummary"] = "Second persona summary.",
+            ["authorPersonaMemories"] = new[] { "Second memory" },
+            ["authorWorldNotes"] = new[] { "Second lore" }
+        };
+        var secondPlannerContext = PlannerContext.FromToolContext(baseContext, conversationState: secondState);
+        await tool.PlanAsync(secondPlannerContext, parameters, CancellationToken.None);
+
+        agentService.Requests.Should().HaveCount(2);
+        var firstPrompt = agentService.Requests[0].Prompt;
+        var secondPrompt = agentService.Requests[1].Prompt;
+        firstPrompt.Should().Contain("First persona summary.");
+        secondPrompt.Should().Contain("Second persona summary.");
+        firstPrompt.Should().NotBe(secondPrompt);
+    }
+
+    [Fact]
+    public async Task ScrollRefinerPlannerTool_includes_author_persona_context()
+    {
+        const string scrollResponse = @"{
+  ""scrollSlug"": ""scroll-1"",
+  ""title"": ""Scroll"",
+  ""synopsis"": ""Detailed synopsis outlining the chapter stakes and reversals."",
+  ""sections"": [
+    {
+      ""sectionSlug"": ""section-1"",
+      ""title"": ""Section"",
+      ""summary"": ""Section summary describing the rising tension across beats."",
+      ""transitions"": [""Next""],
+      ""scenes"": [
+        {
+          ""sceneSlug"": ""scene-1"",
+          ""title"": ""Scene"",
+          ""goal"": ""Capture the informant without triggering alarms."",
+          ""conflict"": ""Security sweeps close in as the crew loses signal."",
+          ""turn"": ""Rival triggers the Whisperglass jammer mid-brief."",
+          ""fallout"": ""Operatives must rely on pre-arranged tactile signals."",
+          ""carryForward"": [""draft-scene""]
+        }
+      ]
+    }
+  ]
+}";
+        var agentService = new RecordingAgentService(scrollResponse);
+        var telemetry = new SpyPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        const string scrollTemplate = @"{{authorPersonaSummary}}
+{{authorPersonaMemories}}
+{{authorWorldNotes}}";
+        var templateRepository = new StubTemplateRepository(scrollTemplate);
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
+        var tool = new ScrollRefinerPlannerTool(
+            agentService,
+            NullLoggerFactory.Instance,
+            telemetry,
+            transcriptStore,
+            templateRepository,
+            Options.Create(new PlannerCritiqueOptions()),
+            scopePathBuilder);
+
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Scroll Plan", Description = "Desc" };
+        var conversation = new Conversation { Id = Guid.NewGuid(), AgentId = Guid.NewGuid() };
+        var executionContext = FictionPhaseExecutionContext.ForPlan(plan.Id, conversation.AgentId, conversation.Id, branchSlug: "beta");
+        executionContext = executionContext with { ChapterBlueprintId = Guid.NewGuid(), ChapterScrollId = Guid.NewGuid() };
+
+        var blueprint = new FictionChapterBlueprint
+        {
+            Id = executionContext.ChapterBlueprintId.Value,
+            ChapterSlug = "chapter-ctx",
+            Title = "Chapter Title",
+            Synopsis = "Chapter synopsis",
+            Structure = new Dictionary<string, object?>()
+        };
+
+        var scroll = new FictionChapterScroll
+        {
+            Id = executionContext.ChapterScrollId.Value,
+            ScrollSlug = "scroll-ctx",
+            Title = "Scroll Title",
+            Sections = new List<FictionChapterSection>()
+        };
+
+        var parameters = ScrollRefinerPlannerParameters.Create(
+            plan,
+            conversation,
+            executionContext,
+            providerId: Guid.NewGuid(),
+            modelId: Guid.NewGuid(),
+            blueprint,
+            scroll);
+
+        var services = new ServiceCollection().BuildServiceProvider();
+        var conversationState = new Dictionary<string, object?>
+        {
+            ["authorPersonaSummary"] = "Scroll author summary.",
+            ["authorPersonaMemories"] = new[] { "Scroll memory" },
+            ["authorWorldNotes"] = new[] { "Scroll lore" }
+        };
+        var toolContext = new ToolContext(conversation.AgentId, conversation.Id, null, services, CancellationToken.None);
+        var plannerContext = PlannerContext.FromToolContext(toolContext, toolId: Guid.NewGuid(), conversationState: conversationState);
+
+        await tool.PlanAsync(plannerContext, parameters, CancellationToken.None);
+
+        agentService.Requests.Should().HaveCount(1);
+        var prompt = agentService.Requests.Single().Prompt;
+        prompt.Should().Contain("Scroll author summary.");
+        prompt.Should().Contain("Scroll memory");
+        prompt.Should().Contain("Scroll lore");
     }
 
     [Fact]
@@ -437,11 +765,75 @@ Project details:
                 return Task.FromResult((iterative, Guid.NewGuid()));
             }
 
+            if (input.Contains("\"sections\"", StringComparison.OrdinalIgnoreCase) &&
+                input.Contains("\"scrollSlug\"", StringComparison.OrdinalIgnoreCase))
+            {
+                const string scroll = @"{
+  ""scrollSlug"": ""scroll-1"",
+  ""title"": ""Scroll"",
+  ""synopsis"": ""Synopsis"",
+  ""sections"": [
+    {
+      ""sectionSlug"": ""section-1"",
+      ""title"": ""Section"",
+      ""summary"": ""Summary"",
+      ""transitions"": [""Next""],
+      ""scenes"": [
+        {
+          ""sceneSlug"": ""scene-1"",
+          ""title"": ""Scene"",
+          ""goal"": ""Goal"",
+          ""conflict"": ""Conflict"",
+          ""turn"": ""Turn"",
+          ""fallout"": ""Fallout"",
+          ""carryForward"": [""draft-scene""]
+        }
+      ]
+    }
+  ]
+}";
+                return Task.FromResult((scroll, Guid.NewGuid()));
+            }
+
             const string response = @"{
   ""authorSummary"": ""An accomplished storyteller weaving grand adventures."",
   ""bookGoals"": [
     ""Deliver a galaxy-spanning saga."",
     ""Explore the cost of ambition.""
+  ],
+  ""coreCast"": [
+    {
+      ""name"": ""Captain Lyra Hale"",
+      ""role"": ""protagonist"",
+      ""track"": true,
+      ""importance"": ""high"",
+      ""summary"": ""Renegade commander balancing daring instincts with the responsibility of safeguarding her crew."",
+      ""continuityHooks"": [
+        ""Owes Admiral Koor a personal debt."",
+        ""Promised to protect the refugee flotilla.""
+      ]
+    }
+  ],
+  ""supportingCast"": [
+    {
+      ""name"": ""Navigator Quinn"",
+      ""role"": ""support"",
+      ""track"": true,
+      ""importance"": ""medium"",
+      ""summary"": ""Chart prodigy whose anxiety spikes when plans change suddenly."",
+      ""notes"": ""Track coping rituals to feed future scenes.""
+    }
+  ],
+  ""loreNeeds"": [
+    {
+      ""title"": ""Fracture Gate Protocols"",
+      ""requirementSlug"": ""fracture-gate-protocols"",
+      ""status"": ""planned"",
+      ""description"": ""Document how slipstream gates are secured and sabotaged."",
+      ""requiredFor"": [""chapter-blueprint"", ""chapter-scroll""],
+      ""notes"": ""Must align with Orbit Guard canon."",
+      ""track"": true
+    }
   ],
   ""planningBacklog"": [
     {
@@ -461,6 +853,33 @@ Project details:
   ]
 }";
             return Task.FromResult((response, Guid.NewGuid()));
+        }
+    }
+
+    private sealed class RecordingAgentService : Cognition.Clients.Agents.IAgentService
+    {
+        private readonly string _response;
+
+        public RecordingAgentService(string response)
+        {
+            _response = response;
+        }
+
+        public List<AgentRequest> Requests { get; } = new();
+
+        public Task<string> AskAsync(Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
+            => Task.FromResult(string.Empty);
+
+        public Task<string> AskWithPlanAsync(Guid conversationId, Guid agentId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default)
+            => Task.FromResult(string.Empty);
+
+        public Task<string> AskWithToolsAsync(Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
+            => Task.FromResult(string.Empty);
+
+        public Task<(string Reply, Guid MessageId)> ChatAsync(Guid conversationId, Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
+        {
+            Requests.Add(new AgentRequest(conversationId, agentId, providerId, modelId, input));
+            return Task.FromResult((_response, Guid.NewGuid()));
         }
     }
 

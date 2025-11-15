@@ -7,8 +7,6 @@ using Cognition.Clients.Agents;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Clients.Tools.Planning.Fiction;
-using Cognition.Contracts;
-using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -78,11 +76,7 @@ public class ChapterArchitectRunner : FictionPhaseRunnerBase
             _serviceProvider,
             cancellationToken);
 
-        ScopePath? scopePath = null;
-        if (ScopePathBuilder.TryBuild(new ScopeToken(null, null, null, context.AgentId, context.ConversationId, null, null), out var builtPath))
-        {
-            scopePath = builtPath;
-        }
+        var scopePath = ResolveScopePath(context);
 
         var plannerContext = PlannerContext.FromToolContext(
             toolContext,

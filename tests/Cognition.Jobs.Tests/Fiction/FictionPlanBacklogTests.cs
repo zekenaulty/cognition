@@ -7,8 +7,13 @@ using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Fiction;
+using Cognition.Data.Relational.Modules.Conversations;
+using Cognition.Data.Relational.Modules.Personas;
+using Cognition.Data.Relational.Modules.Agents;
 using Cognition.Jobs;
+using Cognition.Contracts;
 using Cognition.Contracts.Events;
+using Cognition.Testing.Utilities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Newtonsoft.Json;
 using FluentAssertions;
@@ -67,7 +72,8 @@ public class FictionPlanBacklogTests
 
         var jobs = CreateJobs(db, runner);
 
-        await jobs.RunVisionPlannerAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None);
+        var metadata = BuildMetadata();
+        await jobs.RunVisionPlannerAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
 
         var items = await db.FictionPlanBacklogItems
             .Where(x => x.FictionPlanId == plan.Id)
@@ -111,6 +117,7 @@ public class FictionPlanBacklogTests
 
         var bus = Substitute.For<IBus>();
         var notifier = Substitute.For<IPlanProgressNotifier>();
+        var scopePaths = ScopePathBuilderTestHelper.CreateBuilder();
         var jobs = new FictionWeaverJobs(
             db,
             new[] { runner },
@@ -118,13 +125,11 @@ public class FictionPlanBacklogTests
             notifier,
             new WorkflowEventLogger(db, enabled: false),
             Substitute.For<IFictionBacklogScheduler>(),
+            scopePaths,
             NullLogger<FictionWeaverJobs>.Instance);
-        var metadata = new Dictionary<string, string>
-        {
-            ["backlogItemId"] = "outline-core-conflicts"
-        };
+        var metadata = BuildMetadata("outline-core-conflicts");
 
-        await jobs.RunChapterArchitectAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+        await jobs.RunChapterArchitectAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
 
         var backlogItem = await db.FictionPlanBacklogItems.SingleAsync(x => x.FictionPlanId == plan.Id);
         backlogItem.Status.Should().Be(FictionPlanBacklogStatus.Complete);
@@ -175,12 +180,87 @@ public class FictionPlanBacklogTests
             ["backlogItemId"] = "outline-core-conflicts"
         };
 
-        await jobs.RunChapterArchitectAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+        await jobs.RunChapterArchitectAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: BuildMetadata("outline-core-conflicts"));
 
         var backlogItem = await db.FictionPlanBacklogItems.SingleAsync(x => x.FictionPlanId == plan.Id);
         backlogItem.Status.Should().Be(FictionPlanBacklogStatus.Pending);
         backlogItem.InProgressAtUtc.Should().BeNull();
         backlogItem.CompletedAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task VisionPlanner_CreatesConversationTasksForBacklog()
+    {
+        await using var db = CreateDbContext();
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Planner Persona" };
+        var agent = new Agent { Id = Guid.NewGuid(), PersonaId = persona.Id, Persona = persona };
+        var conversation = new Conversation { Id = Guid.NewGuid(), AgentId = agent.Id, Agent = agent, Title = "Lore Sync" };
+        var conversationPlan = new ConversationPlan
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversation.Id,
+            PersonaId = persona.Id,
+            Title = "Fiction Plan",
+            CreatedAt = DateTime.UtcNow,
+            Tasks = new List<ConversationTask>()
+        };
+
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Starfall Plan",
+            CurrentConversationPlanId = conversationPlan.Id
+        };
+
+        db.Personas.Add(persona);
+        db.Agents.Add(agent);
+        db.Conversations.Add(conversation);
+        db.ConversationPlans.Add(conversationPlan);
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var backlogPayload = new Dictionary<string, object?>
+        {
+            ["backlog"] = new[]
+            {
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "outline-core-conflicts",
+                    ["description"] = "Define the headline conflicts and stakes",
+                    ["status"] = "in_progress",
+                    ["inputs"] = new[] { "vision-plan" },
+                    ["outputs"] = new[] { "conflict-outline" }
+                },
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "map-world-seeds",
+                    ["description"] = "Enumerate worldbuilding seeds",
+                    ["status"] = "pending"
+                }
+            }
+        };
+
+        var runner = new StubPhaseRunner(
+            FictionPhase.VisionPlanner,
+            (context, ct) => Task.FromResult(new FictionPhaseResult(
+                FictionPhase.VisionPlanner,
+                FictionPhaseStatus.Completed,
+                "Vision backlog generated.",
+                backlogPayload)));
+
+        var jobs = CreateJobs(db, runner);
+        var providerId = Guid.NewGuid();
+
+        await jobs.RunVisionPlannerAsync(plan.Id, agent.Id, conversation.Id, providerId, Guid.NewGuid(), metadata: BuildMetadata(), cancellationToken: CancellationToken.None);
+
+        var tasks = await db.ConversationTasks
+            .Where(t => t.ConversationPlanId == conversationPlan.Id)
+            .OrderBy(t => t.StepNumber)
+            .ToListAsync();
+
+        tasks.Should().Contain(t => string.Equals(t.BacklogItemId, "outline-core-conflicts", StringComparison.OrdinalIgnoreCase));
+        tasks.Should().Contain(t => string.Equals(t.BacklogItemId, "map-world-seeds", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -214,10 +294,76 @@ public class FictionPlanBacklogTests
             ["backlogItemId"] = backlogId
         };
 
-        var result = await jobs.RunChapterArchitectAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+        var result = await jobs.RunChapterArchitectAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: BuildMetadata("outline-core-conflicts"));
 
         capturedBacklogId.Should().Be(backlogId);
         result.Data.Should().NotBeNull().And.ContainKey("backlogItemId").WhoseValue.Should().Be(backlogId);
+    }
+
+    [Fact]
+    public async Task VisionPlanner_AttachesScopePathMetadata()
+    {
+        await using var db = CreateDbContext();
+        var projectId = Guid.NewGuid();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = projectId,
+            Name = "Scope metadata plan",
+            Description = "Verifies scope propagation."
+        };
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        FictionPhaseExecutionContext? capturedContext = null;
+        var runner = new StubPhaseRunner(
+            FictionPhase.VisionPlanner,
+            (context, _) =>
+            {
+                capturedContext = context;
+                return Task.FromResult(FictionPhaseResult.Success(FictionPhase.VisionPlanner));
+            });
+
+        var bus = Substitute.For<IBus>();
+        FictionPhaseProgressed? published = null;
+        bus.Publish(Arg.Do<FictionPhaseProgressed>(evt => published = evt)).Returns(Task.CompletedTask);
+
+        var notifier = Substitute.For<IPlanProgressNotifier>();
+        var scheduler = Substitute.For<IFictionBacklogScheduler>();
+        var scopePaths = ScopePathBuilderTestHelper.CreateBuilder();
+        var jobs = new FictionWeaverJobs(
+            db,
+            new[] { runner },
+            bus,
+            notifier,
+            new WorkflowEventLogger(db, enabled: false),
+            scheduler,
+            scopePaths,
+            NullLogger<FictionWeaverJobs>.Instance);
+
+        await jobs.RunVisionPlannerAsync(plan.Id, agentId, conversationId, Guid.NewGuid(), Guid.NewGuid(), metadata: BuildMetadata(), cancellationToken: CancellationToken.None);
+
+        capturedContext.Should().NotBeNull();
+        var context = capturedContext!;
+        context.ScopePath.Should().NotBeNull();
+        context.ScopeToken.Should().NotBeNull();
+
+        var expectedScope = scopePaths.Build(new ScopeToken(null, null, null, agentId, conversationId, plan.Id, projectId, null)).Canonical;
+        context.ScopePath!.Canonical.Should().Be(expectedScope);
+        context.Metadata.Should().NotBeNull();
+        var metadata = context.Metadata!;
+        metadata.Should().ContainKey("scopePath").WhoseValue.Should().Be(expectedScope);
+        metadata.Should().ContainKey("scopePrincipalType").WhoseValue.Should().Be("agent");
+        metadata.Should().ContainKey("scopePrincipalId").WhoseValue.Should().Be(agentId.ToString("D"));
+
+        published.Should().NotBeNull();
+        var payload = published!.Payload!;
+        payload.Should().ContainKey("scopePath");
+        payload["scopePath"]?.ToString().Should().Be(expectedScope);
+        payload["scopePrincipalType"]?.ToString().Should().Be("agent");
+        payload["scopePrincipalId"]?.ToString().Should().Be(agentId.ToString("D"));
     }
 
     [Fact]
@@ -251,7 +397,7 @@ public class FictionPlanBacklogTests
             ["backlogItemId"] = backlogId
         };
 
-        var result = await jobs.RunScrollRefinerAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+        var result = await jobs.RunScrollRefinerAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: BuildMetadata("refine-scroll"));
 
         capturedBacklogId.Should().Be(backlogId);
         result.Data.Should().NotBeNull().And.ContainKey("backlogItemId").WhoseValue.Should().Be(backlogId);
@@ -288,10 +434,26 @@ public class FictionPlanBacklogTests
             ["backlogItemId"] = backlogId
         };
 
-        var result = await jobs.RunSceneWeaverAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: metadata);
+        var result = await jobs.RunSceneWeaverAsync(plan.Id, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), cancellationToken: CancellationToken.None, metadata: BuildMetadata(backlogId));
 
         capturedBacklogId.Should().Be(backlogId);
         result.Data.Should().NotBeNull().And.ContainKey("backlogItemId").WhoseValue.Should().Be(backlogId);
+    }
+
+    private static Dictionary<string, string> BuildMetadata(string? backlogId = null)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["conversationPlanId"] = Guid.NewGuid().ToString(),
+            ["taskId"] = Guid.NewGuid().ToString()
+        };
+
+        if (!string.IsNullOrWhiteSpace(backlogId))
+        {
+            metadata["backlogItemId"] = backlogId;
+        }
+
+        return metadata;
     }
 
     private static FictionWeaverJobs CreateJobs(CognitionDbContext db, params IFictionPhaseRunner[] runners)
@@ -301,7 +463,8 @@ public class FictionPlanBacklogTests
         var workflowLogger = new WorkflowEventLogger(db, enabled: false);
         var scheduler = Substitute.For<IFictionBacklogScheduler>();
         var logger = NullLogger<FictionWeaverJobs>.Instance;
-        return new FictionWeaverJobs(db, runners, bus, notifier, workflowLogger, scheduler, logger);
+        var scopePaths = ScopePathBuilderTestHelper.CreateBuilder();
+        return new FictionWeaverJobs(db, runners, bus, notifier, workflowLogger, scheduler, scopePaths, logger);
     }
 
     private static string? ReadBacklogId(object payload)
@@ -334,7 +497,12 @@ public class FictionPlanBacklogTests
             {
                 typeof(FictionPlan),
                 typeof(FictionPlanBacklogItem),
-                typeof(FictionPlanCheckpoint)
+                typeof(FictionPlanCheckpoint),
+                typeof(ConversationPlan),
+                typeof(ConversationTask),
+                typeof(Conversation),
+                typeof(Persona),
+                typeof(Agent)
             };
 
             foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
@@ -345,6 +513,8 @@ public class FictionPlanBacklogTests
                 }
             }
 
+            modelBuilder.Entity<Agent>().Ignore(a => a.State);
+            modelBuilder.Entity<Conversation>().Ignore(c => c.Metadata);
             modelBuilder.Entity<FictionPlanBacklogItem>().Ignore(x => x.Inputs);
             modelBuilder.Entity<FictionPlanBacklogItem>().Ignore(x => x.Outputs);
             modelBuilder.Entity<FictionPlanCheckpoint>().Ignore(x => x.Progress);

@@ -99,9 +99,10 @@ public sealed class ScrollRefinerPlannerTool : PlannerBase<ScrollRefinerPlannerP
         var executionContext = parameters.ExecutionContext!;
 
         var template = await TemplateRepository.GetTemplateAsync(TemplateId, ct).ConfigureAwait(false);
+        var authorContext = AuthorPersonaPromptContext.FromConversationState(context.ConversationState);
         var prompt = template is { Length: > 0 } resolvedTemplate
-            ? BuildPromptFromTemplate(resolvedTemplate, plan, executionContext, parameters.Blueprint, parameters.ExistingScroll)
-            : BuildFallbackPrompt(plan, executionContext, parameters.Blueprint, parameters.ExistingScroll);
+            ? BuildPromptFromTemplate(resolvedTemplate, plan, executionContext, parameters.Blueprint, parameters.ExistingScroll, authorContext)
+            : BuildFallbackPrompt(plan, executionContext, parameters.Blueprint, parameters.ExistingScroll, authorContext);
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
@@ -154,7 +155,8 @@ public sealed class ScrollRefinerPlannerTool : PlannerBase<ScrollRefinerPlannerP
         FictionPlan plan,
         FictionPhaseExecutionContext context,
         FictionChapterBlueprint? blueprint,
-        FictionChapterScroll? existingScroll)
+        FictionChapterScroll? existingScroll,
+        AuthorPersonaPromptContext authorContext)
     {
         var tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -163,7 +165,11 @@ public sealed class ScrollRefinerPlannerTool : PlannerBase<ScrollRefinerPlannerP
             ["description"] = string.IsNullOrWhiteSpace(plan.Description) ? "(no long-form description captured yet)" : plan.Description!,
             ["blueprintSynopsis"] = BuildBlueprintSynopsis(blueprint),
             ["blueprintStructure"] = BuildBlueprintStructure(blueprint),
-            ["scrollSummary"] = BuildExistingScrollSummary(existingScroll)
+            ["scrollSummary"] = BuildExistingScrollSummary(existingScroll),
+            ["authorPersonaName"] = authorContext.PersonaName ?? "(author persona not set)",
+            ["authorPersonaSummary"] = authorContext.SummaryText,
+            ["authorPersonaMemories"] = authorContext.MemoriesText,
+            ["authorWorldNotes"] = authorContext.WorldNotesText
         };
 
         var result = template;
@@ -179,10 +185,20 @@ public sealed class ScrollRefinerPlannerTool : PlannerBase<ScrollRefinerPlannerP
         FictionPlan plan,
         FictionPhaseExecutionContext context,
         FictionChapterBlueprint? blueprint,
-        FictionChapterScroll? existingScroll)
+        FictionChapterScroll? existingScroll,
+        AuthorPersonaPromptContext authorContext)
     {
         var builder = new StringBuilder();
         builder.AppendLine($"You are refining the chapter scroll for project \"{plan.Name}\" on branch \"{(string.IsNullOrWhiteSpace(context.BranchSlug) ? "main" : context.BranchSlug)}\".");
+        builder.AppendLine();
+        builder.AppendLine("Author persona summary:");
+        builder.AppendLine(authorContext.SummaryText);
+        builder.AppendLine();
+        builder.AppendLine("Recent persona memories:");
+        builder.AppendLine(authorContext.MemoriesText);
+        builder.AppendLine();
+        builder.AppendLine("World-bible obligations to honor:");
+        builder.AppendLine(authorContext.WorldNotesText);
         builder.AppendLine();
         builder.AppendLine("Blueprint synopsis:");
         builder.AppendLine(BuildBlueprintSynopsis(blueprint));

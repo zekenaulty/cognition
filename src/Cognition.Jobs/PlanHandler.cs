@@ -79,32 +79,39 @@ namespace Cognition.Jobs
             var stepNumber = 1;
             foreach (var step in planSteps)
             {
-                var callTool = step.CallTool;
-                var stepJson = JsonSerializer.Serialize(step, PlanSerializerOptions);
-                var argsJson = JsonSerializer.Serialize(callTool.args, PlanSerializerOptions);
+                var argsJson = JsonSerializer.Serialize(step.Args, PlanSerializerOptions);
+                var thoughtPayload = JsonSerializer.Serialize(new
+                {
+                    step.ToolName,
+                    step.BacklogItemId,
+                    step.Goal
+                }, PlanSerializerOptions);
 
                 conversationPlan.Tasks.Add(new ConversationTask
                 {
                     StepNumber = stepNumber,
-                    Thought = stepJson,
-                    Goal = DescribeTool(callTool.tool),
-                    ToolName = callTool.tool,
+                    Thought = thoughtPayload,
+                    Goal = step.Goal,
+                    ToolName = step.ToolName,
                     ArgsJson = argsJson,
                     Status = "Pending",
+                    BacklogItemId = step.BacklogItemId,
                     CreatedAt = DateTime.UtcNow
                 });
 
                 taskSummaries.Add(new
                 {
                     stepNumber,
-                    tool = callTool.tool,
-                    args = callTool.args
+                    tool = step.ToolName,
+                    backlogItemId = step.BacklogItemId,
+                    args = step.Args
                 });
 
                 stepNumber++;
             }
 
             _db.ConversationPlans.Add(conversationPlan);
+            fictionPlan.CurrentConversationPlanId = conversationPlan.Id;
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
             await _logger.LogAsync(message.ConversationId, nameof(PlanRequested), JObject.FromObject(new
@@ -138,71 +145,67 @@ namespace Cognition.Jobs
             await _bus.Publish(planReady).ConfigureAwait(false);
         }
 
-        private static List<dynamic> BuildPlanSteps(PlanRequested message, string branchSlug)
+        private static IReadOnlyList<PlanStepDefinition> BuildPlanSteps(PlanRequested message, string branchSlug)
         {
-            var steps = new List<dynamic>
+            var baseArgs = new
             {
-                new
-                {
-                    CallTool = new
+                planId = message.FictionPlanId,
+                agentId = message.AgentId,
+                conversationId = message.ConversationId,
+                providerId = message.ProviderId,
+                modelId = message.ModelId,
+                branchSlug
+            };
+
+            var steps = new List<PlanStepDefinition>
+            {
+                new(
+                    "fiction.weaver.visionPlanner",
+                    FictionBacklogTokens.VisionPlan,
+                    new
                     {
-                        tool = "fiction.weaver.visionPlanner",
-                        args = new
-                        {
-                            planId = message.FictionPlanId,
-                            agentId = message.AgentId,
-                            conversationId = message.ConversationId,
-                            providerId = message.ProviderId,
-                            modelId = message.ModelId,
-                            branchSlug
-                        }
-                    }
-                },
-                new
-                {
-                    CallTool = new
+                        baseArgs.planId,
+                        baseArgs.agentId,
+                        baseArgs.conversationId,
+                        baseArgs.providerId,
+                        baseArgs.modelId,
+                        baseArgs.branchSlug,
+                        backlogItemId = FictionBacklogTokens.VisionPlan
+                    },
+                    "Capture project vision summary"),
+                new(
+                    "fiction.weaver.worldBibleManager",
+                    FictionBacklogTokens.WorldBible,
+                    new
                     {
-                        tool = "fiction.weaver.worldBibleManager",
-                        args = new
-                        {
-                            planId = message.FictionPlanId,
-                            agentId = message.AgentId,
-                            conversationId = message.ConversationId,
-                            providerId = message.ProviderId,
-                            modelId = message.ModelId,
-                            branchSlug
-                        }
-                    }
-                },
-                new
-                {
-                    CallTool = new
+                        baseArgs.planId,
+                        baseArgs.agentId,
+                        baseArgs.conversationId,
+                        baseArgs.providerId,
+                        baseArgs.modelId,
+                        baseArgs.branchSlug,
+                        backlogItemId = FictionBacklogTokens.WorldBible
+                    },
+                    "Refresh world bible state"),
+                new(
+                    "fiction.weaver.iterativePlanner",
+                    FictionBacklogTokens.IterationPlan,
+                    new
                     {
-                        tool = "fiction.weaver.iterativePlanner",
-                        args = new
-                        {
-                            planId = message.FictionPlanId,
-                            agentId = message.AgentId,
-                            conversationId = message.ConversationId,
-                            providerId = message.ProviderId,
-                            modelId = message.ModelId,
-                            branchSlug,
-                            iterationIndex = 1
-                        }
-                    }
-                }
+                        baseArgs.planId,
+                        baseArgs.agentId,
+                        baseArgs.conversationId,
+                        baseArgs.providerId,
+                        baseArgs.modelId,
+                        baseArgs.branchSlug,
+                        iterationIndex = 1,
+                        backlogItemId = FictionBacklogTokens.IterationPlan
+                    },
+                    "Generate iterative planning pass")
             };
 
             return steps;
         }
-
-        private static string DescribeTool(string tool) => tool switch
-        {
-            "fiction.weaver.visionPlanner" => "Capture project vision summary",
-            "fiction.weaver.worldBibleManager" => "Refresh world bible state",
-            "fiction.weaver.iterativePlanner" => "Generate iterative planning pass",
-            _ => tool
-        };
 
         private static Dictionary<string, object?> MergeMetadata(Dictionary<string, object?>? source, Guid conversationPlanId, string branchSlug, IEnumerable<object> steps)
         {
@@ -223,5 +226,7 @@ namespace Cognition.Jobs
 
             return metadata;
         }
+
+        private sealed record PlanStepDefinition(string ToolName, string BacklogItemId, object Args, string Goal);
     }
 }

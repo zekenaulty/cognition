@@ -70,7 +70,7 @@ public class RetrievalServiceSearchTests_ConversationThenAgent
 
         var embeddings = new ScriptedEmbeddingsClient().When(_ => true, new[] { 0.5f, 0.5f });
         var service = CreateService(store, embeddings);
-        var scope = new ScopeToken(null, null, null, agentId, conversationId, null, null);
+        var scope = new ScopeToken(null, null, null, agentId, conversationId, null, null, null);
 
         var first = await service.SearchAsync(scope, "anything", k: 1);
 

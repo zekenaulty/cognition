@@ -32,6 +32,7 @@ public interface IScopePathBuilder
         Guid? personaId,
         Guid? agentId,
         Guid? conversationId,
+        Guid? planId,
         Guid? projectId,
         Guid? worldId,
         out ScopePath scopePath);
@@ -66,6 +67,7 @@ public sealed class ScopePathBuilder : IScopePathBuilder
         Guid? personaId,
         Guid? agentId,
         Guid? conversationId,
+        Guid? planId,
         Guid? projectId,
         Guid? worldId,
         out ScopePath scopePath)
@@ -76,6 +78,7 @@ public sealed class ScopePathBuilder : IScopePathBuilder
             personaId,
             agentId,
             conversationId,
+            planId,
             projectId,
             worldId));
 

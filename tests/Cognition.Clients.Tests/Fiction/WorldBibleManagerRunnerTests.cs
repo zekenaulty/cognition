@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Scope;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Agents;
@@ -77,7 +78,16 @@ public class WorldBibleManagerRunnerTests
                 Arg.Any<CancellationToken>())
             .Returns(_ => Task.FromResult((responses.Dequeue(), Guid.NewGuid())));
 
-        var runner = new WorldBibleManagerRunner(db, agentService, NullLogger<WorldBibleManagerRunner>.Instance, ScopePathBuilderTestHelper.CreateBuilder());
+        var lifecycle = Substitute.For<ICharacterLifecycleService>();
+        lifecycle.ProcessAsync(Arg.Any<CharacterLifecycleRequest>(), Arg.Any<CancellationToken>())
+            .Returns(CharacterLifecycleResult.Empty);
+
+        var runner = new WorldBibleManagerRunner(
+            db,
+            agentService,
+            lifecycle,
+            NullLogger<WorldBibleManagerRunner>.Instance,
+            ScopePathBuilderTestHelper.CreateBuilder());
 
         var providerId = Guid.NewGuid();
         var modelId = Guid.NewGuid();

@@ -293,23 +293,62 @@ Project description:
 Project logline:
 {logline}
 
-Produce minified JSON with the following shape:
+Return minified JSON with the following shape:
 {{
   ""authorSummary"": ""string describing the author persona voice, tone, pacing, and stylistic edges"",
   ""bookGoals"": [""goal 1"", ""goal 2"", ""goal 3""],
+  ""coreCast"": [
+    {{
+      ""name"": ""string"",
+      ""role"": ""protagonist|antagonist|ally"",
+      ""track"": true,
+      ""importance"": ""high|medium|low"",
+      ""summary"": ""2-3 sentences covering motivation, flaw, stakes, POV"",
+      ""motivation"": ""single sentence"",
+      ""arcBeats"": [""beat"", ""beat""],
+      ""continuityHooks"": [""obligation"", ""callback""],
+      ""notes"": ""continuity notes"",
+      ""slug"": ""friendly-slug"",
+      ""planPassId"": null
+    }}
+  ],
+  ""supportingCast"": [
+    {{
+      ""name"": ""string"",
+      ""role"": ""support"",
+      ""track"": true,
+      ""importance"": ""medium"",
+      ""summary"": ""sentence"",
+      ""notes"": ""continuity notes"",
+      ""slug"": ""friendly-slug""
+    }}
+  ],
+  ""loreNeeds"": [
+    {{
+      ""title"": ""string"",
+      ""requirementSlug"": ""friendly-slug"",
+      ""status"": ""planned|ready|missing"",
+      ""description"": ""what canon or system must exist"",
+      ""requiredFor"": [""vision-plan"", ""chapter-blueprint"", ""chapter-scroll"", ""chapter-scene""],
+      ""notes"": ""continuity notes"",
+      ""track"": true
+    }}
+  ],
   ""planningBacklog"": [
     {{
       ""id"": ""outline-core-conflicts"",
       ""description"": ""Define the headline conflicts and stakes"",
-      ""status"": ""pending""
+      ""status"": ""pending"",
+      ""inputs"": [],
+      ""outputs"": []
     }}
   ],
   ""openQuestions"": [""unknown or risky assumptions""],
   ""worldSeeds"": [""worldbuilding seeds to expand later""]
 }}
 
+Flag every persona or lore pillar that must persist by setting ""track"": true so downstream lifecycle services promote them.
 Ensure backlog entries capture still-needed planner passes rather than a finished story outline.
 Respond with JSON only.";
     }
 }
-

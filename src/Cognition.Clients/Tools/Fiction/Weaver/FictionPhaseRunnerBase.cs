@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Scope;
+using Cognition.Contracts;
+using Cognition.Contracts.Scopes;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -249,4 +251,34 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
     }
 
     protected abstract Task<FictionPhaseResult> ExecuteCoreAsync(FictionPlan plan, Conversation conversation, FictionPhaseExecutionContext context, CancellationToken cancellationToken);
+
+    protected ScopePath? ResolveScopePath(FictionPhaseExecutionContext context)
+    {
+        if (context.ScopePath is { } existing)
+        {
+            return existing;
+        }
+
+        if (context.ScopeToken is ScopeToken scopedToken &&
+            _scopePathBuilder.TryBuild(scopedToken, out var fromToken))
+        {
+            return fromToken;
+        }
+
+        if (_scopePathBuilder.TryBuild(
+                tenantId: null,
+                appId: null,
+                personaId: null,
+                agentId: context.AgentId,
+                conversationId: context.ConversationId,
+                planId: context.PlanId,
+                projectId: null,
+                worldId: null,
+                out var inferred))
+        {
+            return inferred;
+        }
+
+        return null;
+    }
 }

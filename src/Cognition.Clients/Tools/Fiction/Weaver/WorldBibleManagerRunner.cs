@@ -8,11 +8,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Agents;
 using Cognition.Clients.Scope;
+using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 
 namespace Cognition.Clients.Tools.Fiction.Weaver;
 
@@ -20,14 +22,17 @@ public class WorldBibleManagerRunner : FictionPhaseRunnerBase
 {
 
     private sealed record PlanPassSummary(int PassIndex, string Title, string? Summary);
+    private readonly ICharacterLifecycleService _lifecycleService;
 
     public WorldBibleManagerRunner(
         CognitionDbContext db,
         IAgentService agentService,
+        ICharacterLifecycleService lifecycleService,
         ILogger<WorldBibleManagerRunner> logger,
         IScopePathBuilder scopePathBuilder)
         : base(db, agentService, logger, FictionPhase.WorldBibleManager, scopePathBuilder)
     {
+        _lifecycleService = lifecycleService ?? throw new ArgumentNullException(nameof(lifecycleService));
     }
 
     protected override async Task<FictionPhaseResult> ExecuteCoreAsync(
@@ -82,6 +87,8 @@ public class WorldBibleManagerRunner : FictionPhaseRunnerBase
             Logger.LogWarning("WorldBibleManager invoked for plan {PlanId} without a worldBibleId in metadata.", plan.Id);
         }
 
+        await ProcessLifecycleAsync(plan, context, validation, cancellationToken).ConfigureAwait(false);
+
         return BuildResult(
             FictionPhaseStatus.Completed,
             "World bible update recorded.",
@@ -94,6 +101,41 @@ public class WorldBibleManagerRunner : FictionPhaseRunnerBase
             validationStatus: validation.Status,
             validationDetails: validation.Details,
             transcriptMetadata: transcriptMetadata);
+    }
+
+    private async Task ProcessLifecycleAsync(
+        FictionPlan plan,
+        FictionPhaseExecutionContext context,
+        FictionResponseValidationResult validation,
+        CancellationToken cancellationToken)
+    {
+        if (validation.ParsedPayload is not JToken token)
+        {
+            return;
+        }
+
+        var characters = LifecyclePayloadParser.ExtractCharacters(token);
+        if (characters.Count == 0)
+        {
+            return;
+        }
+
+        var request = new CharacterLifecycleRequest(
+            plan.Id,
+            context.ConversationId,
+            PlanPassId: null,
+            characters,
+            Array.Empty<LoreRequirementDescriptor>(),
+            Source: "world-bible");
+
+        var result = await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
+        if (result.CreatedCharacters.Count > 0)
+        {
+            Logger.LogInformation(
+                "World bible lifecycle promoted {Count} characters for plan {PlanId}.",
+                result.CreatedCharacters.Count,
+                plan.Id);
+        }
     }
 
     private static string BuildWorldBiblePrompt(

@@ -38,7 +38,8 @@ public class RetrievalServiceSearchTests
         });
 
         var service = CreateService(vectorStore, embeddingsClient);
-        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), Guid.NewGuid(), null, null);
+        var planId = Guid.NewGuid();
+        var scope = new ScopeToken(Guid.NewGuid(), null, null, Guid.NewGuid(), Guid.NewGuid(), planId, null, null);
         var filters = new Dictionary<string, object?> { ["Existing"] = "value", ["NullValue"] = null };
 
         var results = await service.SearchAsync(scope, "query", k: 2, filters);
@@ -50,7 +51,9 @@ public class RetrievalServiceSearchTests
         vectorStore.Calls[0].TenantKey.Should().Be(scope.TenantId!.Value.ToString());
         vectorStore.Calls[0].Filters.Should().ContainKey("Existing");
         vectorStore.Calls[0].Filters.Should().ContainKey("ConversationId");
+        vectorStore.Calls[0].Filters.Should().ContainKey("PlanId").WhoseValue.Should().Be(planId.ToString());
         vectorStore.Calls[1].Filters.Should().ContainKey("AgentId");
+        vectorStore.Calls[1].Filters.Should().ContainKey("PlanId").WhoseValue.Should().Be(planId.ToString());
     }
 
     [Fact]
@@ -60,7 +63,7 @@ public class RetrievalServiceSearchTests
         var vectorStore = new VectorStoreStub();
         var service = CreateService(vectorStore, embeddingsClient);
 
-        var result = await service.SearchAsync(new ScopeToken(null, null, null, null, null, null, null), "query");
+        var result = await service.SearchAsync(new ScopeToken(null, null, null, null, null, null, null, null), "query");
 
         result.Should().BeEmpty();
         vectorStore.Calls.Should().BeEmpty();
@@ -77,7 +80,7 @@ public class RetrievalServiceSearchTests
         });
 
         var service = CreateService(vectorStore, embeddingsClient);
-        var scope = new ScopeToken(null, Guid.NewGuid(), null, Guid.NewGuid(), null, null, null);
+        var scope = new ScopeToken(null, Guid.NewGuid(), null, Guid.NewGuid(), null, Guid.NewGuid(), null, null);
 
         var result = await service.SearchAsync(scope, "query", k: 1);
 
@@ -85,6 +88,7 @@ public class RetrievalServiceSearchTests
         vectorStore.Calls.Should().HaveCount(1);
         vectorStore.Calls[0].Filters.Should().ContainKey("AgentId");
         vectorStore.Calls[0].Filters.Should().NotContainKey("ConversationId");
+        vectorStore.Calls[0].Filters.Should().ContainKey("PlanId").WhoseValue.Should().Be(scope.PlanId!.Value.ToString());
     }
 
     private static RetrievalService CreateService(VectorStoreStub store, EmbeddingsClientStub embeddings)
