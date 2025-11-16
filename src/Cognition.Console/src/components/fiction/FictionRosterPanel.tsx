@@ -17,7 +17,7 @@ import {
   TableRow,
   Typography
 } from '@mui/material';
-import { FictionLoreRequirementItem, FictionPlanRoster } from '../../types/fiction';
+import { FictionLoreRequirementItem, FictionPlanRoster, LoreFulfillmentLog } from '../../types/fiction';
 
 const EM_DASH = '\u2014';
 
@@ -27,6 +27,9 @@ type Props = {
   error?: string | null;
   placeholder?: string;
   onFulfillLore?: (requirement: FictionLoreRequirementItem) => Promise<void>;
+  loreHistory?: Record<string, LoreFulfillmentLog[]>;
+  loreHistoryLoading?: boolean;
+  loreHistoryError?: string | null;
 };
 
 export function FictionRosterPanel({
@@ -34,7 +37,10 @@ export function FictionRosterPanel({
   loading,
   error,
   placeholder = 'Select a plan to load its roster.',
-  onFulfillLore
+  onFulfillLore,
+  loreHistory,
+  loreHistoryLoading = false,
+  loreHistoryError = null
 }: Props) {
   if (loading) {
     return <LinearProgress />;
@@ -73,6 +79,13 @@ export function FictionRosterPanel({
   );
   const showFulfillActions = Boolean(onFulfillLore);
   const blockedByBranch = groupBlockedLore(roster);
+  const flattenedHistory = React.useMemo(() => {
+    if (!loreHistory) {
+      return [];
+    }
+    const all = Object.values(loreHistory).flat();
+    return all.sort((a, b) => new Date(b.timestampUtc).getTime() - new Date(a.timestampUtc).getTime()).slice(0, 25);
+  }, [loreHistory]);
 
   return (
     <Stack spacing={3}>
@@ -245,6 +258,41 @@ export function FictionRosterPanel({
                 </Stack>
               </Box>
             )}
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                Fulfillment Activity
+              </Typography>
+              {loreHistoryLoading ? (
+                <LinearProgress sx={{ mt: 1 }} />
+              ) : loreHistoryError ? (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  {loreHistoryError}
+                </Alert>
+              ) : flattenedHistory.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  No recorded fulfillment events yet.
+                </Typography>
+              ) : (
+                <List dense sx={{ mt: 1 }}>
+                  {flattenedHistory.map(event => (
+                    <ListItem key={`${event.requirementId}-${event.timestampUtc}-${event.action}`} sx={{ py: 0.5 }}>
+                      <ListItemText
+                        primary={
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {event.requirementSlug} &mdash; {event.action}
+                          </Typography>
+                        }
+                        secondary={
+                          <Typography variant="caption" color="text.secondary">
+                            {event.actor ?? 'Unknown actor'} via {event.source} on branch {event.branch} &middot; {formatRelative(event.timestampUtc)}
+                          </Typography>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </Box>
           </>
         )}
       </Box>

@@ -6,6 +6,7 @@ using Cognition.Api.Infrastructure.Planning;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Data.Relational.Modules.Planning;
 using Cognition.Data.Relational.Modules.Prompts;
@@ -14,6 +15,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Newtonsoft.Json.Linq;
 using Xunit;
 
 namespace Cognition.Api.Tests.Infrastructure;
@@ -168,6 +170,58 @@ public class PlannerHealthServiceTests
         report.Warnings.Should().Contain(w => w.Contains("in progress", StringComparison.OrdinalIgnoreCase));
         report.Warnings.Should().Contain(w => w.Contains("failed", StringComparison.OrdinalIgnoreCase));
         report.Warnings.Should().Contain(w => w.Contains("critique", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GetReportAsync_includes_backlog_action_logs()
+    {
+        await using var db = CreateDbContext();
+
+        db.PromptTemplates.Add(new PromptTemplate
+        {
+            Id = Guid.NewGuid(),
+            Name = TestPlannerTool.TemplateId,
+            PromptType = PromptType.SystemInstruction,
+            Template = "Planner template",
+            IsActive = true
+        });
+
+        var planId = Guid.NewGuid();
+        db.FictionPlans.Add(new FictionPlan
+        {
+            Id = planId,
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Log Plan",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.action",
+            Payload = JObject.FromObject(new
+            {
+                planId,
+                backlogId = "outline-core",
+                action = "resume",
+                branch = "main"
+            })
+        });
+
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped<TestPlannerTool>();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var registry = new StubToolRegistry(typeof(TestPlannerTool));
+        var alertPublisher = new TestAlertPublisher();
+        var health = new PlannerHealthService(db, registry, scope.ServiceProvider, alertPublisher, NullLogger<PlannerHealthService>.Instance);
+
+        var report = await health.GetReportAsync(CancellationToken.None);
+        report.Backlog.ActionLogs.Should().ContainSingle(log => log.BacklogId == "outline-core");
     }
 
     [Fact]
@@ -399,7 +453,8 @@ public class PlannerHealthServiceTests
                 typeof(FictionPlanBacklogItem),
                 typeof(PlannerExecution),
                 typeof(FictionWorldBible),
-                typeof(FictionWorldBibleEntry)
+                typeof(FictionWorldBibleEntry),
+                typeof(WorkflowEvent)
             };
 
             foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())

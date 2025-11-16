@@ -1,10 +1,14 @@
 import { OpenSearchDiagnosticsReport, PlannerHealthReport } from '../types/diagnostics';
 import {
+  BacklogActionLog,
   AuthorPersonaContext,
+  FictionBacklogItem,
   FictionPlanRoster,
   FictionPlanSummary,
   FulfillLoreRequirementPayload,
-  LoreBranchSummary
+  LoreFulfillmentLog,
+  LoreBranchSummary,
+  ResumeBacklogPayload
 } from '../types/fiction';
 
 export async function fetchImageStyles(accessToken: string): Promise<any[]> {
@@ -100,6 +104,7 @@ function joinUrl(base: string, path: string) {
 export async function request<T>(path: string, options: RequestInit = {}, accessToken?: string): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-Console-Client': 'cognition-console',
     ...(options.headers as Record<string, string> | undefined)
   }
   if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
@@ -261,6 +266,18 @@ export const fictionApi = {
     request<LoreBranchSummary[]>(`/api/fiction/plans/${planId}/lore/summary`, {}, accessToken),
   getAuthorPersonaContext: (planId: string, accessToken?: string) =>
     request<AuthorPersonaContext>(`/api/fiction/plans/${planId}/author-persona`, {}, accessToken),
+  getPlanBacklog: (planId: string, accessToken?: string) =>
+    request<FictionBacklogItem[]>(`/api/fiction/plans/${planId}/backlog`, {}, accessToken),
+  getBacklogActions: (planId: string, accessToken?: string) =>
+    request<BacklogActionLog[]>(`/api/fiction/plans/${planId}/backlog/actions`, {}, accessToken),
+  getLoreHistory: (planId: string, accessToken?: string) =>
+    request<LoreFulfillmentLog[]>(`/api/fiction/plans/${planId}/lore/history`, {}, accessToken),
+  resumeBacklog: (planId: string, backlogId: string, payload: ResumeBacklogPayload, accessToken?: string) =>
+    request<FictionBacklogItem>(
+      `/api/fiction/plans/${planId}/backlog/${encodeURIComponent(backlogId)}/resume`,
+      { method: 'POST', body: JSON.stringify(payload) },
+      accessToken
+    ),
   listPlans: (accessToken?: string) =>
     request<FictionPlanSummary[]>('/api/fiction/plans', {}, accessToken)
 }

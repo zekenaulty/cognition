@@ -19,11 +19,17 @@ import { useAuth } from '../auth/AuthContext';
 import { useSecurity } from '../hooks/useSecurity';
 import {
   AuthorPersonaContext,
+  FictionBacklogItem,
+  BacklogActionLog,
   FictionLoreRequirementItem,
   FictionPlanRoster,
-  FictionPlanSummary
+  FictionPlanSummary,
+  ResumeBacklogPayload,
+  LoreFulfillmentLog
 } from '../types/fiction';
 import { FictionRosterPanel } from '../components/fiction/FictionRosterPanel';
+import { FictionBacklogPanel } from '../components/fiction/FictionBacklogPanel';
+import { FictionResumeBacklogDialog } from '../components/fiction/FictionResumeBacklogDialog';
 
 export default function FictionProjectsPage() {
   const { auth } = useAuth();
@@ -40,6 +46,18 @@ export default function FictionProjectsPage() {
   const [personaContext, setPersonaContext] = React.useState<AuthorPersonaContext | null>(null);
   const [personaLoading, setPersonaLoading] = React.useState(false);
   const [personaError, setPersonaError] = React.useState<string | null>(null);
+  const [backlogItems, setBacklogItems] = React.useState<FictionBacklogItem[]>([]);
+  const [backlogLoading, setBacklogLoading] = React.useState(false);
+  const [backlogError, setBacklogError] = React.useState<string | null>(null);
+  const [actionLogs, setActionLogs] = React.useState<BacklogActionLog[]>([]);
+  const [actionLoading, setActionLoading] = React.useState(false);
+  const [actionError, setActionError] = React.useState<string | null>(null);
+  const [resumeTarget, setResumeTarget] = React.useState<FictionBacklogItem | null>(null);
+  const [resuming, setResuming] = React.useState(false);
+  const [resumeError, setResumeError] = React.useState<string | null>(null);
+  const [loreHistory, setLoreHistory] = React.useState<Record<string, LoreFulfillmentLog[]>>({});
+  const [loreHistoryLoading, setLoreHistoryLoading] = React.useState(false);
+  const [loreHistoryError, setLoreHistoryError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!token) {
@@ -150,6 +168,161 @@ export default function FictionProjectsPage() {
     };
   }, [token, selectedPlanId]);
 
+  const fetchBacklog = React.useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!token || !selectedPlanId) {
+        setBacklogItems([]);
+        setBacklogError(null);
+        setBacklogLoading(false);
+        return;
+      }
+
+      setBacklogLoading(true);
+      setBacklogError(null);
+      try {
+        const data = await fictionApi.getPlanBacklog(selectedPlanId, token);
+        if (isCancelled?.()) return;
+        setBacklogItems(data);
+      } catch (err) {
+        if (isCancelled?.()) return;
+        const message = err instanceof ApiError ? err.message : 'Unable to load backlog.';
+        setBacklogError(message);
+        setBacklogItems([]);
+      } finally {
+        if (isCancelled?.()) return;
+        setBacklogLoading(false);
+      }
+    },
+    [token, selectedPlanId]
+  );
+  const fetchLoreHistory = React.useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!token || !selectedPlanId) {
+        setLoreHistory({});
+        setLoreHistoryError(null);
+        setLoreHistoryLoading(false);
+        return;
+      }
+
+      setLoreHistoryLoading(true);
+      setLoreHistoryError(null);
+      try {
+        const data = await fictionApi.getLoreHistory(selectedPlanId, token);
+        if (isCancelled?.()) return;
+        const grouped: Record<string, LoreFulfillmentLog[]> = {};
+        data.forEach(entry => {
+          const key = entry.requirementId.toLowerCase();
+          if (!grouped[key]) {
+            grouped[key] = [];
+          }
+          grouped[key].push(entry);
+        });
+        setLoreHistory(grouped);
+      } catch (err) {
+        if (isCancelled?.()) return;
+        const message = err instanceof ApiError ? err.message : 'Unable to load lore history.';
+        setLoreHistoryError(message);
+        setLoreHistory({});
+      } finally {
+        if (isCancelled?.()) return;
+        setLoreHistoryLoading(false);
+      }
+    },
+    [token, selectedPlanId]
+  );
+
+  const fetchActionLogs = React.useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!token || !selectedPlanId) {
+        setActionLogs([]);
+        setActionError(null);
+        setActionLoading(false);
+        return;
+      }
+
+      setActionLoading(true);
+      setActionError(null);
+      try {
+        const data = await fictionApi.getBacklogActions(selectedPlanId, token);
+        if (isCancelled?.()) return;
+        setActionLogs(data);
+      } catch (err) {
+        if (isCancelled?.()) return;
+        const message = err instanceof ApiError ? err.message : 'Unable to load backlog action logs.';
+        setActionError(message);
+        setActionLogs([]);
+      } finally {
+        if (isCancelled?.()) return;
+        setActionLoading(false);
+      }
+    },
+    [token, selectedPlanId]
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchBacklog(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchBacklog]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchLoreHistory(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchLoreHistory]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchActionLogs(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchActionLogs]);
+
+  const handleResume = React.useCallback((item: FictionBacklogItem) => {
+    setResumeError(null);
+    setResumeTarget(item);
+  }, []);
+
+  const handleResumeSubmit = React.useCallback(
+    async (payload: ResumeBacklogPayload) => {
+      if (!token || !selectedPlanId || !resumeTarget) {
+        return;
+      }
+      setResuming(true);
+      setResumeError(null);
+      try {
+        await fictionApi.resumeBacklog(selectedPlanId, resumeTarget.backlogId, payload, token);
+        setResumeTarget(null);
+        await fetchBacklog();
+        await fetchActionLogs();
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Backlog resume failed.';
+        setResumeError(message);
+      } finally {
+        setResuming(false);
+      }
+    },
+    [token, selectedPlanId, resumeTarget, fetchBacklog, fetchActionLogs]
+  );
+
+  const handleResumeDialogClose = React.useCallback(() => {
+    if (resuming) {
+      return;
+    }
+    setResumeTarget(null);
+    setResumeError(null);
+  }, [resuming]);
+
+  React.useEffect(() => {
+    setResumeTarget(null);
+    setResumeError(null);
+  }, [selectedPlanId, token]);
+
   const handleFulfillLore = React.useCallback(
     async (requirement: FictionLoreRequirementItem) => {
       if (!token || !selectedPlanId) {
@@ -168,12 +341,13 @@ export default function FictionProjectsPage() {
         );
         const refreshed = await fictionApi.getPlanRoster(selectedPlanId, token);
         setRoster(refreshed);
+        await fetchLoreHistory();
       } catch (err) {
         const message = err instanceof ApiError ? err.message : 'Unable to fulfill lore requirement.';
         setRosterError(message);
       }
     },
-    [token, selectedPlanId, roster?.branchSlug]
+    [token, selectedPlanId, roster?.branchSlug, fetchLoreHistory]
   );
 
   if (!isAdmin) {
@@ -191,7 +365,7 @@ export default function FictionProjectsPage() {
           Fiction Projects
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Inspect tracked characters and lore for each fiction plan.
+          Inspect backlog readiness, lore fulfillment, and persona context for each fiction plan.
         </Typography>
       </Box>
       <Grid container spacing={3}>
@@ -236,6 +410,30 @@ export default function FictionProjectsPage() {
           <Stack spacing={3}>
             <Card>
               <CardHeader
+                title="Backlog"
+                subheader={
+                  roster
+                    ? `${backlogItems.length} tracked items`
+                    : 'View pending planner work and resume blocked steps.'
+                }
+              />
+              <CardContent>
+                <FictionBacklogPanel
+                  items={backlogItems}
+                  loading={backlogLoading}
+                  error={backlogError}
+                  placeholder={plans.length === 0 ? 'Create a plan to populate backlog data.' : 'Select a plan to inspect its backlog.'}
+                  onResume={isAdmin ? handleResume : undefined}
+                  resumingId={resuming && resumeTarget ? resumeTarget.id : null}
+                  isAdmin={isAdmin}
+                  actionLogs={actionLogs}
+                  actionLoading={actionLoading}
+                  actionError={actionError}
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader
                 title={roster ? roster.planName : 'Roster'}
                 subheader={roster?.projectTitle}
               />
@@ -246,6 +444,9 @@ export default function FictionProjectsPage() {
                   error={rosterError}
                   placeholder={plans.length === 0 ? 'No fiction plans available.' : 'Select a plan to load its roster.'}
                   onFulfillLore={handleFulfillLore}
+                  loreHistory={loreHistory}
+                  loreHistoryLoading={loreHistoryLoading}
+                  loreHistoryError={loreHistoryError}
                 />
               </CardContent>
             </Card>
@@ -311,6 +512,16 @@ export default function FictionProjectsPage() {
           </Stack>
         </Grid>
       </Grid>
+      <FictionResumeBacklogDialog
+        open={Boolean(resumeTarget)}
+        item={resumeTarget}
+        defaultBranch={roster?.branchSlug ?? undefined}
+        submitting={resuming}
+        error={resumeError}
+        onClose={handleResumeDialogClose}
+        onSubmit={handleResumeSubmit}
+        accessToken={token}
+      />
     </Stack>
   );
 }

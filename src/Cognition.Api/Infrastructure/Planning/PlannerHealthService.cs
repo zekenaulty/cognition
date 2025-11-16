@@ -84,7 +84,8 @@ public sealed record PlannerHealthBacklog(
     IReadOnlyList<PlannerHealthBacklogTransition> RecentTransitions,
     IReadOnlyList<PlannerHealthBacklogItem> StaleItems,
     IReadOnlyList<PlannerHealthBacklogItem> OrphanedItems,
-    IReadOnlyList<PlannerBacklogTelemetry> TelemetryEvents);
+    IReadOnlyList<PlannerBacklogTelemetry> TelemetryEvents,
+    IReadOnlyList<PlannerBacklogActionLog> ActionLogs);
 
 public sealed record PlannerHealthBacklogPlanSummary(
     Guid PlanId,
@@ -148,6 +149,22 @@ public sealed record PlannerBacklogTelemetryLore(
     string Status,
     Guid? WorldBibleEntryId,
     DateTime UpdatedAtUtc);
+
+public sealed record PlannerBacklogActionLog(
+    Guid PlanId,
+    string PlanName,
+    string BacklogId,
+    string? Description,
+    string Action,
+    string Branch,
+    string? Actor,
+    string? ActorId,
+    string Source,
+    Guid? ProviderId,
+    Guid? ModelId,
+    Guid? AgentId,
+    string? Status,
+    DateTime TimestampUtc);
 
 public sealed record PlannerBacklogTelemetryCharacterMetrics(int Total, int PersonaLinked, int WorldBibleLinked);
 
@@ -516,6 +533,9 @@ public sealed class PlannerHealthService : IPlannerHealthService
             .ThenBy(summary => summary.PlanName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var telemetryEvents = await LoadBacklogTelemetryAsync(ct).ConfigureAwait(false);
+        var actionLogs = await LoadBacklogActionLogsAsync(ct).ConfigureAwait(false);
+
         return new PlannerHealthBacklog(
             TotalItems: total,
             Pending: pending,
@@ -525,7 +545,8 @@ public sealed class PlannerHealthService : IPlannerHealthService
             RecentTransitions: recentTransitions,
             StaleItems: staleItems,
             OrphanedItems: orphaned,
-            TelemetryEvents: Array.Empty<PlannerBacklogTelemetry>());
+            TelemetryEvents: telemetryEvents,
+            ActionLogs: actionLogs);
     }
 
     
@@ -684,6 +705,82 @@ public sealed class PlannerHealthService : IPlannerHealthService
         }
 
         return list;
+    }
+
+    private async Task<IReadOnlyList<PlannerBacklogActionLog>> LoadBacklogActionLogsAsync(CancellationToken ct)
+    {
+        var events = await _db.WorkflowEvents
+            .AsNoTracking()
+            .Where(e => e.Kind == "fiction.backlog.action")
+            .OrderByDescending(e => e.Timestamp)
+            .Take(50)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (events.Count == 0)
+        {
+            return Array.Empty<PlannerBacklogActionLog>();
+        }
+
+        var planIds = events
+            .Select(e => e.Payload is JObject o ? ReadGuid(o, "planId") : null)
+            .Where(g => g.HasValue)
+            .Select(g => g!.Value)
+            .Distinct()
+            .ToArray();
+
+        var planLookup = planIds.Length == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.FictionPlans
+                .AsNoTracking()
+                .Where(p => planIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, p => p.Name, ct)
+                .ConfigureAwait(false);
+
+        var logs = new List<PlannerBacklogActionLog>(events.Count);
+        foreach (var evt in events)
+        {
+            if (evt.Payload is not JObject payload)
+            {
+                continue;
+            }
+
+            var planId = ReadGuid(payload, "planId");
+            if (!planId.HasValue)
+            {
+                continue;
+            }
+
+            var planName = planLookup.TryGetValue(planId.Value, out var resolved)
+                ? resolved
+                : $"Plan {planId.Value:N}";
+
+            var statusValue = payload.Value<string>("status");
+            FictionPlanBacklogStatus? status = null;
+            if (!string.IsNullOrWhiteSpace(statusValue) &&
+                Enum.TryParse(statusValue, true, out FictionPlanBacklogStatus parsedStatus))
+            {
+                status = parsedStatus;
+            }
+
+            logs.Add(new PlannerBacklogActionLog(
+                PlanId: planId.Value,
+                PlanName: planName,
+                BacklogId: payload.Value<string>("backlogId") ?? "(unknown)",
+                Description: payload.Value<string>("description"),
+                Action: payload.Value<string>("action") ?? "unknown",
+                Branch: payload.Value<string>("branch") ?? "main",
+                Actor: payload.Value<string>("actor"),
+                ActorId: payload.Value<string>("actorId"),
+                Source: payload.Value<string>("source") ?? "api",
+                ProviderId: ReadGuid(payload, "providerId"),
+                ModelId: ReadGuid(payload, "modelId"),
+                AgentId: ReadGuid(payload, "agentId"),
+                Status: status?.ToString(),
+                TimestampUtc: evt.Timestamp));
+        }
+
+        return logs;
     }
 
     private static IReadOnlyList<PlannerBacklogTelemetryCharacter> ReadCharacterSnapshots(JToken? token)

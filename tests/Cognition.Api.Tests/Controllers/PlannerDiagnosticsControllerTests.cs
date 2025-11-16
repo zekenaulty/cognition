@@ -38,7 +38,8 @@ public class PlannerDiagnosticsControllerTests
                 RecentTransitions: Array.Empty<PlannerHealthBacklogTransition>(),
                 StaleItems: Array.Empty<PlannerHealthBacklogItem>(),
                 OrphanedItems: Array.Empty<PlannerHealthBacklogItem>(),
-                TelemetryEvents: Array.Empty<PlannerBacklogTelemetry>()),
+                TelemetryEvents: Array.Empty<PlannerBacklogTelemetry>(),
+                ActionLogs: Array.Empty<PlannerBacklogActionLog>()),
             WorldBible: new PlannerHealthWorldBibleReport(Array.Empty<PlannerHealthWorldBiblePlan>()),
             Telemetry: new PlannerHealthTelemetry(
                 TotalExecutions: 0,

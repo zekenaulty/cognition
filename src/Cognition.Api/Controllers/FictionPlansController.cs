@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,8 @@ using Cognition.Jobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Primitives;
+using Newtonsoft.Json.Linq;
 
 namespace Cognition.Api.Controllers;
 
@@ -139,6 +142,142 @@ public sealed class FictionPlansController : ControllerBase
         return Ok(response);
     }
 
+    [HttpGet("{planId:guid}/backlog/actions")]
+    public async Task<ActionResult<IReadOnlyList<BacklogActionLogResponse>>> GetBacklogActions(Guid planId, CancellationToken cancellationToken)
+    {
+        var plan = await _db.FictionPlans
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == planId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (plan is null)
+        {
+            return NotFound();
+        }
+
+        var events = await _db.WorkflowEvents
+            .AsNoTracking()
+            .Where(e => e.Kind == "fiction.backlog.action")
+            .OrderByDescending(e => e.Timestamp)
+            .Take(200)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (events.Count == 0)
+        {
+            return Ok(Array.Empty<BacklogActionLogResponse>());
+        }
+
+        var logs = new List<BacklogActionLogResponse>();
+        foreach (var evt in events)
+        {
+            if (evt.Payload is not JObject payload)
+            {
+                continue;
+            }
+
+            var payloadPlanId = TryReadGuid(payload, "planId");
+            if (!payloadPlanId.HasValue || payloadPlanId.Value != plan.Id)
+            {
+                continue;
+            }
+
+            logs.Add(new BacklogActionLogResponse(
+                Action: payload.Value<string>("action") ?? "unknown",
+                BacklogId: payload.Value<string>("backlogId") ?? "(unknown)",
+                Description: payload.Value<string>("description"),
+                Branch: payload.Value<string>("branch") ?? plan.PrimaryBranchSlug ?? "main",
+                Actor: payload.Value<string>("actor"),
+                ActorId: payload.Value<string>("actorId"),
+                Source: payload.Value<string>("source") ?? "api",
+                ProviderId: TryReadGuid(payload, "providerId"),
+                ModelId: TryReadGuid(payload, "modelId"),
+                AgentId: TryReadGuid(payload, "agentId"),
+                Status: payload.Value<string>("status"),
+                ConversationId: TryReadGuid(payload, "conversationId"),
+                ConversationPlanId: TryReadGuid(payload, "conversationPlanId"),
+                TaskId: TryReadGuid(payload, "taskId"),
+                TimestampUtc: evt.Timestamp));
+
+            if (logs.Count >= 50)
+            {
+                break;
+            }
+        }
+
+        return Ok(logs);
+    }
+
+    [HttpGet("{planId:guid}/lore/history")]
+    public async Task<ActionResult<IReadOnlyList<LoreFulfillmentLogResponse>>> GetLoreHistory(Guid planId, CancellationToken cancellationToken)
+    {
+        var plan = await _db.FictionPlans
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == planId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (plan is null)
+        {
+            return NotFound();
+        }
+
+        var events = await _db.WorkflowEvents
+            .AsNoTracking()
+            .Where(e => e.Kind == "fiction.lore.fulfillment")
+            .OrderByDescending(e => e.Timestamp)
+            .Take(200)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (events.Count == 0)
+        {
+            return Ok(Array.Empty<LoreFulfillmentLogResponse>());
+        }
+
+        var logs = new List<LoreFulfillmentLogResponse>();
+        foreach (var evt in events)
+        {
+            if (evt.Payload is not JObject payload)
+            {
+                continue;
+            }
+
+            var payloadPlanId = TryReadGuid(payload, "planId");
+            if (!payloadPlanId.HasValue || payloadPlanId.Value != plan.Id)
+            {
+                continue;
+            }
+
+            var requirementId = TryReadGuid(payload, "requirementId");
+            if (!requirementId.HasValue)
+            {
+                continue;
+            }
+
+            logs.Add(new LoreFulfillmentLogResponse(
+                requirementId.Value,
+                payload.Value<string>("requirementSlug") ?? "(unknown)",
+                payload.Value<string>("action") ?? "fulfilled",
+                payload.Value<string>("branch") ?? plan.PrimaryBranchSlug ?? "main",
+                payload.Value<string>("actor"),
+                payload.Value<string>("actorId"),
+                payload.Value<string>("source") ?? "api",
+                TryReadGuid(payload, "worldBibleEntryId"),
+                payload.Value<string>("notes"),
+                payload.Value<string>("status"),
+                payload.Value<string>("conversationId"),
+                payload.Value<string>("planPassId"),
+                evt.Timestamp));
+
+            if (logs.Count >= 100)
+            {
+                break;
+            }
+        }
+
+        return Ok(logs);
+    }
+
     [HttpPost("{planId:guid}/backlog/{backlogId}/resume")]
     public async Task<ActionResult<BacklogItemResponse>> ResumeBacklog(
         Guid planId,
@@ -250,6 +389,8 @@ public sealed class FictionPlansController : ControllerBase
 
         await _backlogScheduler.ScheduleAsync(plan, FictionPhase.VisionPlanner, resumeResult, executionContext, cancellationToken).ConfigureAwait(false);
 
+        await LogBacklogActionAsync(plan, backlog, branchSlug, request, cancellationToken).ConfigureAwait(false);
+
         return Ok(MapBacklogItem(backlog, new[] { conversationTask }));
     }
 
@@ -333,6 +474,7 @@ public sealed class FictionPlansController : ControllerBase
 
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await EmitLoreFulfillmentTelemetry(plan, requirement, branchContext, request, cancellationToken).ConfigureAwait(false);
+        await LogLoreFulfillmentEventAsync(plan, requirement, branchContext, request, cancellationToken).ConfigureAwait(false);
 
         return Ok(MapLoreRequirement(requirement, plan.PrimaryBranchSlug));
     }
@@ -457,6 +599,8 @@ public sealed class FictionPlansController : ControllerBase
     private static BacklogItemResponse MapBacklogItem(FictionPlanBacklogItem entity, IEnumerable<ConversationTask> tasks)
     {
         var task = FindTaskForBacklog(tasks, entity);
+        var args = task is null ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) : DeserializeArgs(task.ArgsJson);
+
         return new BacklogItemResponse(
             entity.Id,
             entity.BacklogId,
@@ -467,6 +611,11 @@ public sealed class FictionPlansController : ControllerBase
             entity.CreatedAtUtc,
             entity.UpdatedAtUtc,
             task?.ConversationPlanId,
+            TryGetGuidArg(args, "conversationId"),
+            TryGetGuidArg(args, "agentId"),
+            TryGetGuidArg(args, "providerId"),
+            TryGetGuidArg(args, "modelId"),
+            TryGetStringArg(args, "branchSlug"),
             task?.Id,
             task?.StepNumber,
             task?.ToolName,
@@ -615,6 +764,206 @@ public sealed class FictionPlansController : ControllerBase
         args[key] = value;
     }
 
+    private async Task LogBacklogActionAsync(
+        FictionPlan plan,
+        FictionPlanBacklogItem backlog,
+        string branchSlug,
+        ResumeBacklogRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = new JObject
+        {
+            ["planId"] = plan.Id,
+            ["planName"] = plan.Name,
+            ["backlogId"] = backlog.BacklogId,
+            ["description"] = backlog.Description,
+            ["action"] = "resume",
+            ["branch"] = string.IsNullOrWhiteSpace(branchSlug) ? "main" : branchSlug,
+            ["status"] = backlog.Status.ToString(),
+            ["conversationId"] = request.ConversationId,
+            ["conversationPlanId"] = request.ConversationPlanId,
+            ["taskId"] = request.TaskId,
+            ["providerId"] = request.ProviderId,
+            ["agentId"] = request.AgentId
+        };
+
+        if (request.ModelId.HasValue)
+        {
+            payload["modelId"] = request.ModelId.Value;
+        }
+
+        var httpContext = HttpContext ?? ControllerContext?.HttpContext;
+        var actorId = ResolveActorId(httpContext);
+        if (!string.IsNullOrWhiteSpace(actorId))
+        {
+            payload["actorId"] = actorId;
+        }
+
+        var actorName = ResolveActorName(httpContext);
+        if (!string.IsNullOrWhiteSpace(actorName))
+        {
+            payload["actor"] = actorName;
+        }
+
+        payload["source"] = ResolveBacklogActionSource(httpContext);
+
+        _db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = request.ConversationId,
+            Kind = "fiction.backlog.action",
+            Payload = payload,
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string? ResolveActorId(HttpContext? context)
+    {
+        if (context?.User is null)
+        {
+            return null;
+        }
+
+        return context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? context.User.FindFirstValue("sub");
+    }
+
+    private static string? ResolveActorName(HttpContext? context)
+    {
+        if (context?.User is null)
+        {
+            return null;
+        }
+
+        return context.User.Identity?.Name
+            ?? context.User.FindFirstValue("name")
+            ?? context.User.FindFirstValue(ClaimTypes.Name);
+    }
+
+    private static string ResolveBacklogActionSource(HttpContext? context)
+    {
+        if (context is null)
+        {
+            return "api";
+        }
+
+        if (context.Request.Headers.TryGetValue("X-Console-Client", out var client) &&
+            !StringValues.IsNullOrEmpty(client))
+        {
+            return client.ToString();
+        }
+
+        return "api";
+    }
+
+    private async Task LogLoreFulfillmentEventAsync(
+        FictionPlan plan,
+        FictionLoreRequirement requirement,
+        BranchContext branchContext,
+        FulfillLoreRequirementRequest request,
+        CancellationToken cancellationToken)
+    {
+        var payload = new JObject
+        {
+            ["planId"] = plan.Id,
+            ["planName"] = plan.Name,
+            ["requirementId"] = requirement.Id,
+            ["requirementSlug"] = requirement.RequirementSlug,
+            ["title"] = requirement.Title,
+            ["action"] = "fulfilled",
+            ["branch"] = branchContext.Slug,
+            ["status"] = requirement.Status.ToString(),
+            ["notes"] = request.Notes,
+            ["worldBibleEntryId"] = requirement.WorldBibleEntryId ?? request.WorldBibleEntryId,
+            ["source"] = string.IsNullOrWhiteSpace(request.Source) ? "api" : request.Source
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.BranchSlug))
+        {
+            payload["requestedBranch"] = request.BranchSlug;
+        }
+
+        if (request.ConversationId.HasValue)
+        {
+            payload["conversationId"] = request.ConversationId.Value;
+        }
+
+        if (request.PlanPassId.HasValue)
+        {
+            payload["planPassId"] = request.PlanPassId.Value;
+        }
+
+        var actorId = ResolveActorId(HttpContext ?? ControllerContext?.HttpContext);
+        if (!string.IsNullOrWhiteSpace(actorId))
+        {
+            payload["actorId"] = actorId;
+        }
+
+        var actorName = ResolveActorName(HttpContext ?? ControllerContext?.HttpContext);
+        if (!string.IsNullOrWhiteSpace(actorName))
+        {
+            payload["actor"] = actorName;
+        }
+
+        _db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = request.ConversationId ?? Guid.Empty,
+            Kind = "fiction.lore.fulfillment",
+            Payload = payload,
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Guid? TryReadGuid(JObject payload, string propertyName)
+    {
+        if (!payload.TryGetValue(propertyName, out var token) || token is null || token.Type == JTokenType.Null)
+        {
+            return null;
+        }
+
+        if (token.Type == JTokenType.Guid)
+        {
+            return token.Value<Guid>();
+        }
+
+        var value = token.ToString();
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static Guid? TryGetGuidArg(IReadOnlyDictionary<string, object?> args, string key)
+    {
+        if (!args.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            Guid guid => guid,
+            string str when Guid.TryParse(str, out var parsed) => parsed,
+            JsonElement element when element.ValueKind == JsonValueKind.String && Guid.TryParse(element.GetString(), out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static string? TryGetStringArg(IReadOnlyDictionary<string, object?> args, string key)
+    {
+        if (!args.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string str when !string.IsNullOrWhiteSpace(str) => str,
+            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
+            _ => null
+        };
+    }
+
     private async Task EmitLoreFulfillmentTelemetry(
         FictionPlan plan,
         FictionLoreRequirement requirement,
@@ -712,11 +1061,48 @@ public sealed class FictionPlansController : ControllerBase
         DateTime CreatedAtUtc,
         DateTime? UpdatedAtUtc,
         Guid? ConversationPlanId,
+        Guid? ConversationId,
+        Guid? AgentId,
+        Guid? ProviderId,
+        Guid? ModelId,
+        string? BranchSlug,
         Guid? TaskId,
         int? StepNumber,
         string? ToolName,
         string? Thought,
         string? TaskStatus);
+
+    public sealed record BacklogActionLogResponse(
+        string Action,
+        string BacklogId,
+        string? Description,
+        string Branch,
+        string? Actor,
+        string? ActorId,
+        string Source,
+        Guid? ProviderId,
+        Guid? ModelId,
+        Guid? AgentId,
+        string? Status,
+        Guid? ConversationId,
+        Guid? ConversationPlanId,
+        Guid? TaskId,
+        DateTime TimestampUtc);
+
+    public sealed record LoreFulfillmentLogResponse(
+        Guid RequirementId,
+        string RequirementSlug,
+        string Action,
+        string Branch,
+        string? Actor,
+        string? ActorId,
+        string Source,
+        Guid? WorldBibleEntryId,
+        string? Notes,
+        string? Status,
+        string? ConversationId,
+        string? PlanPassId,
+        DateTime TimestampUtc);
 
     public sealed record FictionPlanSummary(
         Guid Id,

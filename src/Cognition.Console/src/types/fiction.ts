@@ -14,6 +14,62 @@ export type FictionPlanSummary = {
   status: string;
 };
 
+export type LoreFulfillmentLog = {
+  requirementId: string;
+  requirementSlug: string;
+  action: string;
+  branch: string;
+  actor?: string | null;
+  actorId?: string | null;
+  source: string;
+  worldBibleEntryId?: string | null;
+  notes?: string | null;
+  status?: string | null;
+  conversationId?: string | null;
+  planPassId?: string | null;
+  timestampUtc: string;
+};
+
+export type BacklogActionLog = {
+  action: string;
+  backlogId: string;
+  description?: string | null;
+  branch: string;
+  actor?: string | null;
+  actorId?: string | null;
+  source: string;
+  providerId?: string | null;
+  modelId?: string | null;
+  agentId?: string | null;
+  status?: string | null;
+  conversationId?: string | null;
+  conversationPlanId?: string | null;
+  taskId?: string | null;
+  timestampUtc: string;
+};
+
+export type FictionBacklogItem = {
+  id: string;
+  backlogId: string;
+  description: string;
+  status: string;
+  inputs?: string[] | null;
+  outputs?: string[] | null;
+  createdAtUtc: string;
+  updatedAtUtc?: string | null;
+  conversationPlanId?: string | null;
+  conversationId?: string | null;
+  agentId?: string | null;
+  providerId?: string | null;
+  modelId?: string | null;
+  branchSlug?: string | null;
+  taskId?: string | null;
+  stepNumber?: number | null;
+  toolName?: string | null;
+  thought?: string | null;
+  taskStatus?: string | null;
+};
+
 export type FictionCharacterRosterItem = {
   id: string;
   slug: string;
@@ -109,4 +165,14 @@ export type FulfillLoreRequirementPayload = {
   branchSlug?: string | null;
   branchLineage?: string[] | null;
   source?: string | null;
+};
+
+export type ResumeBacklogPayload = {
+  conversationId: string;
+  conversationPlanId: string;
+  agentId: string;
+  providerId: string;
+  modelId?: string | null;
+  taskId: string;
+  branchSlug?: string | null;
 };

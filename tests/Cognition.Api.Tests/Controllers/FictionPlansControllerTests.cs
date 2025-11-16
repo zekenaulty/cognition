@@ -17,6 +17,7 @@ using Cognition.Jobs;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json.Linq;
 using NSubstitute;
 using Xunit;
 
@@ -199,6 +200,9 @@ public class FictionPlansControllerTests
             CreatedAt = DateTime.UtcNow,
             Tasks = new List<ConversationTask>()
         };
+        var agentId = Guid.NewGuid();
+        var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
         var task = new ConversationTask
         {
             Id = Guid.NewGuid(),
@@ -208,7 +212,15 @@ public class FictionPlansControllerTests
             BacklogItemId = backlog.BacklogId,
             Status = "Pending",
             Thought = "Plan vision",
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            ArgsJson = JsonSerializer.Serialize(new
+            {
+                conversationId = conversationPlan.ConversationId,
+                agentId,
+                providerId,
+                modelId,
+                branchSlug = "draft"
+            })
         };
         conversationPlan.Tasks.Add(task);
         plan.CurrentConversationPlanId = conversationPlan.Id;
@@ -231,6 +243,12 @@ public class FictionPlansControllerTests
         item.TaskId.Should().Be(task.Id);
         item.StepNumber.Should().Be(1);
         item.ToolName.Should().Be("fiction.weaver.visionPlanner");
+        item.ConversationPlanId.Should().Be(conversationPlan.Id);
+        item.ConversationId.Should().Be(conversationPlan.ConversationId);
+        item.AgentId.Should().Be(agentId);
+        item.ProviderId.Should().Be(providerId);
+        item.ModelId.Should().Be(modelId);
+        item.BranchSlug.Should().Be("draft");
     }
 
     [Fact]
@@ -298,6 +316,12 @@ public class FictionPlansControllerTests
         var backlogResponse = ok!.Value as FictionPlansController.BacklogItemResponse;
         backlogResponse.Should().NotBeNull();
         backlogResponse!.TaskStatus.Should().Be("Pending");
+        backlogResponse.AgentId.Should().Be(request.AgentId);
+        backlogResponse.ProviderId.Should().Be(request.ProviderId);
+        backlogResponse.ModelId.Should().Be(request.ModelId);
+        backlogResponse.ConversationId.Should().Be(request.ConversationId);
+        backlogResponse.ConversationPlanId.Should().Be(request.ConversationPlanId);
+        backlogResponse.BranchSlug.Should().Be("draft");
 
         var updatedTask = await db.ConversationTasks.SingleAsync(t => t.Id == task.Id);
         updatedTask.Status.Should().Be("Pending");
@@ -314,6 +338,12 @@ public class FictionPlansControllerTests
             Arg.Any<FictionPhaseResult>(),
             Arg.Any<FictionPhaseExecutionContext>(),
             Arg.Any<CancellationToken>());
+
+        var workflowEvent = await db.WorkflowEvents.SingleAsync();
+        workflowEvent.Kind.Should().Be("fiction.backlog.action");
+        workflowEvent.Payload.Value<Guid>("planId").Should().Be(plan.Id);
+        workflowEvent.Payload.Value<string>("action").Should().Be("resume");
+        workflowEvent.Payload.Value<string>("backlogId").Should().Be(backlog.BacklogId);
     }
 
     [Fact]
@@ -465,6 +495,114 @@ public class FictionPlansControllerTests
         payload.Memories.Should().ContainSingle().Which.Should().Be("Memory A");
         payload.WorldNotes.Should().ContainSingle().Which.Should().Be("Note A");
     }
+
+    [Fact]
+    public async Task GetBacklogActions_returns_recent_entries_for_plan()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Action Plan" };
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.action",
+            Payload = JObject.FromObject(new
+            {
+                planId = plan.Id,
+                backlogId = "outline-alpha",
+                description = "Outline conflicts",
+                action = "resume",
+                branch = "main",
+                actor = "Tester",
+                source = "console"
+            }),
+            Timestamp = DateTime.UtcNow
+        });
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.action",
+            Payload = JObject.FromObject(new
+            {
+                planId = Guid.NewGuid(),
+                backlogId = "other-plan",
+                action = "resume",
+                branch = "alt"
+            }),
+            Timestamp = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var response = await controller.GetBacklogActions(plan.Id, CancellationToken.None);
+
+        var ok = response.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+        var items = ok!.Value as IReadOnlyList<FictionPlansController.BacklogActionLogResponse>;
+        items.Should().NotBeNull();
+        items!.Should().HaveCount(1);
+        var log = items[0];
+        log.Action.Should().Be("resume");
+        log.BacklogId.Should().Be("outline-alpha");
+        log.Actor.Should().Be("Tester");
+        log.Source.Should().Be("console");
+    }
+
+    [Fact]
+    public async Task GetLoreHistory_returns_fulfillment_events()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Lore Plan", PrimaryBranchSlug = "main" };
+        var requirement = new FictionLoreRequirement
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            RequirementSlug = "stellar-key",
+            Title = "Stellar Key",
+            Status = FictionLoreRequirementStatus.Blocked,
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-1)
+        };
+        db.FictionPlans.Add(plan);
+        db.FictionLoreRequirements.Add(requirement);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var fulfillRequest = new FictionPlansController.FulfillLoreRequirementRequest(
+            WorldBibleEntryId: Guid.NewGuid(),
+            Notes: "captured via console",
+            ConversationId: Guid.NewGuid(),
+            PlanPassId: Guid.NewGuid(),
+            BranchSlug: "main",
+            BranchLineage: new[] { "main" },
+            Source: "console");
+
+        await controller.FulfillLoreRequirement(plan.Id, requirement.Id, fulfillRequest, CancellationToken.None);
+
+        var history = await controller.GetLoreHistory(plan.Id, CancellationToken.None);
+
+        var ok = history.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+        var payload = ok!.Value as IReadOnlyList<FictionPlansController.LoreFulfillmentLogResponse>;
+        payload.Should().NotBeNull();
+        payload!.Should().ContainSingle(entry => entry.RequirementSlug == "stellar-key");
+        payload[0].Source.Should().Be("console");
+        payload[0].WorldBibleEntryId.Should().Be(fulfillRequest.WorldBibleEntryId);
+    }
     private static FictionPlansController CreateController(
         CognitionDbContext db,
         ICharacterLifecycleService? lifecycle = null,
@@ -498,7 +636,8 @@ internal sealed class FictionPlansTestDbContext : CognitionDbContext
             typeof(Agent),
             typeof(FictionPlanBacklogItem),
             typeof(ConversationPlan),
-            typeof(ConversationTask)
+            typeof(ConversationTask),
+            typeof(WorkflowEvent)
         };
 
         foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())

@@ -73,6 +73,7 @@ export type PlannerHealthBacklog = {
   staleItems: PlannerHealthBacklogItem[];
   orphanedItems: PlannerHealthBacklogItem[];
   telemetryEvents: PlannerBacklogTelemetry[];
+  actionLogs: PlannerBacklogActionLog[];
 };
 
 export type PlannerHealthBacklogPlanSummary = {
@@ -154,6 +155,23 @@ export type PlannerBacklogTelemetryLore = {
   status: string;
   worldBibleEntryId?: string | null;
   updatedAtUtc: string;
+};
+
+export type PlannerBacklogActionLog = {
+  planId: string;
+  planName: string;
+  backlogId: string;
+  description?: string | null;
+  action: string;
+  branch: string;
+  actor?: string | null;
+  actorId?: string | null;
+  source: string;
+  providerId?: string | null;
+  modelId?: string | null;
+  agentId?: string | null;
+  status?: string | null;
+  timestampUtc: string;
 };
 
 export type PlannerHealthTelemetry = {
