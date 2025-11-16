@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -251,6 +252,42 @@ public abstract class FictionPhaseRunnerBase : IFictionPhaseRunner
     }
 
     protected abstract Task<FictionPhaseResult> ExecuteCoreAsync(FictionPlan plan, Conversation conversation, FictionPhaseExecutionContext context, CancellationToken cancellationToken);
+
+    protected (string BranchSlug, IReadOnlyList<string> BranchLineage) ResolveBranchContext(FictionPlan plan, FictionPhaseExecutionContext context)
+    {
+        if (plan is null) throw new ArgumentNullException(nameof(plan));
+        if (context is null) throw new ArgumentNullException(nameof(context));
+
+        var fallback = string.IsNullOrWhiteSpace(plan.PrimaryBranchSlug) ? "main" : plan.PrimaryBranchSlug.Trim();
+        var slug = string.IsNullOrWhiteSpace(context.BranchSlug) ? fallback : context.BranchSlug.Trim();
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            slug = "main";
+        }
+
+        var lineage = BuildBranchLineage(fallback, slug);
+        return (slug, lineage);
+    }
+
+    private static IReadOnlyList<string> BuildBranchLineage(string? primaryBranchSlug, string activeBranchSlug)
+    {
+        var canonical = string.IsNullOrWhiteSpace(primaryBranchSlug) ? "main" : primaryBranchSlug.Trim();
+        var normalized = string.IsNullOrWhiteSpace(activeBranchSlug) ? canonical : activeBranchSlug.Trim();
+
+        var lineage = new List<string>();
+        if (!string.IsNullOrWhiteSpace(canonical))
+        {
+            lineage.Add(canonical);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalized) &&
+            !lineage.Any(existing => string.Equals(existing, normalized, StringComparison.OrdinalIgnoreCase)))
+        {
+            lineage.Add(normalized);
+        }
+
+        return lineage.AsReadOnly();
+    }
 
     protected ScopePath? ResolveScopePath(FictionPhaseExecutionContext context)
     {

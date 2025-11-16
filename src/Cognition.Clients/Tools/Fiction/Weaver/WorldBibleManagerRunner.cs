@@ -120,13 +120,16 @@ public class WorldBibleManagerRunner : FictionPhaseRunnerBase
             return;
         }
 
+        var (branchSlug, branchLineage) = ResolveBranchContext(plan, context);
         var request = new CharacterLifecycleRequest(
             plan.Id,
             context.ConversationId,
             PlanPassId: null,
             characters,
             Array.Empty<LoreRequirementDescriptor>(),
-            Source: "world-bible");
+            Source: "world-bible",
+            BranchSlug: branchSlug,
+            BranchLineage: branchLineage);
 
         var result = await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
         if (result.CreatedCharacters.Count > 0)

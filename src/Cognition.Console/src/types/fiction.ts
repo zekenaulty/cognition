@@ -30,6 +30,8 @@ export type FictionCharacterRosterItem = {
   worldBible?: FictionWorldBibleSummary | null;
   firstSceneId?: string | null;
   createdByPlanPassId?: string | null;
+  branchSlug?: string | null;
+  branchLineage?: string[] | null;
   provenance?: any;
   createdAtUtc: string;
   updatedAtUtc?: string | null;
@@ -79,4 +81,32 @@ export type FictionLoreRequirementItem = {
   createdByPlanPassId?: string | null;
   chapterScrollId?: string | null;
   chapterSceneId?: string | null;
+  branchSlug?: string | null;
+  branchLineage?: string[] | null;
+};
+
+export type LoreBranchSummary = {
+  branchSlug: string;
+  branchLineage?: string[] | null;
+  ready: number;
+  blocked: number;
+  planned: number;
+};
+
+export type AuthorPersonaContext = {
+  personaId: string;
+  personaName: string;
+  summary: string;
+  memories: string[];
+  worldNotes: string[];
+};
+
+export type FulfillLoreRequirementPayload = {
+  worldBibleEntryId?: string | null;
+  notes?: string | null;
+  conversationId?: string | null;
+  planPassId?: string | null;
+  branchSlug?: string | null;
+  branchLineage?: string[] | null;
+  source?: string | null;
 };

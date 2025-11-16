@@ -19,8 +19,9 @@
 - C# runners + Hangfire orchestration are still live end-to-end, but we now have structured vision payloads (core/supporting cast + lore arrays with `track` flags) and schema validation/tests to back them.
 - `CharacterLifecycleService` handles persona/world-bible promotion and scroll + scene runners refuse to run when `FictionLoreRequirement` entries remain `Planned`, so lore gaps surface before prose is attempted.
 - Author persona context now flows through an `AuthorPersonaRegistry`; scroll/scene prompts load persona summaries + memories/world notes and automatically append new `PersonaMemory` entries after each pass.
-- FictionWeaver jobs enforce backlog metadata contracts (conversationPlanId, provider/model IDs, backlog task IDs) and fail early if clients omit them, keeping Hangfire + UI in sync.
-- Remaining gaps sit in tooling (UI/console still needs backlog/task plumbing), world-bible provenance wiring, and ~~surfacing of tracked characters/lore inside author dashboards~~ **live roster/telemetry visibility shipped via new API + console views.**
+- FictionWeaver jobs enforce backlog metadata contracts (conversationPlanId, provider/model IDs, backlog task IDs) and fail early if clients omit them, keeping Hangfire + UI in sync. The API exposes backlog listings + resume endpoints so console resumes can hydrate `ConversationTask` metadata and trigger `FictionBacklogScheduler` without manual DB edits.
+- Console UX now surfaces branch-aware rosters, blocked-vs-ready lore dashboards, and author persona memories/world notes, with lore fulfillment actions invoking the new API in real time.
+- Remaining gaps sit in tooling (console still needs backlog/action cards + alerts), world-bible provenance wiring, and ~~surfacing of tracked characters/lore inside author dashboards~~ **live roster/telemetry visibility shipped via new API + console views** (branch-aware rosters, lore fulfillment dashboards, author persona memory panes).
 
 ## Success Criteria
 - Vision/iterative planners emit detailed `characters[]` and `lore[]` payloads, flag importance, and automatically spin up personas/agents/memories when needed.
@@ -30,22 +31,22 @@
 - Consoles/agents can inspect characters, lore, checkpoints, branches, and transcripts via API.
 
 ## Immediate User-Facing Priorities (Nov 2025)
-1. **Backlog-driven orchestration + resume UX:** Server-side guardrails now reject missing `conversationPlanId`/provider/model/task IDs; finish the `FictionPlanBacklog` work so Hangfire jobs and `ConversationTask` scheduling derive entirely from backlog state and ensure front-ends always send the required metadata (`phase-001_step_20250926_2327_inventory.md`, `hot_targeted_todo.md`). This keeps console progress, transcripts, and auto-resume flows aligned with what users initiated.
-   - _User impact:_ Authors see phase cards progress exactly in the order they kicked off, resumes land in the right scene, and transcripts stop drifting from backlog truth.
-   - _Work to land:_ Wire backlog state into `FictionWeaverJobs` enqueueing + `ConversationTask` scheduling, update UI/API contracts to require plan/provider/model IDs, migrate existing backlog items, and add guardrails that fail jobs lacking metadata.
-   - _Proof/telemetry:_ Dashboards comparing backlog status vs `FictionPhaseProgressed` events, resume-success counters, and new `fiction.backlog.telemetry` workflow events/console feed highlighting per-plan roster metrics.
-2. **Character & lore lifecycle enforcement:** Structured vision output, lifecycle service hooks, and scroll/scene gating are in place; next is wiring world-bible manager + UI so any `track=true` payload immediately surfaces personas/agents/memories/world-bible entries with provenance (`character_persona_lifecycle.md`). Authors should see a living roster with provenance instead of guessing which assets exist.
-   - _User impact:_ Character sheets, lore pillars, and drafting prerequisites become visible before prose starts, preventing canon drift and surprise failures mid-scroll.
-   - _Work to land:_ EF migrations + service implementation, runner integrations (Vision, WorldBible, Scroll, Scene), provenance metadata, lore requirement enforcement/auto-fill, and deterministic tests proving persona creation.
-   - _Proof/telemetry:_ Console roster fed by new APIs, lifecycle logs per character, blocking errors when prerequisites missing, and test snapshots attached to Milestone H.
-3. **Author persona context hydration:** Inject author persona memories (baseline prompt + latest `PersonaMemory` window + recent world-bible deltas) into every writing call and append memories after each pass so prose keeps a consistent voice and exposes obligations for subsequent edits.
-   - _User impact:_ Writers experience a stable tone/voice per author persona; edits carry previous obligations and world bible reminders without manual copy-paste.
-   - _Work to land:_ Author persona registry, AgentService prompt hook, memory window selection, automatic memory append after each pass, and console surfacing of newest obligations.
-   - _Proof/telemetry:_ Persona-memory diff logs per SceneWeaver run, regression tests swapping personas, and UX validation clips showing tone consistency.
-4. **Console/API surfacing for canon assets:** Build the `/projects/{id}/characters` and lore requirement endpoints plus console tabs/dashboards that show character status, first appearance, pending lore, and branch lineage. This is the first tangible UI the author will use to trust the lifecycle plumbing.
-   - _User impact:_ Authors can inspect who is tracked, whether lore is missing, and which branch each asset belongs to without digging through raw transcripts.
-   - _Work to land:_ API controllers/DTOs, lineage queries, console tabs/cards, and alert banners that link missing requirements back to lifecycle enforcement.
-   - _Proof/telemetry:_ Usage metrics on the new tabs, health checks confirming roster vs DB parity, and author-reported issues dropping in console feedback.
+1. **Backlog-driven orchestration + resume UX:** Guardrails now reject missing `conversationPlanId`/provider/model/task IDs, the fiction API exposes backlog listings/resume endpoints, and resuming a backlog item rewrites the `ConversationTask` metadata before handing it back to `FictionBacklogScheduler`.
+   - _User impact:_ Authors see phase cards progress exactly in the order they kicked off, resumes land in the right scene, transcripts stop drifting from backlog truth, and admins can restart blocked backlog items without DB spelunking.
+   - _Work to land:_ Wire console resume buttons to the new API, add backlog widgets/alerts to telemetry pages, migrate legacy backlog rows to carry branch + provider/model metadata, and publish drift counters to Ops dashboards.
+   - _Proof/telemetry:_ Dashboards comparing backlog status vs `FictionPhaseProgressed` events, resume-success counters, backlog-action audit feed, and `fiction.backlog.telemetry` workflow events highlighting API usage.
+2. **Character & lore lifecycle enforcement:** Structured vision output, lifecycle service hooks, scroll/scene gating, and branch-aware rosters/dashboards are live; next is closing the fulfillment loop so console users can mark requirements Ready (with provenance) and so world-bible flows auto-generate missing entries (`character_persona_lifecycle.md`).
+   - _User impact:_ Character sheets, lore pillars, and drafting prerequisites remain visible before prose starts, while lore fulfillment no longer requires raw SQL.
+   - _Work to land:_ Automate world-bible fulfillment (tool prompts + API), add audit history for each requirement, surface fulfillment state in Hangfire/workflow telemetry, and keep deterministic tests proving branch-lineage propagation + roster math.
+   - _Proof/telemetry:_ Console roster + lore summary staying in sync with Hangfire attempts, lifecycle logs per character, and schema tests covering fulfillments/resumptions.
+3. **Author persona context hydration:** Author persona registry + prompt hooks are live, persona memories append after each pass, and console pages show the newest memories/world notes. Remaining work focuses on obligations workflow + personas without memory debt.
+   - _User impact:_ Writers experience a stable tone/voice per author persona; edits carry previous obligations and world-bible reminders without manual copy/paste; admins can inspect memory growth in the console.
+   - _Work to land:_ Add obligation tagging/triage UI, expose persona-memory diff feeds via API, and attach authorship metadata to backlog runs so Ops can see who triggered each pass.
+   - _Proof/telemetry:_ Persona-memory diff logs per SceneWeaver run, regression tests swapping personas, UX validation clips showing tone consistency, and console analytics on the new author persona panes.
+4. **Console/API surfacing for canon assets:** `/api/fiction/plans/{id}/roster`, `/lore/summary`, `/lore/{id}/fulfill`, `/backlog`, and `/author-persona` endpoints plus console dashboards are live (branch-aware characters, blocked-lore groupings, author persona memories). Next is wiring backlog resume/fill actions + alerting hooks so admins can drive the entire lifecycle from the console.
+   - _User impact:_ Authors can inspect who is tracked, whether lore is missing, which branch each asset belongs to, and restart blocked backlog tasks without digging through raw transcripts.
+   - _Work to land:_ Backlog cards in the console, persona/lore change history panels, alert banners for blocked fulfillment, and guardrails that prompt users when they attempt to resume without providing provider/model/task metadata.
+   - _Proof/telemetry:_ Usage metrics on the new panels, backlog-resume success counters, console feedback citing the workflow, and `fiction.backlog.telemetry` events linked back to UI actions.
 
 ## Author-Facing Acceptance Scenarios
 1. **"Resume right where I left off" rehearsal**

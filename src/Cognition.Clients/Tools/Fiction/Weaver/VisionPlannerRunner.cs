@@ -97,13 +97,16 @@ public class VisionPlannerRunner : FictionPhaseRunnerBase
             return;
         }
 
+        var (branchSlug, branchLineage) = ResolveBranchContext(plan, context);
         var request = new CharacterLifecycleRequest(
             plan.Id,
             context.ConversationId,
             PlanPassId: null,
             characters,
             loreRequirements,
-            Source: "vision");
+            Source: "vision",
+            BranchSlug: branchSlug,
+            BranchLineage: branchLineage);
 
         var lifecycleResult = await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
         if (lifecycleResult.CreatedCharacters.Count > 0 || lifecycleResult.UpsertedLoreRequirements.Count > 0)

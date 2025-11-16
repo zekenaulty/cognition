@@ -17,7 +17,12 @@ import {
 import { ApiError, fictionApi } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useSecurity } from '../hooks/useSecurity';
-import { FictionPlanRoster, FictionPlanSummary } from '../types/fiction';
+import {
+  AuthorPersonaContext,
+  FictionLoreRequirementItem,
+  FictionPlanRoster,
+  FictionPlanSummary
+} from '../types/fiction';
 import { FictionRosterPanel } from '../components/fiction/FictionRosterPanel';
 
 export default function FictionProjectsPage() {
@@ -32,6 +37,9 @@ export default function FictionProjectsPage() {
   const [roster, setRoster] = React.useState<FictionPlanRoster | null>(null);
   const [rosterLoading, setRosterLoading] = React.useState(false);
   const [rosterError, setRosterError] = React.useState<string | null>(null);
+  const [personaContext, setPersonaContext] = React.useState<AuthorPersonaContext | null>(null);
+  const [personaLoading, setPersonaLoading] = React.useState(false);
+  const [personaError, setPersonaError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!token) {
@@ -107,6 +115,67 @@ export default function FictionProjectsPage() {
     };
   }, [token, selectedPlanId]);
 
+  React.useEffect(() => {
+    if (!token || !selectedPlanId) {
+      setPersonaContext(null);
+      setPersonaLoading(false);
+      setPersonaError(null);
+      return;
+    }
+    let cancelled = false;
+    setPersonaLoading(true);
+    setPersonaError(null);
+    fictionApi
+      .getAuthorPersonaContext(selectedPlanId, token)
+      .then(data => {
+        if (!cancelled) {
+          setPersonaContext(data);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          const message = err instanceof ApiError ? err.message : 'Unable to load author persona context.';
+          setPersonaError(message);
+          setPersonaContext(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPersonaLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, selectedPlanId]);
+
+  const handleFulfillLore = React.useCallback(
+    async (requirement: FictionLoreRequirementItem) => {
+      if (!token || !selectedPlanId) {
+        return;
+      }
+      try {
+        await fictionApi.fulfillLoreRequirement(
+          selectedPlanId,
+          requirement.id,
+          {
+            branchSlug: requirement.branchSlug ?? roster?.branchSlug,
+            branchLineage: requirement.branchLineage ?? null,
+            source: 'console'
+          },
+          token
+        );
+        const refreshed = await fictionApi.getPlanRoster(selectedPlanId, token);
+        setRoster(refreshed);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Unable to fulfill lore requirement.';
+        setRosterError(message);
+      }
+    },
+    [token, selectedPlanId, roster?.branchSlug]
+  );
+
   if (!isAdmin) {
     return (
       <Alert severity="info">
@@ -164,20 +233,82 @@ export default function FictionProjectsPage() {
           </Card>
         </Grid>
         <Grid item xs={12} md={8}>
-          <Card>
-            <CardHeader
-              title={roster ? roster.planName : 'Roster'}
-              subheader={roster?.projectTitle}
-            />
-            <CardContent>
-              <FictionRosterPanel
-                roster={roster}
-                loading={rosterLoading}
-                error={rosterError}
-                placeholder={plans.length === 0 ? 'No fiction plans available.' : 'Select a plan to load its roster.'}
+          <Stack spacing={3}>
+            <Card>
+              <CardHeader
+                title={roster ? roster.planName : 'Roster'}
+                subheader={roster?.projectTitle}
               />
-            </CardContent>
-          </Card>
+              <CardContent>
+                <FictionRosterPanel
+                  roster={roster}
+                  loading={rosterLoading}
+                  error={rosterError}
+                  placeholder={plans.length === 0 ? 'No fiction plans available.' : 'Select a plan to load its roster.'}
+                  onFulfillLore={handleFulfillLore}
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader
+                title="Author Persona"
+                subheader={personaContext ? personaContext.personaName : undefined}
+              />
+              <CardContent>
+                {personaLoading ? (
+                  <LinearProgress />
+                ) : personaError ? (
+                  <Alert severity="warning">{personaError}</Alert>
+                ) : personaContext ? (
+                  <Stack spacing={2}>
+                    <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-line' }}>
+                      {personaContext.summary}
+                    </Typography>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        Recent Memories
+                      </Typography>
+                      {personaContext.memories.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary">
+                          No memories recorded yet.
+                        </Typography>
+                      ) : (
+                        <List dense>
+                          {personaContext.memories.map((memory, idx) => (
+                            <ListItem key={`memory-${idx}`} sx={{ py: 0 }}>
+                              <ListItemText primary={memory} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      )}
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        World Notes
+                      </Typography>
+                      {personaContext.worldNotes.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary">
+                          No world notes captured.
+                        </Typography>
+                      ) : (
+                        <List dense>
+                          {personaContext.worldNotes.map((note, idx) => (
+                            <ListItem key={`note-${idx}`} sx={{ py: 0 }}>
+                              <ListItemText primary={note} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      )}
+                    </Box>
+                  </Stack>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Select a plan with an author persona to review recent memories and notes.
+                  </Typography>
+                )}
+              </CardContent>
+            </Card>
+          </Stack>
         </Grid>
       </Grid>
     </Stack>

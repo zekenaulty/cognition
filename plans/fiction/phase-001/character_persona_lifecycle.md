@@ -8,8 +8,8 @@
 ## Current Pain
 - World bible entries are created, but they are not linked to personas/agents; provenance is missing.
 - ~~Vision planner output is now structured, yet world-bible manager and consoles still need to display the roster so authors can track promotions.~~ Fiction plan roster API + console dashboards now expose tracked characters/lore with provenance; remaining gap is keeping world-bible lineage metadata in sync per branch.
-- Lore requirements block scroll/scene writers when missing, but we still need fulfillment tooling + console surfacing so authors can unblock themselves rather than diving into the DB.
-- Author persona memories feed scroll/scene runners, but consoles do not yet expose the fresh memories/world notes for inspection.
+- Lore requirements block scroll/scene writers when missing, and the new API/console affordances let admins mark requirements Ready with branch-aware provenance; remaining gap is automated fulfillment (world-bible prompts + audit trails) instead of manual note-taking.
+- Author persona memories feed scroll/scene runners, and consoles now expose the latest memories/world notes for inspection; follow-up work focuses on obligation tagging and persona-change history.
 
 ## Success Criteria
 - Vision Planner emits structured `characters[]` and `lore[]` payloads with “track?” booleans, importance scores, and continuity hooks.
@@ -44,7 +44,7 @@ _Status:_ Landing complete in C# runners + tests; Python feature flag retired. F
   - Writes provenance metadata into persona/agent/character rows.
   - Writes an initial `PersonaMemory` entry referencing the world-bible payload.
 - Update Vision Planner + WorldBible Manager runners to call the service before returning success.
-_Status:_ Service now mints personas/agents/memories and auto-infers world-bible provenance; lifecycle telemetry feeds `fiction.backlog.telemetry` so dashboards/console can inspect roster metrics. Remaining work: surface branch lineage + fulfillment tooling for lore requirements.
+_Status:_ Service now mints personas/agents/memories, auto-infers world-bible provenance, and stamps branch lineage metadata that flows through roster/telemetry dashboards. Remaining work: tie world-bible fulfillment + lineage history together for audit automation.
 
 ### C. Lore Prerequisites _(🚧 partial)_
 - Add `FictionLoreRequirement` table referencing plan + scroll/scene ids; status = Planned/Ready/Missing.
@@ -52,7 +52,7 @@ _Status:_ Service now mints personas/agents/memories and auto-infers world-bible
   - Auto-create via lore tool using the prompt payload, or
   - Fail early with actionable error.
 - When lore is fulfilled, mark requirement “Ready” and link to `FictionWorldBibleEntry`.
-_Status:_ Scroll + scene runners now block on `Planned` entries and emit telemetry; remaining work is linking fulfillment flows + console surfacing.
+_Status:_ Scroll + scene runners now block on `Planned` entries and emit telemetry; lore fulfillment can be triggered via API/console with branch-aware provenance, and dashboards show blocked vs ready totals. Remaining work: automate fulfillment tooling (world-bible prompts/assistants) and attach audit history to each requirement.
 
 ### D. Author Persona Context _(✅ runtime hydrated; UI pending)_
 - Introduce `AuthorPersonaRegistry` mapping fiction projects to author personas.
@@ -62,12 +62,12 @@ _Status:_ Scroll + scene runners now block on `Planned` entries and emit telemet
   - Recent world-bible notes tagged with that persona.
 - After each writing call, append new persona memories capturing summary, tone, obligations, open loops.
 - Tests ensure switching author personas changes prompt context.
-_Status:_ Registry, prompt hydration, and automatic memory append landed in Scroll/Scene runners with new deterministic tests; consoles still need to surface the newest memories.
+_Status:_ Registry, prompt hydration, and automatic memory append landed in Scroll/Scene runners with deterministic tests; consoles now surface persona summaries, newest memories, and world notes. Next: obligation tagging, change history, and Ops alerts for drifting personas.
 
-### E. Tooling & UI Hooks _(✅ roster API + console view live; lore fulfillment dashboard pending)_
-- API endpoints `/api/fiction/plans` + `/api/fiction/plans/{id}/roster` surface roster + provenance.
-- Console “Fiction Projects” page + Planner telemetry card show status (planned/drafted/active), first appearance, and allow admins to inspect tracked assets.
-- Dashboard for lore requirements (pending vs ready) per scroll/scene remains a follow-up once fulfillment workflow lands.
+### E. Tooling & UI Hooks _(✅ roster/lore/persona/backlog APIs + console panes live; backlog action widgets pending)_
+- API endpoints `/api/fiction/plans`, `/api/fiction/plans/{id}/roster`, `/lore/summary`, `/lore/{id}/fulfill`, `/backlog`, and `/author-persona` surface roster + provenance, fulfillment telemetry, persona memories, and backlog state.
+- Console “Fiction Projects” page + Planner telemetry card display branch-aware rosters, blocked-lore groupings, backlog lists/resume actions, and author persona memories so admins can inspect tracked assets.
+- Remaining work: backlog action widgets + alerting, fulfillment history timelines, and persona obligation lists tied back to backlog items.
 
 ## Dependencies
 - Existing plan graph tables (`FictionPlan*`, `FictionWorldBible*`).
@@ -92,7 +92,8 @@ _Status:_ Registry, prompt hydration, and automatic memory append landed in Scro
 - [x] Update Vision planner template/validator + unit tests.
 - [x] Implement `CharacterLifecycleService` + EF migration for `FictionCharacter`.
 - [x] Wire service into Vision + WorldBible runners.
-- [x] Add `FictionLoreRequirement` tables + runner checks (scroll + scene gating live; fulfillment UI still pending).
-- [x] Inject author persona memories into AgentService writing calls (runners hydrate + append memories; console surfacing next).
-- [x] Build deterministic tests covering persona creation + lore gating.
-- [ ] Document API/UI updates and handoff to console team (roster API/console usage notes pending).
+- [x] Add `FictionLoreRequirement` tables + runner checks (scroll + scene gating live; fulfillment API/console actions live).
+- [x] Inject author persona memories into AgentService writing calls (runners hydrate + append memories; console panes surface the newest memories/world notes).
+- [x] Build deterministic tests covering persona creation + lore gating (branch-lineage + fulfillment propagation scenarios added).
+- [ ] Automate world-bible fulfillment tooling + audit history for lore requirements.
+- [ ] Document API/UI updates and handoff to console team (roster/lore/backlog/persona usage notes + alerting plan).

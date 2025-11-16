@@ -426,6 +426,16 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
             ["createdByPlanPassId"] = descriptor.CreatedByPlanPassId ?? request.PlanPassId
         };
 
+        if (!string.IsNullOrWhiteSpace(request.BranchSlug))
+        {
+            properties["branchSlug"] = request.BranchSlug;
+        }
+
+        if (request.BranchLineage is { Count: > 0 })
+        {
+            properties["branchLineage"] = request.BranchLineage;
+        }
+
         if (descriptor.Metadata is not null && descriptor.Metadata.Count > 0)
         {
             properties["descriptor"] = descriptor.Metadata;
@@ -502,6 +512,53 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
         AddValue("importance", descriptor.Importance);
         AddValue("role", descriptor.Role);
         AddValue("track", descriptor.Track);
+        if (!string.IsNullOrWhiteSpace(request.BranchSlug))
+        {
+            AddValue("branchSlug", request.BranchSlug);
+        }
+
+        if (request.BranchLineage is { Count: > 0 })
+        {
+            AddValue("branchLineage", request.BranchLineage);
+        }
+
+        return metadata;
+    }
+
+    private static IReadOnlyDictionary<string, object?>? BuildLoreMetadata(
+        CharacterLifecycleRequest request,
+        LoreRequirementDescriptor descriptor)
+    {
+        Dictionary<string, object?>? metadata = null;
+        if (descriptor.Metadata is not null && descriptor.Metadata.Count > 0)
+        {
+            metadata = new Dictionary<string, object?>(descriptor.Metadata, StringComparer.OrdinalIgnoreCase);
+        }
+
+        void AddValue(string key, object? value)
+        {
+            if (value is null)
+            {
+                return;
+            }
+
+            metadata ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            metadata[key] = value;
+        }
+
+        AddValue("planId", request.PlanId);
+        AddValue("planPassId", descriptor.CreatedByPlanPassId ?? request.PlanPassId);
+        AddValue("requirementSlug", descriptor.RequirementSlug);
+        AddValue("source", request.Source);
+        if (!string.IsNullOrWhiteSpace(request.BranchSlug))
+        {
+            AddValue("branchSlug", request.BranchSlug);
+        }
+
+        if (request.BranchLineage is { Count: > 0 })
+        {
+            AddValue("branchLineage", request.BranchLineage);
+        }
 
         return metadata;
     }
@@ -595,10 +652,11 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
             entity.ChapterSceneId = descriptor.ChapterSceneId ?? entity.ChapterSceneId;
             entity.WorldBibleEntryId = descriptor.WorldBibleEntryId ?? entity.WorldBibleEntryId;
             entity.CreatedByPlanPassId ??= descriptor.CreatedByPlanPassId ?? request.PlanPassId;
-            var metadata = SerializeMetadata(descriptor.Metadata);
-            if (!string.IsNullOrWhiteSpace(metadata))
+            var metadata = BuildLoreMetadata(request, descriptor);
+            var metadataJson = SerializeMetadata(metadata);
+            if (!string.IsNullOrWhiteSpace(metadataJson))
             {
-                entity.MetadataJson = metadata;
+                entity.MetadataJson = metadataJson;
             }
             entity.UpdatedAtUtc = DateTime.UtcNow;
 

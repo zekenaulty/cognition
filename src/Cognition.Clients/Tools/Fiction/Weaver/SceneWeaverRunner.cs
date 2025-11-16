@@ -209,13 +209,16 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             return;
         }
 
+        var (branchSlug, branchLineage) = ResolveBranchContext(plan, context);
         var request = new CharacterLifecycleRequest(
             plan.Id,
             context.ConversationId,
             PlanPassId: null,
             characters,
             loreRequirements,
-            Source: "scene");
+            Source: "scene",
+            BranchSlug: branchSlug,
+            BranchLineage: branchLineage);
 
         await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
     }

@@ -44,7 +44,12 @@ import {
   PlannerHealthReport,
   PlannerHealthStatus
 } from '../types/diagnostics';
-import { FictionPlanRoster } from '../types/fiction';
+import {
+  AuthorPersonaContext,
+  FictionLoreRequirementItem,
+  FictionPlanRoster,
+  LoreBranchSummary
+} from '../types/fiction';
 import { FictionRosterPanel } from '../components/fiction/FictionRosterPanel';
 
 type AlertDescriptor = {
@@ -68,6 +73,12 @@ export default function PlannerTelemetryPage() {
   const [planRoster, setPlanRoster] = React.useState<FictionPlanRoster | null>(null);
   const [rosterLoading, setRosterLoading] = React.useState(false);
   const [rosterError, setRosterError] = React.useState<string | null>(null);
+  const [planRosterPersona, setPlanRosterPersona] = React.useState<AuthorPersonaContext | null>(null);
+  const [planRosterPersonaLoading, setPlanRosterPersonaLoading] = React.useState(false);
+  const [planRosterPersonaError, setPlanRosterPersonaError] = React.useState<string | null>(null);
+  const [loreSummary, setLoreSummary] = React.useState<LoreBranchSummary[]>([]);
+  const [loreSummaryLoading, setLoreSummaryLoading] = React.useState(false);
+  const [loreSummaryError, setLoreSummaryError] = React.useState<string | null>(null);
 
   const loadReports = React.useCallback(
     async (isRefresh = false) => {
@@ -122,11 +133,19 @@ export default function PlannerTelemetryPage() {
   React.useEffect(() => {
     if (!token || !rosterPlanId) {
       setPlanRoster(null);
+      setPlanRosterPersona(null);
+      setPlanRosterPersonaError(null);
+      setLoreSummary([]);
+      setLoreSummaryError(null);
       return;
     }
     let cancelled = false;
     setRosterLoading(true);
     setRosterError(null);
+    setPlanRosterPersonaLoading(true);
+    setPlanRosterPersonaError(null);
+    setLoreSummaryLoading(true);
+    setLoreSummaryError(null);
     fictionApi
       .getPlanRoster(rosterPlanId, token)
       .then(data => {
@@ -146,10 +165,83 @@ export default function PlannerTelemetryPage() {
           setRosterLoading(false);
         }
       });
+    fictionApi
+      .getAuthorPersonaContext(rosterPlanId, token)
+      .then(data => {
+        if (!cancelled) {
+          setPlanRosterPersona(data);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          if (err instanceof ApiError && err.status === 404) {
+            setPlanRosterPersona(null);
+            setPlanRosterPersonaError(null);
+          } else {
+            const message = err instanceof ApiError ? err.message : 'Unable to load author persona context.';
+            setPlanRosterPersonaError(message);
+            setPlanRosterPersona(null);
+          }
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPlanRosterPersonaLoading(false);
+        }
+      });
+    fictionApi
+      .getLoreSummary(rosterPlanId, token)
+      .then(data => {
+        if (!cancelled) {
+          setLoreSummary(data);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          const message = err instanceof ApiError ? err.message : 'Unable to load lore fulfillment summary.';
+          setLoreSummaryError(message);
+          setLoreSummary([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoreSummaryLoading(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, [token, rosterPlanId]);
+
+  const handleFulfillLore = React.useCallback(
+    async (requirement: FictionLoreRequirementItem) => {
+      if (!token || !rosterPlanId) {
+        return;
+      }
+      try {
+        await fictionApi.fulfillLoreRequirement(
+          rosterPlanId,
+          requirement.id,
+          {
+            branchSlug: requirement.branchSlug ?? planRoster?.branchSlug,
+            branchLineage: requirement.branchLineage ?? null,
+            source: 'console'
+          },
+          token
+        );
+        const [refreshedRoster, summary] = await Promise.all([
+          fictionApi.getPlanRoster(rosterPlanId, token),
+          fictionApi.getLoreSummary(rosterPlanId, token)
+        ]);
+        setPlanRoster(refreshedRoster);
+        setLoreSummary(summary);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Unable to fulfill lore requirement.';
+        setRosterError(message);
+      }
+    },
+    [token, rosterPlanId, planRoster?.branchSlug]
+  );
 
   const serverAlerts = React.useMemo(() => {
     if (!plannerReport) {
@@ -677,6 +769,54 @@ export default function PlannerTelemetryPage() {
         </Grid>
       </Grid>
       <Card>
+        <CardHeader title="Lore Fulfillment by Branch" />
+        <CardContent>
+          {!rosterPlanId ? (
+            <Typography variant="body2" color="text.secondary">
+              Select a plan to inspect lore fulfillment progress.
+            </Typography>
+          ) : loreSummaryLoading ? (
+            <LinearProgress />
+          ) : loreSummaryError ? (
+            <Alert severity="warning">{loreSummaryError}</Alert>
+          ) : loreSummary.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No lore requirements have been recorded for this plan yet.
+            </Typography>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Branch</TableCell>
+                  <TableCell align="right">Ready</TableCell>
+                  <TableCell align="right">Blocked</TableCell>
+                  <TableCell align="right">Planned</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {loreSummary.map(summary => (
+                  <TableRow key={summary.branchSlug}>
+                    <TableCell>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {summary.branchSlug}
+                      </Typography>
+                      {summary.branchLineage && summary.branchLineage.length > 1 && (
+                        <Typography variant="caption" color="text.secondary">
+                          {summary.branchLineage.join(' â†’ ')}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell align="right">{summary.ready}</TableCell>
+                    <TableCell align="right">{summary.blocked}</TableCell>
+                    <TableCell align="right">{summary.planned}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
         <CardHeader
           title="Character & Lore Roster"
           subheader={
@@ -712,7 +852,71 @@ export default function PlannerTelemetryPage() {
               roster={planRoster}
               loading={rosterLoading}
               error={rosterError}
+              onFulfillLore={handleFulfillLore}
             />
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader
+          title="Author Persona"
+          subheader={planRosterPersona ? planRosterPersona.personaName : undefined}
+        />
+        <CardContent>
+          {!rosterPlanId ? (
+            <Typography variant="body2" color="text.secondary">
+              Select a plan with an author persona to inspect its memories and world notes.
+            </Typography>
+          ) : planRosterPersonaLoading ? (
+            <LinearProgress />
+          ) : planRosterPersonaError ? (
+            <Alert severity="warning">{planRosterPersonaError}</Alert>
+          ) : planRosterPersona ? (
+            <Stack spacing={2}>
+              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-line' }}>
+                {planRosterPersona.summary}
+              </Typography>
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  Recent Memories
+                </Typography>
+                {planRosterPersona.memories.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No memories recorded for this persona.
+                  </Typography>
+                ) : (
+                  <List dense>
+                    {planRosterPersona.memories.map((memory, idx) => (
+                      <ListItem key={`persona-memory-${idx}`} sx={{ py: 0 }}>
+                        <ListItemText primary={memory} />
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
+              </Box>
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  World Notes
+                </Typography>
+                {planRosterPersona.worldNotes.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No world notes captured yet.
+                  </Typography>
+                ) : (
+                  <List dense>
+                    {planRosterPersona.worldNotes.map((note, idx) => (
+                      <ListItem key={`persona-note-${idx}`} sx={{ py: 0 }}>
+                        <ListItemText primary={note} />
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
+              </Box>
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Author persona context is unavailable for the selected plan.
+            </Typography>
           )}
         </CardContent>
       </Card>

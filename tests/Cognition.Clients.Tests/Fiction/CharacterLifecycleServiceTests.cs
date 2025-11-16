@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Fiction;
@@ -144,6 +146,78 @@ public sealed class CharacterLifecycleServiceTests
 
         var character = await db.FictionCharacters.SingleAsync();
         character.WorldBibleEntryId.Should().Be(entry.Id);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_includes_branch_metadata_for_characters_and_lore()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new CharacterLifecycleTestDbContext(options);
+        var project = new FictionProject { Id = Guid.NewGuid(), Title = "Branch Saga" };
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = project.Id,
+            FictionProject = project,
+            Name = "Branch Plan",
+            PrimaryBranchSlug = "main"
+        };
+
+        db.FictionProjects.Add(project);
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var service = new CharacterLifecycleService(db, NullLogger<CharacterLifecycleService>.Instance);
+        var characterDescriptor = new CharacterLifecycleDescriptor(
+            Name: "Captain Mira",
+            Track: true,
+            Slug: "captain-mira",
+            Role: "protagonist",
+            Importance: "high",
+            Summary: "Relentless captain balancing duty and loyalty.",
+            Notes: "Owes Admiral Kerr.");
+        var loreDescriptor = new LoreRequirementDescriptor(
+            Title: "Fracture Gate Protocol",
+            RequirementSlug: "fracture-gate");
+
+        var request = new CharacterLifecycleRequest(
+            plan.Id,
+            ConversationId: null,
+            PlanPassId: Guid.NewGuid(),
+            new[] { characterDescriptor },
+            new[] { loreDescriptor },
+            Source: "vision",
+            BranchSlug: "draft",
+            BranchLineage: new[] { "main", "draft" });
+
+        await service.ProcessAsync(request, CancellationToken.None);
+
+        var character = await db.FictionCharacters.SingleAsync();
+        character.ProvenanceJson.Should().NotBeNull();
+        using (var document = JsonDocument.Parse(character.ProvenanceJson!))
+        {
+            var root = document.RootElement;
+            root.GetProperty("branchSlug").GetString().Should().Be("draft");
+            root.GetProperty("branchLineage").EnumerateArray().Select(x => x.GetString()).Should().ContainInOrder("main", "draft");
+        }
+
+        var lore = await db.FictionLoreRequirements.SingleAsync();
+        lore.MetadataJson.Should().NotBeNull();
+        using (var metadata = JsonDocument.Parse(lore.MetadataJson!))
+        {
+            var root = metadata.RootElement;
+            root.GetProperty("branchSlug").GetString().Should().Be("draft");
+            root.GetProperty("branchLineage").EnumerateArray().Select(x => x.GetString()).Should().ContainInOrder("main", "draft");
+        }
+
+        var memory = await db.PersonaMemories.SingleAsync();
+        memory.Properties.Should().NotBeNull();
+        memory.Properties!.Should().ContainKey("branchSlug");
+        memory.Properties!["branchSlug"].Should().Be("draft");
+        memory.Properties.Should().ContainKey("branchLineage");
     }
 }
 

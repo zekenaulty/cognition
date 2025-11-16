@@ -30,10 +30,16 @@ public sealed class FictionLifecycleWorkflowTelemetry : IFictionLifecycleTelemet
         {
             ["planId"] = request.PlanId,
             ["source"] = request.Source ?? string.Empty,
+            ["branchSlug"] = request.BranchSlug ?? string.Empty,
             ["charactersCreated"] = result.CreatedCharacters.Count,
             ["charactersUpdated"] = result.UpdatedCharacters.Count,
             ["loreRequirementsUpserted"] = result.UpsertedLoreRequirements.Count
         };
+
+        if (request.BranchLineage is { Count: > 0 })
+        {
+            payload["branchLineage"] = new JArray(request.BranchLineage);
+        }
 
         if (result.CreatedCharacters.Count > 0)
         {

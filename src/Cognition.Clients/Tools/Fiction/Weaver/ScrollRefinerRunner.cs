@@ -221,13 +221,16 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
             return;
         }
 
+        var (branchSlug, branchLineage) = ResolveBranchContext(plan, context);
         var request = new CharacterLifecycleRequest(
             plan.Id,
             context.ConversationId,
             PlanPassId: null,
             characters,
             loreRequirements,
-            Source: "scroll");
+            Source: "scroll",
+            BranchSlug: branchSlug,
+            BranchLineage: branchLineage);
 
         await _lifecycleService.ProcessAsync(request, cancellationToken).ConfigureAwait(false);
     }

@@ -12,7 +12,9 @@ public sealed record CharacterLifecycleRequest(
     Guid? PlanPassId,
     IReadOnlyList<CharacterLifecycleDescriptor> Characters,
     IReadOnlyList<LoreRequirementDescriptor> LoreRequirements,
-    string? Source = null)
+    string? Source = null,
+    string? BranchSlug = null,
+    IReadOnlyList<string>? BranchLineage = null)
 {
     public static CharacterLifecycleRequest Empty(Guid planId)
         => new(planId, null, null, Array.Empty<CharacterLifecycleDescriptor>(), Array.Empty<LoreRequirementDescriptor>());

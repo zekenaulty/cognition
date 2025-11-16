@@ -1,5 +1,11 @@
 import { OpenSearchDiagnosticsReport, PlannerHealthReport } from '../types/diagnostics';
-import { FictionPlanRoster, FictionPlanSummary } from '../types/fiction';
+import {
+  AuthorPersonaContext,
+  FictionPlanRoster,
+  FictionPlanSummary,
+  FulfillLoreRequirementPayload,
+  LoreBranchSummary
+} from '../types/fiction';
 
 export async function fetchImageStyles(accessToken: string): Promise<any[]> {
   const headers: HeadersInit = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
@@ -245,6 +251,16 @@ export const diagnosticsApi = {
 export const fictionApi = {
   getPlanRoster: (planId: string, accessToken?: string) =>
     request<FictionPlanRoster>(`/api/fiction/plans/${planId}/roster`, {}, accessToken),
+  fulfillLoreRequirement: (planId: string, requirementId: string, payload: FulfillLoreRequirementPayload, accessToken?: string) =>
+    request<FictionPlanRoster['loreRequirements'][number]>(
+      `/api/fiction/plans/${planId}/lore/${requirementId}/fulfill`,
+      { method: 'POST', body: JSON.stringify(payload ?? {}) },
+      accessToken
+    ),
+  getLoreSummary: (planId: string, accessToken?: string) =>
+    request<LoreBranchSummary[]>(`/api/fiction/plans/${planId}/lore/summary`, {}, accessToken),
+  getAuthorPersonaContext: (planId: string, accessToken?: string) =>
+    request<AuthorPersonaContext>(`/api/fiction/plans/${planId}/author-persona`, {}, accessToken),
   listPlans: (accessToken?: string) =>
     request<FictionPlanSummary[]>('/api/fiction/plans', {}, accessToken)
 }
