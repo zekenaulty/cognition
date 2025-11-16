@@ -1,4 +1,4 @@
-Prompt for next session (2025-11-10)
+Prompt for next session (2025-11-15)
 ------------------------------------
 
 Status recap
@@ -9,14 +9,14 @@ Status recap
 - CharacterLifecycleService now promotes personas/agents/memories with provenance, emits `fiction.backlog.telemetry`, and the new fiction roster API/console pages expose tracked characters + lore to admins.
 
 Next targets
-1. Close the loop on world-bible provenance + lore fulfillment (branch lineage, ready-state dashboards) now that the roster API/console surfacing is live (`plans/fiction/phase-001/plan-first-draft.md`, `character_persona_lifecycle.md`).
-2. Update console + front-end flows to always pass the metadata contract (conversationPlanId/provider/model/task/backlog IDs) and keep instrumenting UI paths with the new telemetry feed.
-3. Extend backlog scheduling/resume UX: have Hangfire enqueue strictly off backlog state and expose plan/backlog progress via API.
-4. Document and expose author persona context in the consoles (new memories, world notes, tracked obligations) so writers can inspect what the registry is appending.
-5. Keep building tests around lifecycle + backlog enforcement (world-bible manager, resume scenarios) before moving to Milestone D tooling.
+1. **World-bible provenance + lore fulfillment:** Wire branch lineage onto roster entries, expose ready/blocking lore dashboards, and define how fulfillment flows surface in the console (`plans/fiction/phase-001/plan-first-draft.md`, `character_persona_lifecycle.md`).
+2. **Metadata contract everywhere:** Ensure console/front-end submits `conversationPlanId`/provider/model/task/backlog IDs for every run/resume, and keep emitting `fiction.backlog.telemetry` so UI paths are observable.
+3. **Backlog-driven scheduling/resume UX:** Finish letting Hangfire enqueue strictly from backlog state, expose backlog/progress via API, and add resume success/drift metrics.
+4. **Author persona visibility:** Surface new memories, world notes, and obligations directly in the console so writers can inspect what AuthorPersonaRegistry appends each pass.
+5. **Test coverage:** Expand deterministic tests for lifecycle enforcement (world-bible manager, resume scenarios, backlog transitions) before moving toward Milestone D tooling.
 
 Getting started
-- Read `plans/fiction/phase-001/plan-first-draft.md` + `plans/fiction/phase-001/character_persona_lifecycle.md` for the refreshed context/checklists.
-- Audit the console/UI backlog flows to ensure they populate the new metadata contract; capture gaps in `plans/hot_targeted_todo.md`.
-- Plan the remaining lifecycle hooks (world-bible provenance + lore fulfillment UI) and note the work under the same plan so world-bible + author console teams can consume it next session.
-- refer to plans\README.md for overview of how to the plans directory
+- Skim `plans/fiction/phase-001/plan-first-draft.md` + `plans/fiction/phase-001/character_persona_lifecycle.md` for the latest checklists and completed items.
+- Review `plans/hot_targeted_todo.md` for any backlog/metadata TODOs that need updates after the recent telemetry/roster work.
+- Sketch the remaining world-bible provenance + lore fulfillment hooks under the same plan so both world-bible and author-console efforts share context.
+- Double-check `plans/README.md` if you need a refresher on how we organize plan docs before diving in.
