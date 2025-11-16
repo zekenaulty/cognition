@@ -10,6 +10,7 @@ import ChatIcon from '@mui/icons-material/Chat';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import InsightsIcon from '@mui/icons-material/Insights';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { useSecurity } from '../../hooks/useSecurity';
@@ -159,6 +160,12 @@ export function PrimaryDrawer({ open, onClose }: { open: boolean; onClose: () =>
                 <ListItemButton component={Link} to="/operations/backlog" onClick={onClose} sx={{ pl: 0 }}>
                   <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><InsightsIcon /></ListItemIcon>
                   <ListItemText primary="Backlog Telemetry" />
+                </ListItemButton>
+              </ListItem>
+              <ListItem disablePadding>
+                <ListItemButton component={Link} to="/fiction/projects" onClick={onClose} sx={{ pl: 0 }}>
+                  <ListItemIcon sx={{ minWidth: 0, pl: 0.75, mr: 1 }}><MenuBookIcon /></ListItemIcon>
+                  <ListItemText primary="Fiction Projects" />
                 </ListItemButton>
               </ListItem>
               <ListItem disablePadding>

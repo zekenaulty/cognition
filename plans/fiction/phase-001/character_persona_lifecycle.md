@@ -7,7 +7,7 @@
 
 ## Current Pain
 - World bible entries are created, but they are not linked to personas/agents; provenance is missing.
-- Vision planner output is now structured, yet world-bible manager and consoles still need to display the roster so authors can track promotions.
+- ~~Vision planner output is now structured, yet world-bible manager and consoles still need to display the roster so authors can track promotions.~~ Fiction plan roster API + console dashboards now expose tracked characters/lore with provenance; remaining gap is keeping world-bible lineage metadata in sync per branch.
 - Lore requirements block scroll/scene writers when missing, but we still need fulfillment tooling + console surfacing so authors can unblock themselves rather than diving into the DB.
 - Author persona memories feed scroll/scene runners, but consoles do not yet expose the fresh memories/world notes for inspection.
 
@@ -36,7 +36,7 @@
 - Emit `createdCharacters` / `createdLore` metadata for downstream jobs.
 _Status:_ Landing complete in C# runners + tests; Python feature flag retired. Future changes are additive (e.g., richer importance scoring).
 
-### B. Character Promotion & Provenance
+### B. Character Promotion & Provenance _(✅ service + telemetry live)_
 - Create `FictionCharacter` table linking `PersonaId`, `AgentId`, `FictionPlanId`, `WorldBibleEntryId`, `FirstSceneId`, `CreatedInPass`.
 - Implement `CharacterLifecycleService` (shared by runners) that:
   - Looks up existing personas/agents by slug.
@@ -44,6 +44,7 @@ _Status:_ Landing complete in C# runners + tests; Python feature flag retired. F
   - Writes provenance metadata into persona/agent/character rows.
   - Writes an initial `PersonaMemory` entry referencing the world-bible payload.
 - Update Vision Planner + WorldBible Manager runners to call the service before returning success.
+_Status:_ Service now mints personas/agents/memories and auto-infers world-bible provenance; lifecycle telemetry feeds `fiction.backlog.telemetry` so dashboards/console can inspect roster metrics. Remaining work: surface branch lineage + fulfillment tooling for lore requirements.
 
 ### C. Lore Prerequisites _(🚧 partial)_
 - Add `FictionLoreRequirement` table referencing plan + scroll/scene ids; status = Planned/Ready/Missing.
@@ -63,10 +64,10 @@ _Status:_ Scroll + scene runners now block on `Planned` entries and emit telemet
 - Tests ensure switching author personas changes prompt context.
 _Status:_ Registry, prompt hydration, and automatic memory append landed in Scroll/Scene runners with new deterministic tests; consoles still need to surface the newest memories.
 
-### E. Tooling & UI Hooks
-- API endpoint `/api/fiction/projects/{id}/characters` surfaces roster + provenance.
-- Console “Characters” tab shows status (planned/drafted/active), first appearance, and allows manual edits.
-- Dashboard for lore requirements (pending vs ready) per scroll/scene.
+### E. Tooling & UI Hooks _(✅ roster API + console view live; lore fulfillment dashboard pending)_
+- API endpoints `/api/fiction/plans` + `/api/fiction/plans/{id}/roster` surface roster + provenance.
+- Console “Fiction Projects” page + Planner telemetry card show status (planned/drafted/active), first appearance, and allow admins to inspect tracked assets.
+- Dashboard for lore requirements (pending vs ready) per scroll/scene remains a follow-up once fulfillment workflow lands.
 
 ## Dependencies
 - Existing plan graph tables (`FictionPlan*`, `FictionWorldBible*`).
@@ -89,9 +90,9 @@ _Status:_ Registry, prompt hydration, and automatic memory append landed in Scro
 
 ## Checklist
 - [x] Update Vision planner template/validator + unit tests.
-- [ ] Implement `CharacterLifecycleService` + EF migration for `FictionCharacter`.
-- [ ] Wire service into Vision + WorldBible runners.
+- [x] Implement `CharacterLifecycleService` + EF migration for `FictionCharacter`.
+- [x] Wire service into Vision + WorldBible runners.
 - [x] Add `FictionLoreRequirement` tables + runner checks (scroll + scene gating live; fulfillment UI still pending).
 - [x] Inject author persona memories into AgentService writing calls (runners hydrate + append memories; console surfacing next).
 - [x] Build deterministic tests covering persona creation + lore gating.
-- [ ] Document API/UI updates and handoff to console team.
+- [ ] Document API/UI updates and handoff to console team (roster API/console usage notes pending).

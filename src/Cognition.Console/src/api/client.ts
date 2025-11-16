@@ -1,4 +1,5 @@
 import { OpenSearchDiagnosticsReport, PlannerHealthReport } from '../types/diagnostics';
+import { FictionPlanRoster, FictionPlanSummary } from '../types/fiction';
 
 export async function fetchImageStyles(accessToken: string): Promise<any[]> {
   const headers: HeadersInit = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
@@ -239,6 +240,13 @@ export const diagnosticsApi = {
     request<PlannerHealthReport>('/api/diagnostics/planner', {}, accessToken),
   openSearch: (accessToken?: string) =>
     request<OpenSearchDiagnosticsReport>('/api/diagnostics/opensearch', {}, accessToken)
+}
+
+export const fictionApi = {
+  getPlanRoster: (planId: string, accessToken?: string) =>
+    request<FictionPlanRoster>(`/api/fiction/plans/${planId}/roster`, {}, accessToken),
+  listPlans: (accessToken?: string) =>
+    request<FictionPlanSummary[]>('/api/fiction/plans', {}, accessToken)
 }
 
 export async function fetchImageMessages(accessToken: string, conversationId: string): Promise<any[]> {

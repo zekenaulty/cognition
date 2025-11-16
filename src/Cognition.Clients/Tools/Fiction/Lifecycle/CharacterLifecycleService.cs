@@ -6,7 +6,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Agents;
 using Cognition.Data.Relational.Modules.Fiction;
+using Cognition.Data.Relational.Modules.Personas;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -22,6 +24,7 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
     private readonly CognitionDbContext _db;
     private readonly ILogger<CharacterLifecycleService> _logger;
     private readonly IReadOnlyList<IFictionLifecycleTelemetry> _telemetrySinks;
+    private const string CharacterWorldBibleCategory = "characters";
 
     public CharacterLifecycleService(
         CognitionDbContext db,
@@ -119,6 +122,9 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
             .Where(c => c.FictionPlanId == request.PlanId && slugSet.Contains(c.Slug))
             .ToDictionaryAsync(c => c.Slug, StringComparer.OrdinalIgnoreCase, cancellationToken)
             .ConfigureAwait(false);
+        var personaCache = new Dictionary<Guid, Persona>();
+        var agentCache = new Dictionary<Guid, Agent>();
+        var worldBibleLookup = await LoadCharacterWorldBibleEntriesAsync(request.PlanId, slugSet, cancellationToken).ConfigureAwait(false);
 
         foreach (var (slug, descriptor) in normalized)
         {
@@ -153,24 +159,373 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
             entity.Importance = descriptor.Importance ?? entity.Importance;
             entity.Summary = descriptor.Summary ?? entity.Summary;
             entity.Notes = descriptor.Notes ?? entity.Notes;
-            entity.PersonaId = descriptor.PersonaId ?? entity.PersonaId;
-            entity.AgentId = descriptor.AgentId ?? entity.AgentId;
-            entity.WorldBibleEntryId = descriptor.WorldBibleEntryId ?? entity.WorldBibleEntryId;
             entity.FirstSceneId = descriptor.FirstSceneId ?? entity.FirstSceneId;
             entity.CreatedByPlanPassId ??= descriptor.CreatedByPlanPassId ?? request.PlanPassId;
 
-            var provenance = SerializeMetadata(descriptor.Metadata);
+            var (persona, personaCreated) = await EnsurePersonaAsync(descriptor, entity, personaCache, cancellationToken).ConfigureAwait(false);
+            var agent = await EnsureAgentAsync(descriptor, entity, persona, agentCache, cancellationToken).ConfigureAwait(false);
+
+            var resolvedWorldBibleEntryId = descriptor.WorldBibleEntryId
+                ?? entity.WorldBibleEntryId
+                ?? TryResolveWorldBibleEntryId(slug, worldBibleLookup);
+            if (resolvedWorldBibleEntryId.HasValue)
+            {
+                entity.WorldBibleEntryId = resolvedWorldBibleEntryId;
+            }
+
+            var metadata = BuildCharacterMetadata(request, descriptor, persona, agent, slug);
+            var provenance = SerializeMetadata(metadata);
             if (!string.IsNullOrWhiteSpace(provenance))
             {
                 entity.ProvenanceJson = provenance;
             }
             entity.UpdatedAtUtc = DateTime.UtcNow;
 
+            if (personaCreated)
+            {
+                await CreatePersonaMemoryAsync(persona, descriptor, request, slug, entity.WorldBibleEntryId, cancellationToken).ConfigureAwait(false);
+            }
+
             _logger.LogInformation(
-                isNew ? "FictionCharacterPromoted plan={PlanId} slug={Slug}" : "FictionCharacterUpdated plan={PlanId} slug={Slug}",
+                isNew ? "FictionCharacterPromoted plan={PlanId} slug={Slug} persona={PersonaId}" : "FictionCharacterUpdated plan={PlanId} slug={Slug} persona={PersonaId}",
                 request.PlanId,
-                slug);
+                slug,
+                entity.PersonaId);
         }
+    }
+
+    private async Task<IReadOnlyDictionary<string, FictionWorldBibleEntry>> LoadCharacterWorldBibleEntriesAsync(
+        Guid planId,
+        IReadOnlyCollection<string> slugs,
+        CancellationToken cancellationToken)
+    {
+        if (slugs.Count == 0)
+        {
+            return new Dictionary<string, FictionWorldBibleEntry>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var bibleIds = await _db.FictionWorldBibles
+            .Where(b => b.FictionPlanId == planId)
+            .Select(b => b.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (bibleIds.Count == 0)
+        {
+            return new Dictionary<string, FictionWorldBibleEntry>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var prefixedSlugs = slugs.Select(BuildWorldBibleCharacterSlug).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+        var entries = await _db.FictionWorldBibleEntries
+            .Where(e => bibleIds.Contains(e.FictionWorldBibleId) && prefixedSlugs.Contains(e.EntrySlug))
+            .OrderByDescending(e => e.Sequence)
+            .ThenByDescending(e => e.UpdatedAtUtc ?? e.CreatedAtUtc)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var lookup = new Dictionary<string, FictionWorldBibleEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            var slug = ExtractCharacterSlug(entry.EntrySlug);
+            if (string.IsNullOrEmpty(slug))
+            {
+                continue;
+            }
+
+            if (!lookup.ContainsKey(slug))
+            {
+                lookup[slug] = entry;
+            }
+        }
+
+        return lookup;
+    }
+
+    private async Task<(Persona Persona, bool Created)> EnsurePersonaAsync(
+        CharacterLifecycleDescriptor descriptor,
+        FictionCharacter entity,
+        Dictionary<Guid, Persona> cache,
+        CancellationToken cancellationToken)
+    {
+        var personaId = descriptor.PersonaId ?? entity.PersonaId;
+        Persona? persona = null;
+        if (personaId.HasValue)
+        {
+            persona = await LoadPersonaAsync(personaId.Value, cache, cancellationToken).ConfigureAwait(false);
+        }
+
+        var created = false;
+        if (persona is null)
+        {
+            var id = personaId ?? Guid.NewGuid();
+            persona = new Persona
+            {
+                Id = id,
+                Name = descriptor.Name,
+                Nickname = descriptor.Name,
+                Role = descriptor.Role ?? "Fiction Character",
+                Type = PersonaType.RolePlayCharacter,
+                OwnedBy = OwnedBy.System,
+                IsPublic = false,
+                Background = descriptor.Summary ?? string.Empty,
+                Essence = descriptor.Importance ?? string.Empty,
+                Voice = descriptor.Notes ?? string.Empty,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            _db.Personas.Add(persona);
+            cache[id] = persona;
+            created = true;
+        }
+        else
+        {
+            var updated = false;
+            if (!string.Equals(persona.Name, descriptor.Name, StringComparison.Ordinal))
+            {
+                persona.Name = descriptor.Name;
+                updated = true;
+            }
+            if (string.IsNullOrWhiteSpace(persona.Nickname))
+            {
+                persona.Nickname = descriptor.Name;
+                updated = true;
+            }
+            if (!string.IsNullOrWhiteSpace(descriptor.Role) && !string.Equals(persona.Role, descriptor.Role, StringComparison.Ordinal))
+            {
+                persona.Role = descriptor.Role!;
+                updated = true;
+            }
+            if (persona.Type != PersonaType.RolePlayCharacter)
+            {
+                persona.Type = PersonaType.RolePlayCharacter;
+                updated = true;
+            }
+            if (persona.OwnedBy != OwnedBy.System)
+            {
+                persona.OwnedBy = OwnedBy.System;
+                updated = true;
+            }
+            if (!string.IsNullOrWhiteSpace(descriptor.Summary) && !string.Equals(persona.Background, descriptor.Summary, StringComparison.Ordinal))
+            {
+                persona.Background = descriptor.Summary;
+                updated = true;
+            }
+            if (!string.IsNullOrWhiteSpace(descriptor.Notes) && !string.Equals(persona.CommunicationStyle, descriptor.Notes, StringComparison.Ordinal))
+            {
+                persona.CommunicationStyle = descriptor.Notes!;
+                updated = true;
+            }
+            if (!string.IsNullOrWhiteSpace(descriptor.Importance) && !string.Equals(persona.Essence, descriptor.Importance, StringComparison.Ordinal))
+            {
+                persona.Essence = descriptor.Importance!;
+                updated = true;
+            }
+
+            if (updated)
+            {
+                persona.UpdatedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        entity.PersonaId = persona.Id;
+        return (persona, created);
+    }
+
+    private async Task<Persona?> LoadPersonaAsync(Guid personaId, IDictionary<Guid, Persona> cache, CancellationToken cancellationToken)
+    {
+        if (cache.TryGetValue(personaId, out var cached))
+        {
+            return cached;
+        }
+
+        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, cancellationToken).ConfigureAwait(false);
+        if (persona is not null)
+        {
+            cache[personaId] = persona;
+        }
+
+        return persona;
+    }
+
+    private async Task<Agent> EnsureAgentAsync(
+        CharacterLifecycleDescriptor descriptor,
+        FictionCharacter entity,
+        Persona persona,
+        Dictionary<Guid, Agent> cache,
+        CancellationToken cancellationToken)
+    {
+        var agentId = descriptor.AgentId ?? entity.AgentId;
+        Agent? agent = null;
+        if (agentId.HasValue)
+        {
+            agent = await LoadAgentAsync(agentId.Value, cache, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (agent is null)
+        {
+            var id = agentId ?? Guid.NewGuid();
+            agent = new Agent
+            {
+                Id = id,
+                PersonaId = persona.Id,
+                Persona = persona,
+                RolePlay = true,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            _db.Agents.Add(agent);
+            cache[id] = agent;
+        }
+        else if (agent.PersonaId != persona.Id)
+        {
+            agent.PersonaId = persona.Id;
+            agent.Persona = persona;
+            agent.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        entity.AgentId = agent.Id;
+        return agent;
+    }
+
+    private async Task<Agent?> LoadAgentAsync(Guid agentId, IDictionary<Guid, Agent> cache, CancellationToken cancellationToken)
+    {
+        if (cache.TryGetValue(agentId, out var cached))
+        {
+            return cached;
+        }
+
+        var agent = await _db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, cancellationToken).ConfigureAwait(false);
+        if (agent is not null)
+        {
+            cache[agentId] = agent;
+        }
+
+        return agent;
+    }
+
+    private Task CreatePersonaMemoryAsync(
+        Persona persona,
+        CharacterLifecycleDescriptor descriptor,
+        CharacterLifecycleRequest request,
+        string slug,
+        Guid? worldBibleEntryId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var content = BuildPersonaMemoryContent(descriptor);
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            content = $"Character dossier for {descriptor.Name}.";
+        }
+
+        var properties = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["planId"] = request.PlanId,
+            ["characterSlug"] = slug,
+            ["source"] = request.Source ?? "lifecycle",
+            ["worldBibleEntryId"] = worldBibleEntryId,
+            ["createdByPlanPassId"] = descriptor.CreatedByPlanPassId ?? request.PlanPassId
+        };
+
+        if (descriptor.Metadata is not null && descriptor.Metadata.Count > 0)
+        {
+            properties["descriptor"] = descriptor.Metadata;
+        }
+
+        var memory = new PersonaMemory
+        {
+            Id = Guid.NewGuid(),
+            PersonaId = persona.Id,
+            Title = $"{descriptor.Name} dossier",
+            Content = content,
+            Source = request.Source ?? "lifecycle",
+            OccurredAtUtc = DateTime.UtcNow,
+            Properties = properties
+        };
+
+        _db.PersonaMemories.Add(memory);
+        return Task.CompletedTask;
+    }
+
+    private static string BuildPersonaMemoryContent(CharacterLifecycleDescriptor descriptor)
+    {
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(descriptor.Summary))
+        {
+            builder.AppendLine($"Summary: {descriptor.Summary.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(descriptor.Role))
+        {
+            builder.AppendLine($"Role: {descriptor.Role.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(descriptor.Importance))
+        {
+            builder.AppendLine($"Importance: {descriptor.Importance.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(descriptor.Notes))
+        {
+            builder.AppendLine($"Notes: {descriptor.Notes.Trim()}");
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static IReadOnlyDictionary<string, object?>? BuildCharacterMetadata(
+        CharacterLifecycleRequest request,
+        CharacterLifecycleDescriptor descriptor,
+        Persona persona,
+        Agent agent,
+        string slug)
+    {
+        Dictionary<string, object?>? metadata = null;
+        if (descriptor.Metadata is not null && descriptor.Metadata.Count > 0)
+        {
+            metadata = new Dictionary<string, object?>(descriptor.Metadata, StringComparer.OrdinalIgnoreCase);
+        }
+
+        void AddValue(string key, object? value)
+        {
+            if (value is null)
+            {
+                return;
+            }
+
+            metadata ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            metadata[key] = value;
+        }
+
+        AddValue("planId", request.PlanId);
+        AddValue("planPassId", descriptor.CreatedByPlanPassId ?? request.PlanPassId);
+        AddValue("characterSlug", slug);
+        AddValue("source", request.Source);
+        AddValue("personaId", persona.Id);
+        AddValue("agentId", agent.Id);
+        AddValue("importance", descriptor.Importance);
+        AddValue("role", descriptor.Role);
+        AddValue("track", descriptor.Track);
+
+        return metadata;
+    }
+
+    private static Guid? TryResolveWorldBibleEntryId(string slug, IReadOnlyDictionary<string, FictionWorldBibleEntry> lookup)
+        => lookup.TryGetValue(slug, out var entry) ? entry.Id : null;
+
+    private static string BuildWorldBibleCharacterSlug(string slug)
+        => $"{CharacterWorldBibleCategory}:{slug}";
+
+    private static string ExtractCharacterSlug(string? entrySlug)
+    {
+        if (string.IsNullOrWhiteSpace(entrySlug))
+        {
+            return string.Empty;
+        }
+
+        var parts = entrySlug.Split(':', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2)
+        {
+            return string.Empty;
+        }
+
+        return parts[0].Equals(CharacterWorldBibleCategory, StringComparison.OrdinalIgnoreCase) ? parts[1] : string.Empty;
     }
 
     private async Task UpsertLoreRequirementsAsync(

@@ -3,12 +3,14 @@ using System.Collections.Concurrent;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Cognition.Data.Relational.Modules.Planning;
 using Cognition.Data.Relational.Modules.Prompts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Cognition.Api.Infrastructure.Planning;
 
@@ -81,7 +83,8 @@ public sealed record PlannerHealthBacklog(
     IReadOnlyList<PlannerHealthBacklogPlanSummary> Plans,
     IReadOnlyList<PlannerHealthBacklogTransition> RecentTransitions,
     IReadOnlyList<PlannerHealthBacklogItem> StaleItems,
-    IReadOnlyList<PlannerHealthBacklogItem> OrphanedItems);
+    IReadOnlyList<PlannerHealthBacklogItem> OrphanedItems,
+    IReadOnlyList<PlannerBacklogTelemetry> TelemetryEvents);
 
 public sealed record PlannerHealthBacklogPlanSummary(
     Guid PlanId,
@@ -110,6 +113,45 @@ public sealed record PlannerHealthBacklogTransition(
     FictionPlanBacklogStatus Status,
     DateTime OccurredAtUtc,
     TimeSpan Age);
+
+public sealed record PlannerBacklogTelemetry(
+    Guid PlanId,
+    string PlanName,
+    string BacklogId,
+    string Phase,
+    string Status,
+    string? PreviousStatus,
+    string Reason,
+    string Branch,
+    int? Iteration,
+    DateTime TimestampUtc,
+    IReadOnlyDictionary<string, string?>? Metadata,
+    PlannerBacklogTelemetryCharacterMetrics? CharacterMetrics,
+    PlannerBacklogTelemetryLoreMetrics? LoreMetrics,
+    IReadOnlyList<PlannerBacklogTelemetryCharacter> RecentCharacters,
+    IReadOnlyList<PlannerBacklogTelemetryLore> PendingLore);
+
+public sealed record PlannerBacklogTelemetryCharacter(
+    Guid Id,
+    string Slug,
+    string DisplayName,
+    Guid? PersonaId,
+    Guid? WorldBibleEntryId,
+    string? Role,
+    string? Importance,
+    DateTime UpdatedAtUtc);
+
+public sealed record PlannerBacklogTelemetryLore(
+    Guid Id,
+    string RequirementSlug,
+    string Title,
+    string Status,
+    Guid? WorldBibleEntryId,
+    DateTime UpdatedAtUtc);
+
+public sealed record PlannerBacklogTelemetryCharacterMetrics(int Total, int PersonaLinked, int WorldBibleLinked);
+
+public sealed record PlannerBacklogTelemetryLoreMetrics(int Total, int Ready, int Blocked);
 
 public sealed record PlannerHealthTelemetry(
     int TotalExecutions,
@@ -482,7 +524,8 @@ public sealed class PlannerHealthService : IPlannerHealthService
             Plans: planSummariesList,
             RecentTransitions: recentTransitions,
             StaleItems: staleItems,
-            OrphanedItems: orphaned);
+            OrphanedItems: orphaned,
+            TelemetryEvents: Array.Empty<PlannerBacklogTelemetry>());
     }
 
     
@@ -496,8 +539,9 @@ public sealed class PlannerHealthService : IPlannerHealthService
 
         if (worldBibles.Count == 0)
         {
-            return new PlannerHealthWorldBibleReport(Array.Empty<PlannerHealthWorldBiblePlan>());
-        }
+        return new PlannerHealthWorldBibleReport(Array.Empty<PlannerHealthWorldBiblePlan>());
+    }
+
 
         var bibleIds = worldBibles.Select(b => b.Id).ToArray();
         var entries = await _db.FictionWorldBibleEntries
@@ -555,6 +599,161 @@ public sealed class PlannerHealthService : IPlannerHealthService
 
         return new PlannerHealthWorldBibleReport(
             plans.OrderByDescending(p => p.LastUpdatedUtc ?? DateTime.MinValue).ToList());
+    }
+
+    private async Task<IReadOnlyList<PlannerBacklogTelemetry>> LoadBacklogTelemetryAsync(CancellationToken ct)
+    {
+        var events = await _db.WorkflowEvents
+            .AsNoTracking()
+            .Where(e => e.Kind == "fiction.backlog.telemetry")
+            .OrderByDescending(e => e.Timestamp)
+            .Take(25)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (events.Count == 0)
+        {
+            return Array.Empty<PlannerBacklogTelemetry>();
+        }
+
+        var planIds = events
+            .Select(e => e.Payload is JObject o ? ReadGuid(o, "planId") : null)
+            .Where(g => g.HasValue)
+            .Select(g => g!.Value)
+            .Distinct()
+            .ToArray();
+
+        var planLookup = planIds.Length == 0
+            ? new Dictionary<Guid, string>()
+            : await _db.FictionPlans
+                .AsNoTracking()
+                .Where(p => planIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, p => p.Name, ct)
+                .ConfigureAwait(false);
+
+        var list = new List<PlannerBacklogTelemetry>(events.Count);
+        foreach (var evt in events)
+        {
+            if (evt.Payload is not JObject payload)
+            {
+                continue;
+            }
+
+            var planId = ReadGuid(payload, "planId");
+            if (!planId.HasValue)
+            {
+                continue;
+            }
+
+            var planName = planLookup.TryGetValue(planId.Value, out var resolvedName)
+                ? resolvedName
+                : $"Plan {planId.Value:N}";
+
+            var characterMetrics = payload["characterMetrics"] is JObject charMetrics
+                ? new PlannerBacklogTelemetryCharacterMetrics(
+                    charMetrics.Value<int?>("total") ?? 0,
+                    charMetrics.Value<int?>("personaLinked") ?? 0,
+                    charMetrics.Value<int?>("worldBibleLinked") ?? 0)
+                : null;
+
+            var loreMetrics = payload["loreMetrics"] is JObject loreMetricsObj
+                ? new PlannerBacklogTelemetryLoreMetrics(
+                    loreMetricsObj.Value<int?>("total") ?? 0,
+                    loreMetricsObj.Value<int?>("ready") ?? 0,
+                    loreMetricsObj.Value<int?>("blocked") ?? 0)
+                : null;
+
+            var telemetry = new PlannerBacklogTelemetry(
+                PlanId: planId.Value,
+                PlanName: planName,
+                BacklogId: payload.Value<string>("backlogId") ?? "(unknown)",
+                Phase: payload.Value<string>("phase") ?? "unknown",
+                Status: payload.Value<string>("status") ?? "unknown",
+                PreviousStatus: payload.Value<string>("previousStatus"),
+                Reason: payload.Value<string>("reason") ?? string.Empty,
+                Branch: payload.Value<string>("branch") ?? "main",
+                Iteration: payload.Value<int?>("iteration"),
+                TimestampUtc: evt.Timestamp,
+                Metadata: ConvertMetadata(payload["metadata"]),
+                CharacterMetrics: characterMetrics,
+                LoreMetrics: loreMetrics,
+                RecentCharacters: ReadCharacterSnapshots(payload["recentCharacters"]),
+                PendingLore: ReadLoreSnapshots(payload["pendingLore"]));
+
+            list.Add(telemetry);
+        }
+
+        return list;
+    }
+
+    private static IReadOnlyList<PlannerBacklogTelemetryCharacter> ReadCharacterSnapshots(JToken? token)
+    {
+        if (token is not JArray array || array.Count == 0)
+        {
+            return Array.Empty<PlannerBacklogTelemetryCharacter>();
+        }
+
+        var results = new List<PlannerBacklogTelemetryCharacter>(array.Count);
+        foreach (var obj in array.OfType<JObject>())
+        {
+            var id = ReadGuid(obj, "id") ?? Guid.NewGuid();
+            results.Add(new PlannerBacklogTelemetryCharacter(
+                Id: id,
+                Slug: obj.Value<string>("slug") ?? id.ToString("N"),
+                DisplayName: obj.Value<string>("displayName") ?? obj.Value<string>("name") ?? "(unknown character)",
+                PersonaId: ReadGuid(obj, "personaId"),
+                WorldBibleEntryId: ReadGuid(obj, "worldBibleEntryId"),
+                Role: obj.Value<string>("role"),
+                Importance: obj.Value<string>("importance"),
+                UpdatedAtUtc: obj.Value<DateTime?>("updatedAtUtc") ?? DateTime.UtcNow));
+        }
+
+        return results;
+    }
+
+    private static IReadOnlyList<PlannerBacklogTelemetryLore> ReadLoreSnapshots(JToken? token)
+    {
+        if (token is not JArray array || array.Count == 0)
+        {
+            return Array.Empty<PlannerBacklogTelemetryLore>();
+        }
+
+        var results = new List<PlannerBacklogTelemetryLore>(array.Count);
+        foreach (var obj in array.OfType<JObject>())
+        {
+            var id = ReadGuid(obj, "id") ?? Guid.NewGuid();
+            results.Add(new PlannerBacklogTelemetryLore(
+                Id: id,
+                RequirementSlug: obj.Value<string>("slug") ?? obj.Value<string>("requirementSlug") ?? id.ToString("N"),
+                Title: obj.Value<string>("title") ?? "(unknown lore)",
+                Status: obj.Value<string>("status") ?? "unknown",
+                WorldBibleEntryId: ReadGuid(obj, "worldBibleEntryId"),
+                UpdatedAtUtc: obj.Value<DateTime?>("updatedAtUtc") ?? DateTime.UtcNow));
+        }
+
+        return results;
+    }
+
+    private static IReadOnlyDictionary<string, string?>? ConvertMetadata(JToken? token)
+    {
+        if (token is not JObject obj || obj.Count == 0)
+        {
+            return null;
+        }
+
+        var dict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var prop in obj.Properties())
+        {
+            dict[prop.Name] = prop.Value.Type == JTokenType.Null ? null : prop.Value.ToString();
+        }
+
+        return dict;
+    }
+
+    private static Guid? ReadGuid(JObject obj, string property)
+    {
+        var value = obj.Value<string>(property);
+        return Guid.TryParse(value, out var result) ? result : null;
     }
 
     private IReadOnlyList<WorldBibleIssue> DetectWorldBibleIssues(PlannerHealthWorldBibleReport report)

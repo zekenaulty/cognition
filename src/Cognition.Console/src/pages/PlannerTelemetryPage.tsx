@@ -10,12 +10,16 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  FormControl,
   Grid,
   IconButton,
+  InputLabel,
   LinearProgress,
   List,
   ListItem,
   ListItemText,
+  MenuItem,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -30,7 +34,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import InsightsIcon from '@mui/icons-material/Insights';
-import { ApiError, diagnosticsApi } from '../api/client';
+import { ApiError, diagnosticsApi, fictionApi } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useSecurity } from '../hooks/useSecurity';
 import {
@@ -40,6 +44,8 @@ import {
   PlannerHealthReport,
   PlannerHealthStatus
 } from '../types/diagnostics';
+import { FictionPlanRoster } from '../types/fiction';
+import { FictionRosterPanel } from '../components/fiction/FictionRosterPanel';
 
 type AlertDescriptor = {
   id: string;
@@ -58,6 +64,10 @@ export default function PlannerTelemetryPage() {
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [rosterPlanId, setRosterPlanId] = React.useState<string | null>(null);
+  const [planRoster, setPlanRoster] = React.useState<FictionPlanRoster | null>(null);
+  const [rosterLoading, setRosterLoading] = React.useState(false);
+  const [rosterError, setRosterError] = React.useState<string | null>(null);
 
   const loadReports = React.useCallback(
     async (isRefresh = false) => {
@@ -94,6 +104,52 @@ export default function PlannerTelemetryPage() {
   React.useEffect(() => {
     loadReports(false);
   }, [loadReports]);
+
+  React.useEffect(() => {
+    if (!plannerReport || plannerReport.backlog.plans.length === 0) {
+      setRosterPlanId(null);
+      setPlanRoster(null);
+      return;
+    }
+    setRosterPlanId(prev => {
+      if (prev && plannerReport.backlog.plans.some(plan => plan.planId === prev)) {
+        return prev;
+      }
+      return plannerReport.backlog.plans[0].planId;
+    });
+  }, [plannerReport]);
+
+  React.useEffect(() => {
+    if (!token || !rosterPlanId) {
+      setPlanRoster(null);
+      return;
+    }
+    let cancelled = false;
+    setRosterLoading(true);
+    setRosterError(null);
+    fictionApi
+      .getPlanRoster(rosterPlanId, token)
+      .then(data => {
+        if (!cancelled) {
+          setPlanRoster(data);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          const message = err instanceof ApiError ? err.message : 'Unable to load roster.';
+          setRosterError(message);
+          setPlanRoster(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRosterLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, rosterPlanId]);
 
   const serverAlerts = React.useMemo(() => {
     if (!plannerReport) {
@@ -620,6 +676,122 @@ export default function PlannerTelemetryPage() {
           </Card>
         </Grid>
       </Grid>
+      <Card>
+        <CardHeader
+          title="Character & Lore Roster"
+          subheader={
+            planRoster
+              ? `${planRoster.planName}${planRoster.projectTitle ? ` • ${planRoster.projectTitle}` : ''}`
+              : 'Select a plan to inspect tracked characters and lore.'
+          }
+          action={
+            <FormControl size="small" sx={{ minWidth: 220 }} disabled={(plannerReport.backlog.plans ?? []).length === 0}>
+              <InputLabel id="roster-plan-label">Plan</InputLabel>
+              <Select
+                labelId="roster-plan-label"
+                label="Plan"
+                value={rosterPlanId ?? ''}
+                onChange={event => setRosterPlanId(event.target.value ? (event.target.value as string) : null)}
+              >
+                {(plannerReport.backlog.plans ?? []).map(plan => (
+                  <MenuItem key={plan.planId} value={plan.planId}>
+                    {plan.planName}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          }
+        />
+        <CardContent>
+          {(plannerReport.backlog.plans ?? []).length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No backlog plans detected yet.
+            </Typography>
+          ) : (
+            <FictionRosterPanel
+              roster={planRoster}
+              loading={rosterLoading}
+              error={rosterError}
+            />
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader
+          title="Backlog Telemetry Feed"
+          subheader="Latest workflow events emitted from backlog transitions"
+        />
+        <CardContent sx={{ px: 0 }}>
+          {plannerReport.backlog.telemetryEvents.length === 0 ? (
+            <Box sx={{ px: 2, pb: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                Telemetry events will appear once backlog runs emit workflow logs.
+              </Typography>
+            </Box>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Plan</TableCell>
+                  <TableCell>Phase / Status</TableCell>
+                  <TableCell>Characters</TableCell>
+                  <TableCell>Lore</TableCell>
+                  <TableCell>Updated</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {plannerReport.backlog.telemetryEvents.map(event => (
+                  <TableRow key={`${event.planId}-${event.backlogId}-${event.timestampUtc}`}>
+                    <TableCell>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {event.planName}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {event.backlogId} on branch {event.branch}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+                        <Chip size="small" label={event.phase} />
+                        <Chip size="small" label={event.status} color={event.status.toLowerCase() === 'complete' ? 'success' : event.status.toLowerCase() === 'pending' ? 'warning' : 'default'} />
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary">
+                        {event.reason}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {event.characterMetrics ? (
+                        <Typography variant="body2">
+                          {event.characterMetrics.personaLinked}/{event.characterMetrics.total} persona-linked
+                        </Typography>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">—</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {event.loreMetrics ? (
+                        <Typography variant="body2">
+                          {event.loreMetrics.ready}/{event.loreMetrics.total} ready
+                        </Typography>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">—</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{formatRelativeTime(event.timestampUtc)}</Typography>
+                      {event.iteration && (
+                        <Typography variant="caption" color="text.secondary">
+                          Iteration {event.iteration}
+                        </Typography>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </Stack>
   );
 }

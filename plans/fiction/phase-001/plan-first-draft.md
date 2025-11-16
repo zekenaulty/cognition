@@ -20,7 +20,7 @@
 - `CharacterLifecycleService` handles persona/world-bible promotion and scroll + scene runners refuse to run when `FictionLoreRequirement` entries remain `Planned`, so lore gaps surface before prose is attempted.
 - Author persona context now flows through an `AuthorPersonaRegistry`; scroll/scene prompts load persona summaries + memories/world notes and automatically append new `PersonaMemory` entries after each pass.
 - FictionWeaver jobs enforce backlog metadata contracts (conversationPlanId, provider/model IDs, backlog task IDs) and fail early if clients omit them, keeping Hangfire + UI in sync.
-- Remaining gaps sit in tooling (UI/console still needs backlog/task plumbing), world-bible provenance wiring, and surfacing of tracked characters/lore inside author dashboards.
+- Remaining gaps sit in tooling (UI/console still needs backlog/task plumbing), world-bible provenance wiring, and ~~surfacing of tracked characters/lore inside author dashboards~~ **live roster/telemetry visibility shipped via new API + console views.**
 
 ## Success Criteria
 - Vision/iterative planners emit detailed `characters[]` and `lore[]` payloads, flag importance, and automatically spin up personas/agents/memories when needed.
@@ -33,7 +33,7 @@
 1. **Backlog-driven orchestration + resume UX:** Server-side guardrails now reject missing `conversationPlanId`/provider/model/task IDs; finish the `FictionPlanBacklog` work so Hangfire jobs and `ConversationTask` scheduling derive entirely from backlog state and ensure front-ends always send the required metadata (`phase-001_step_20250926_2327_inventory.md`, `hot_targeted_todo.md`). This keeps console progress, transcripts, and auto-resume flows aligned with what users initiated.
    - _User impact:_ Authors see phase cards progress exactly in the order they kicked off, resumes land in the right scene, and transcripts stop drifting from backlog truth.
    - _Work to land:_ Wire backlog state into `FictionWeaverJobs` enqueueing + `ConversationTask` scheduling, update UI/API contracts to require plan/provider/model IDs, migrate existing backlog items, and add guardrails that fail jobs lacking metadata.
-   - _Proof/telemetry:_ Dashboards comparing backlog status vs `FictionPhaseProgressed` events, resume-success counters, and alerting when UI posts missing identifiers.
+   - _Proof/telemetry:_ Dashboards comparing backlog status vs `FictionPhaseProgressed` events, resume-success counters, and new `fiction.backlog.telemetry` workflow events/console feed highlighting per-plan roster metrics.
 2. **Character & lore lifecycle enforcement:** Structured vision output, lifecycle service hooks, and scroll/scene gating are in place; next is wiring world-bible manager + UI so any `track=true` payload immediately surfaces personas/agents/memories/world-bible entries with provenance (`character_persona_lifecycle.md`). Authors should see a living roster with provenance instead of guessing which assets exist.
    - _User impact:_ Character sheets, lore pillars, and drafting prerequisites become visible before prose starts, preventing canon drift and surprise failures mid-scroll.
    - _Work to land:_ EF migrations + service implementation, runner integrations (Vision, WorldBible, Scroll, Scene), provenance metadata, lore requirement enforcement/auto-fill, and deterministic tests proving persona creation.
@@ -179,7 +179,7 @@
 - [ ] Prompt playbook/templating landed with versioned prompts + promotion pipeline.
 - [ ] Backlog-driven orchestration + resume UX polish so user-facing progress, resumes, and dashboards stay authoritative (server-side guardrails landed; UI/console + telemetry still pending).
 - [x] Author persona context hydration + automatic memory append validated end-to-end (Immediate Priority #3 / Milestone H).
-- [ ] Console/API surfacing for tracked characters + lore requirements with branch lineage (Immediate Priority #4 / Milestone D).
+  - [x] Console/API surfacing for tracked characters + lore requirements with branch lineage (Immediate Priority #4 / Milestone D). _Fiction plan roster endpoint + console projects page are live._
 - [ ] Hangfire + front-end backlog metadata contract signed off, telemetry hooks live, and Scenario #1 rehearsal recorded.
 - [ ] CharacterLifecycleService + lore requirement migrations landed with telemetry (`FictionCharacterPromoted`, `FictionLoreRequirementBlocked`) and Scenarios #2/#4 ready to run.
 - [ ] Acceptance scenarios 1-4 rehearsed with artifacts (videos/logs) attached to the Phase 001 completion report.

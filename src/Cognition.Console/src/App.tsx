@@ -15,6 +15,7 @@ import ChatPage from './pages/ChatPage'
 import AgentsPage from './pages/AgentsPage'
 import AgentDetailPage from './pages/AgentDetailPage'
 import PlannerTelemetryPage from './pages/PlannerTelemetryPage'
+import FictionProjectsPage from './pages/FictionProjectsPage'
 
 import { PrimaryDrawer } from './components/navigation/PrimaryDrawer'
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material'
@@ -122,6 +123,7 @@ export default function App() {
                 <Route path="/agents" element={<AgentsPage />} />
                 <Route path="/agents/:agentId" element={<AgentDetailPage />} />
                 <Route path="/operations/backlog" element={<PlannerTelemetryPage />} />
+                <Route path="/fiction/projects" element={<FictionProjectsPage />} />
               </Route>
             </Routes>
           </Shell>

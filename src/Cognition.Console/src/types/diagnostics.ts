@@ -72,6 +72,7 @@ export type PlannerHealthBacklog = {
   recentTransitions: PlannerHealthBacklogTransition[];
   staleItems: PlannerHealthBacklogItem[];
   orphanedItems: PlannerHealthBacklogItem[];
+  telemetryEvents: PlannerBacklogTelemetry[];
 };
 
 export type PlannerHealthBacklogPlanSummary = {
@@ -103,6 +104,56 @@ export type PlannerHealthBacklogTransition = {
   status: string | number;
   occurredAtUtc: string;
   age: string | number;
+};
+
+export type PlannerBacklogTelemetry = {
+  planId: string;
+  planName: string;
+  backlogId: string;
+  phase: string;
+  status: string;
+  previousStatus?: string | null;
+  reason: string;
+  branch: string;
+  iteration?: number | null;
+  timestampUtc: string;
+  metadata?: Record<string, string | null> | null;
+  characterMetrics?: PlannerBacklogTelemetryCharacterMetrics | null;
+  loreMetrics?: PlannerBacklogTelemetryLoreMetrics | null;
+  recentCharacters: PlannerBacklogTelemetryCharacter[];
+  pendingLore: PlannerBacklogTelemetryLore[];
+};
+
+export type PlannerBacklogTelemetryCharacterMetrics = {
+  total: number;
+  personaLinked: number;
+  worldBibleLinked: number;
+};
+
+export type PlannerBacklogTelemetryLoreMetrics = {
+  total: number;
+  ready: number;
+  blocked: number;
+};
+
+export type PlannerBacklogTelemetryCharacter = {
+  id: string;
+  slug: string;
+  displayName: string;
+  personaId?: string | null;
+  worldBibleEntryId?: string | null;
+  role?: string | null;
+  importance?: string | null;
+  updatedAtUtc: string;
+};
+
+export type PlannerBacklogTelemetryLore = {
+  id: string;
+  requirementSlug: string;
+  title: string;
+  status: string;
+  worldBibleEntryId?: string | null;
+  updatedAtUtc: string;
 };
 
 export type PlannerHealthTelemetry = {

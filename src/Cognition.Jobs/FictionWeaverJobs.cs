@@ -638,7 +638,7 @@ public class FictionWeaverJobs
 
             if (previousStatus is null || previousStatus != existingItem.Status)
             {
-                RecordBacklogTelemetry(planId, existingItem.BacklogId, phase, existingItem.Status, context, "vision-sync", previousStatus);
+                await RecordBacklogTelemetry(planId, existingItem.BacklogId, phase, existingItem.Status, context, "vision-sync", previousStatus, cancellationToken).ConfigureAwait(false);
             }
 
             if (conversationPlanId.HasValue)
@@ -700,7 +700,7 @@ public class FictionWeaverJobs
 
         var conversationPlanId = await GetConversationPlanIdAsync(planId, cancellationToken).ConfigureAwait(false);
 
-        RecordBacklogTelemetry(planId, backlogId, phase, status, context, reason, previousStatus);
+        await RecordBacklogTelemetry(planId, backlogId, phase, status, context, reason, previousStatus, cancellationToken).ConfigureAwait(false);
         await UpdateConversationTaskStatusAsync(conversationPlanId, planId, backlogId, status, cancellationToken).ConfigureAwait(false);
     }
 
@@ -879,15 +879,17 @@ public class FictionWeaverJobs
         public string[]? Outputs { get; init; }
     }
 
-    private void RecordBacklogTelemetry(
+    private async Task RecordBacklogTelemetry(
         Guid planId,
         string backlogId,
         FictionPhase phase,
         FictionPlanBacklogStatus status,
         FictionPhaseExecutionContext context,
         string reason,
-        FictionPlanBacklogStatus? previousStatus)
+        FictionPlanBacklogStatus? previousStatus,
+        CancellationToken cancellationToken)
     {
+        var branch = context.BranchSlug ?? "main";
         _logger.LogInformation(
             "BacklogTelemetry plan={PlanId} backlog={BacklogId} phase={Phase} status={Status} previousStatus={PreviousStatus} reason={Reason} branch={Branch} iteration={Iteration} blueprint={BlueprintId} scroll={ScrollId} scene={SceneId}",
             planId,
@@ -896,12 +898,202 @@ public class FictionWeaverJobs
             status.ToString(),
             previousStatus?.ToString() ?? "unknown",
             reason,
-            context.BranchSlug ?? "main",
+            branch,
             context.IterationIndex,
             context.ChapterBlueprintId,
             context.ChapterScrollId,
             context.ChapterSceneId);
+
+        var hasCharacterEntity = _db.Model.FindEntityType(typeof(FictionCharacter)) is not null;
+        var hasLoreEntity = _db.Model.FindEntityType(typeof(FictionLoreRequirement)) is not null;
+
+        if (!hasCharacterEntity && !hasLoreEntity)
+        {
+            return;
+        }
+
+        var characterMetrics = new CharacterMetrics(0, 0, 0);
+        List<CharacterSnapshot> recentCharacters = new();
+        if (hasCharacterEntity)
+        {
+            characterMetrics = await _db.FictionCharacters
+                .AsNoTracking()
+                .Where(c => c.FictionPlanId == planId)
+                .GroupBy(_ => 1)
+                .Select(g => new CharacterMetrics(
+                    g.Count(),
+                    g.Count(c => c.PersonaId != null),
+                    g.Count(c => c.WorldBibleEntryId != null)))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false) ?? new CharacterMetrics(0, 0, 0);
+
+            recentCharacters = await _db.FictionCharacters
+                .AsNoTracking()
+                .Where(c => c.FictionPlanId == planId)
+                .OrderByDescending(c => c.UpdatedAtUtc ?? c.CreatedAtUtc)
+                .Take(5)
+                .Select(c => new CharacterSnapshot(
+                    c.Id,
+                    c.Slug,
+                    c.DisplayName,
+                    c.PersonaId,
+                    c.WorldBibleEntryId,
+                    c.Role,
+                    c.Importance,
+                    c.UpdatedAtUtc ?? c.CreatedAtUtc,
+                    c.ProvenanceJson))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var loreMetrics = new LoreMetrics(0, 0, 0);
+        List<LoreSnapshot> pendingLore = new();
+        if (hasLoreEntity)
+        {
+            loreMetrics = await _db.FictionLoreRequirements
+                .AsNoTracking()
+                .Where(r => r.FictionPlanId == planId)
+                .GroupBy(_ => 1)
+                .Select(g => new LoreMetrics(
+                    g.Count(),
+                    g.Count(r => r.Status == FictionLoreRequirementStatus.Ready),
+                    g.Count(r => r.Status == FictionLoreRequirementStatus.Blocked)))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false) ?? new LoreMetrics(0, 0, 0);
+
+            pendingLore = await _db.FictionLoreRequirements
+                .AsNoTracking()
+                .Where(r => r.FictionPlanId == planId && r.Status != FictionLoreRequirementStatus.Ready)
+                .OrderBy(r => r.UpdatedAtUtc ?? r.CreatedAtUtc)
+                .Take(5)
+                .Select(r => new LoreSnapshot(
+                    r.Id,
+                    r.RequirementSlug,
+                    r.Title,
+                    r.Status.ToString(),
+                    r.WorldBibleEntryId,
+                    r.MetadataJson,
+                    r.UpdatedAtUtc ?? r.CreatedAtUtc))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var payload = new JObject
+        {
+            ["planId"] = planId,
+            ["backlogId"] = backlogId,
+            ["phase"] = phase.ToString(),
+            ["status"] = status.ToString(),
+            ["previousStatus"] = previousStatus?.ToString(),
+            ["reason"] = reason,
+            ["branch"] = branch,
+            ["iteration"] = context.IterationIndex,
+            ["chapterBlueprintId"] = context.ChapterBlueprintId,
+            ["chapterScrollId"] = context.ChapterScrollId,
+            ["chapterSceneId"] = context.ChapterSceneId,
+            ["characterMetrics"] = new JObject
+            {
+                ["total"] = characterMetrics.Total,
+                ["personaLinked"] = characterMetrics.PersonaLinked,
+                ["worldBibleLinked"] = characterMetrics.WorldBibleLinked
+            },
+            ["loreMetrics"] = new JObject
+            {
+                ["total"] = loreMetrics.Total,
+                ["ready"] = loreMetrics.Ready,
+                ["blocked"] = loreMetrics.Blocked
+            }
+        };
+
+        if (context.Metadata is not null && context.Metadata.Count > 0)
+        {
+            payload["metadata"] = JObject.FromObject(context.Metadata);
+        }
+
+        if (recentCharacters.Count > 0)
+        {
+            var characterArray = new JArray();
+            foreach (var snapshot in recentCharacters)
+            {
+                var item = new JObject
+                {
+                    ["id"] = snapshot.Id,
+                    ["slug"] = snapshot.Slug,
+                    ["displayName"] = snapshot.DisplayName,
+                    ["personaId"] = snapshot.PersonaId,
+                    ["worldBibleEntryId"] = snapshot.WorldBibleEntryId,
+                    ["role"] = snapshot.Role ?? string.Empty,
+                    ["importance"] = snapshot.Importance ?? string.Empty,
+                    ["updatedAtUtc"] = snapshot.UpdatedAtUtc
+                };
+                var provenance = TryParseJToken(snapshot.ProvenanceJson);
+                if (provenance is not null)
+                {
+                    item["provenance"] = provenance;
+                }
+
+                characterArray.Add(item);
+            }
+
+            payload["recentCharacters"] = characterArray;
+        }
+
+        if (pendingLore.Count > 0)
+        {
+            var loreArray = new JArray();
+            foreach (var snapshot in pendingLore)
+            {
+                var item = new JObject
+                {
+                    ["id"] = snapshot.Id,
+                    ["slug"] = snapshot.RequirementSlug,
+                    ["title"] = snapshot.Title,
+                    ["status"] = snapshot.Status,
+                    ["worldBibleEntryId"] = snapshot.WorldBibleEntryId,
+                    ["updatedAtUtc"] = snapshot.UpdatedAtUtc
+                };
+                var metadataToken = TryParseJToken(snapshot.MetadataJson);
+                if (metadataToken is not null)
+                {
+                    item["metadata"] = metadataToken;
+                }
+
+                loreArray.Add(item);
+            }
+
+            payload["pendingLore"] = loreArray;
+        }
+
+        await _workflowLogger.LogAsync(
+            context.ConversationId,
+            "fiction.backlog.telemetry",
+            payload).ConfigureAwait(false);
     }
+
+    private static JToken? TryParseJToken(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JToken.Parse(raw);
+        }
+        catch (JsonReaderException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record CharacterMetrics(int Total, int PersonaLinked, int WorldBibleLinked);
+
+    private sealed record LoreMetrics(int Total, int Ready, int Blocked);
+
+    private sealed record CharacterSnapshot(Guid Id, string Slug, string DisplayName, Guid? PersonaId, Guid? WorldBibleEntryId, string? Role, string? Importance, DateTime UpdatedAtUtc, string? ProvenanceJson);
+
+    private sealed record LoreSnapshot(Guid Id, string RequirementSlug, string Title, string Status, Guid? WorldBibleEntryId, string? MetadataJson, DateTime UpdatedAtUtc);
 
     private static FictionPhaseResult AnnotateBacklogResult(FictionPhaseResult result, string backlogItemId)
     {
