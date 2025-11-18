@@ -1,5 +1,15 @@
 # Phase 001 – Session 2025-11-16 Action Plan
 
+## Definition of Done
+- Backlog console widgets consume `/backlog` + `/resume`, enforce metadata requirements, and emit telemetry/audit logs; admins can resume items without CLI/SQL.
+- Lore fulfillment automation triggers off SLA breaches, records provenance/timelines, and console users can review/approve history.
+- Persona obligations are created/tagged/resolved through API + console flows with alerts for aging items, and regression tests cover backlog → scheduler → lore + obligation loops.
+
+## Status (2025-11-18)
+- Backlog + obligation UX is live in Fiction Projects and Planner Telemetry, and an end-to-end regression anchors the resume → fulfill → resolve workflow.
+- Persona obligations now include inline persona-memory/world notes, resume dialogs apply default provider/model metadata, and Planner Telemetry exposes the same backlog alerts + dialogs so Ops can triage stale backlog, lore, and obligations in one place.
+- Remaining work is explicitly user-facing (plan creation CTA, backlog alert cards, lore auto-fulfillment), so keep the stack focused on features end users can touch.
+
 ## Snapshot
 - Backlog + resume APIs are live and metadata contracts are enforced end-to-end (ConversationTask.ProviderId/ModelId/TaskId/ConversationPlanId).
 - Roster + lore fulfillment dashboards now surface branch-aware provenance in the console, and manual fulfill calls emit telemetry immediately.
@@ -8,10 +18,10 @@
 
 ## Priority Work Items
 
-1. **Backlog console widgets & actions**
-   - Surface `/api/fiction/plans/{id}/backlog` data on Fiction Projects + Planner Telemetry pages (cards, filters, resume controls).
-   - Invoke `/resume` with enforced provider/model/task ids collected from ConversationTask metadata; refresh roster/backlog panes after actions.
-   - Emit console event logs + alert banners for blocked/on fire backlog items (missing metadata, repeated failures).
+1. **Author-facing backlog UX**
+   - Add console CTA to create/seed a plan (persona picker, default backlog items).
+   - Highlight stale backlog items with inline alerts (age, missing lore, open obligations) linking directly to resume/resolve dialogs.
+   - Surface resume/action metadata (provider/model/task) as user-facing hints, not just telemetry.
 
 2. **Lore fulfillment automation pipeline**
    - Trigger fulfillment tool runs when requirements stay `Blocked` beyond SLA; capture `conversationId/planPassId/source` metadata from assistants.

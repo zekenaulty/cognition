@@ -1,4 +1,9 @@
-ï»¿# Milestone A Inventory â€” Prompts, Validators, Outputs
+# Milestone A Inventory — Prompts, Validators, Outputs
+
+## Definition of Done
+- Prompt catalog + schema/validator mapping for both Python prototype and Cognition tools remains accurate to source templates (drift is tracked as TODOs).
+- Each prompt has a migration decision (reuse vs retire) recorded, and Cognition tooling now references the documented templates/validators.
+- Sample run artifacts (story.json, context files, metrics) are archived/linked so template edits can be regression tested.
 
 ## 1. Prompt Catalogue (Python Weaver v2)
 
@@ -22,25 +27,25 @@
 
 ## 2. Schema Validators & Gates
 
-- `validate_blueprint_structure` â€” ensures chapter blueprint JSON has required keys (`title`, `summary`, `structure` entries with goal/obstacle/turn/fallout). Raises `SchemaValidationError` on failure.
-- `validate_refined_chapter_structure` â€” enforces final chapter schema (sections + subsections with metadata fields, slug generation, synopsis).
-- `simple_attentional_gate` â€” token overlap check between generated text and salient terms derived from roster/book goals to catch off-topic outputs.
-- `collect_salient_terms` â€” builds term set from roster names + book goals to feed the attentional gate.
-- JSON extraction helper inside `llm_call` â€” regex-based extraction to guard against mixed-format responses.
+- `validate_blueprint_structure` — ensures chapter blueprint JSON has required keys (`title`, `summary`, `structure` entries with goal/obstacle/turn/fallout). Raises `SchemaValidationError` on failure.
+- `validate_refined_chapter_structure` — enforces final chapter schema (sections + subsections with metadata fields, slug generation, synopsis).
+- `simple_attentional_gate` — token overlap check between generated text and salient terms derived from roster/book goals to catch off-topic outputs.
+- `collect_salient_terms` — builds term set from roster names + book goals to feed the attentional gate.
+- JSON extraction helper inside `llm_call` — regex-based extraction to guard against mixed-format responses.
 - Blueprint/refine/writing phases all wrap LLM calls in retry loops with exponential backoff (up to 4 attempts) and log schema failures.
 
 ## 3. Retry / Backoff Patterns
 
 | Function | Attempts | Backoff Notes |
 | --- | --- | --- |
-| `plan_chapter_blueprint` | 4 | First retry 0.6â€“1.2s, subsequent retries exponential up to 30s |
+| `plan_chapter_blueprint` | 4 | First retry 0.6–1.2s, subsequent retries exponential up to 30s |
 | `refine_chapter_plan_for_writing` | 4 | Same cadence; retries on schema/json/transport failures |
 | `update_world_grimoires_after_chapter` | 4 | Retries strict JSON conversion with exponential backoff |
 | Scene writing skips rather than retries if markdown already exists (idempotent write guard) |
 
 ## 4. File & Directory Outputs
 
-- Root `story.json` â€” final scroll + metadata.
+- Root `story.json` — final scroll + metadata.
 - `_context/` directory:
   - `book_goals.md`, `story.plan.md`
   - `blueprints.json`
@@ -75,11 +80,11 @@
 | Tool | Method | Prompt Summary | Output/Usage |
 | --- | --- | --- | --- |
 | OutlinerTool | `BuildBeatsPrompt` | "Return ONLY minified JSON" with promise/progress/payoff beats for a titled node; optional style hints injected from DB | Beats stored in `OutlineNodeVersion.Beats` JSON and surfaced during scene drafting |
-| SceneDraftTool | `BuildDraftPrompt` | System reminder + style/canon/glossary context; instructs: "Write a single narrative scene in raw Markdownâ€¦ Target 1200-2000 wordsâ€¦ Return only the scene body" | Result becomes `DraftSegmentVersion.BodyMarkdown`; metrics logged alongside |
-| LoreKeeperTool | `BuildExtractionPrompt` | "Extract glossary terms and canon rules. Return ONLY minified JSONâ€¦" | Populates `GlossaryTerms` + `CanonRules` (ingest pipeline) |
-| WorldbuilderTool | `BuildWorldAssetPrompt` | "Return ONLY minified JSON objectâ€¦ Design a {type} named '{name}'â€¦" | Seeds `WorldAssetVersion.Content` for locations/characters/systems |
+| SceneDraftTool | `BuildDraftPrompt` | System reminder + style/canon/glossary context; instructs: "Write a single narrative scene in raw Markdown… Target 1200-2000 words… Return only the scene body" | Result becomes `DraftSegmentVersion.BodyMarkdown`; metrics logged alongside |
+| LoreKeeperTool | `BuildExtractionPrompt` | "Extract glossary terms and canon rules. Return ONLY minified JSON…" | Populates `GlossaryTerms` + `CanonRules` (ingest pipeline) |
+| WorldbuilderTool | `BuildWorldAssetPrompt` | "Return ONLY minified JSON object… Design a {type} named '{name}'…" | Seeds `WorldAssetVersion.Content` for locations/characters/systems |
 | SceneDraftTool | `GenerateDraftFallbackAsync` | Deterministic stub summarizing beats when LLM unavailable | Used only on failure (no external call) |
-| FactCheckerTool / NPCDesignerTool | â€” | No LLM prompt (pure heuristic/db operations) | n/a |
+| FactCheckerTool / NPCDesignerTool | — | No LLM prompt (pure heuristic/db operations) | n/a |
 
 \n_Provider note_: focus templating on OpenAI/Gemini for Phase-001; Ollama support deferred to narrow, explicit-use plays later.
 ## Legacy Fiction Refactor Actions
@@ -87,3 +92,4 @@
 2. Decide keep vs. supersede: map each entity/tool to new plan graph roles or mark for retirement.
 3. For retained components, plan polish tasks (schema alignment, prompt updates, telemetry).
 4. Remove unused scaffolding once replacements are in place.
+

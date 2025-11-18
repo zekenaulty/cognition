@@ -33,7 +33,8 @@ public sealed record CharacterLifecycleDescriptor(
     string? Importance = null,
     string? Summary = null,
     string? Notes = null,
-    IReadOnlyDictionary<string, object?>? Metadata = null);
+    IReadOnlyDictionary<string, object?>? Metadata = null,
+    IReadOnlyList<string>? ContinuityHooks = null);
 
 public sealed record LoreRequirementDescriptor(
     string Title,

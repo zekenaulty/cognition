@@ -6,6 +6,12 @@ Objective
 - Deliver fluent LINQ/query helpers so RAG, jobs, and tools can target scopes without bespoke wiring.
 - Keep migration low-risk via dual-write/backfill phases and transparent rollouts.
 
+## Definition of Done
+- `ScopePrincipal/ScopeSegment/ScopePath` value objects are the only way to build scopes; constructors are internal and analyzer/CI enforcement prevents regressions.
+- Persistence (relational + vector/OpenSearch) stores principal + canonical path data, and retrieval/tooling layers exclusively use the new fluent APIs (`ForPrincipal`, `UnderPath`, etc.) with green integration tests.
+- Diagnostics expose `ScopePathDualWrite` and `PathAwareHashing` states plus collision metrics, and staging verifies hashing/collision monitors remain healthy after enabling the path-aware mode.
+- Documentation + rollout notes explain how to build scopes, toggle flags, and recover, with step notes capturing the cutover evidence.
+
 Scope
 - `Cognition.Clients` scope token models, hash helpers, and retrieval utilities.
 - Shared value objects for `ScopeSegment`, `ScopePath`, and canonicalization.

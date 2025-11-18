@@ -2,6 +2,13 @@
 
 Context: 2025-10-27 external review highlighted security, quota, observability, and scope integrity gaps before any external pilots. This plan captures the remediation path and maps each recommendation into actionable work.
 
+## Definition of Done
+- ScopePath construction is locked behind the DI factory with analyzer/test coverage proving no direct `new ScopePath` or `Parse` calls ship; regression guard lives in CI.
+- Correlation IDs and structured logging propagate from API → Jobs → Clients → vector + LLM calls, and staging traces show end-to-end linkage for at least one fiction + non-fiction workflow.
+- HGTF sandbox orchestration runs in staging (OOPS worker, enable/approval jobs, integration test battery) with docs describing the rollout switches.
+- DTO validation + abuse headers + explicit auth policies for admin/console endpoints are enforced, with automated tests covering success/failure and PlannerHealth dashboards reflecting latency/retry/SLO metrics.
+- Cosine similarity scoring parity is verified by running the offline harness against OpenSearch fixtures, and developer/ops guides are updated to capture the new safeguards.
+
 ## Snapshot & Scorecard
 - Overall alpha readiness: **7.7 / 10** (architecture 8.5, planner framework 8.0, data/vector layers 8.0, API 7.5, observability 7.5, testing 7.5, security/devex 6.5, console 7.0).
 - Strengths: PlannerBase lifecycle, scope-path refactor scaffolding, deterministic fakes, Ops alerting + telemetry, Plans discipline.

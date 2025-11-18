@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   CardHeader,
@@ -25,11 +26,14 @@ import {
   FictionPlanRoster,
   FictionPlanSummary,
   ResumeBacklogPayload,
-  LoreFulfillmentLog
+  LoreFulfillmentLog,
+  PersonaObligation
 } from '../types/fiction';
 import { FictionRosterPanel } from '../components/fiction/FictionRosterPanel';
 import { FictionBacklogPanel } from '../components/fiction/FictionBacklogPanel';
 import { FictionResumeBacklogDialog } from '../components/fiction/FictionResumeBacklogDialog';
+import { PersonaObligationActionDialog } from '../components/fiction/PersonaObligationActionDialog';
+import { FictionPlanWizardDialog } from '../components/fiction/FictionPlanWizardDialog';
 
 export default function FictionProjectsPage() {
   const { auth } = useAuth();
@@ -52,53 +56,61 @@ export default function FictionProjectsPage() {
   const [actionLogs, setActionLogs] = React.useState<BacklogActionLog[]>([]);
   const [actionLoading, setActionLoading] = React.useState(false);
   const [actionError, setActionError] = React.useState<string | null>(null);
+  const [personaObligations, setPersonaObligations] = React.useState<PersonaObligation[]>([]);
+  const [obligationsLoading, setObligationsLoading] = React.useState(false);
+  const [obligationsError, setObligationsError] = React.useState<string | null>(null);
+  const [obligationActionId, setObligationActionId] = React.useState<string | null>(null);
+  const [obligationActionError, setObligationActionError] = React.useState<string | null>(null);
+  const [obligationDialog, setObligationDialog] = React.useState<{
+    obligation: PersonaObligation;
+    action: 'resolve' | 'dismiss';
+  } | null>(null);
   const [resumeTarget, setResumeTarget] = React.useState<FictionBacklogItem | null>(null);
   const [resuming, setResuming] = React.useState(false);
   const [resumeError, setResumeError] = React.useState<string | null>(null);
+  const [resumeDefaults, setResumeDefaults] = React.useState<{ providerId?: string; modelId?: string | null }>({});
   const [loreHistory, setLoreHistory] = React.useState<Record<string, LoreFulfillmentLog[]>>({});
   const [loreHistoryLoading, setLoreHistoryLoading] = React.useState(false);
   const [loreHistoryError, setLoreHistoryError] = React.useState<string | null>(null);
+  const [planDialogOpen, setPlanDialogOpen] = React.useState(false);
+  const rosterCardRef = React.useRef<HTMLDivElement | null>(null);
+
+  const fetchPlans = React.useCallback(
+    async (nextSelectedId?: string | null) => {
+      if (!token) {
+        setPlans([]);
+        setSelectedPlanId(null);
+        return;
+      }
+      setPlansLoading(true);
+      setPlansError(null);
+      try {
+        const data = await fictionApi.listPlans(token);
+        setPlans(data);
+        setSelectedPlanId(prev => {
+          if (nextSelectedId && data.some(plan => plan.id === nextSelectedId)) {
+            return nextSelectedId;
+          }
+          if (prev && data.some(plan => plan.id === prev)) {
+            return prev;
+          }
+          return data.length > 0 ? data[0].id : null;
+        });
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Unable to load fiction plans.';
+        setPlansError(message);
+        setPlans([]);
+        setSelectedPlanId(null);
+      } finally {
+        setPlansLoading(false);
+      }
+    },
+    [token]
+  );
 
   React.useEffect(() => {
-    if (!token) {
-      setPlans([]);
-      setSelectedPlanId(null);
-      return;
-    }
-    let cancelled = false;
-    setPlansLoading(true);
-    setPlansError(null);
-    fictionApi
-      .listPlans(token)
-      .then(data => {
-        if (!cancelled) {
-          setPlans(data);
-          setSelectedPlanId(prev => {
-            if (prev && data.some(plan => plan.id === prev)) {
-              return prev;
-            }
-            return data.length > 0 ? data[0].id : null;
-          });
-        }
-      })
-      .catch(err => {
-        if (!cancelled) {
-          const message = err instanceof ApiError ? err.message : 'Unable to load fiction plans.';
-          setPlansError(message);
-          setPlans([]);
-          setSelectedPlanId(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setPlansLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+    fetchPlans();
+  }, [fetchPlans]);
 
   React.useEffect(() => {
     if (!token || !selectedPlanId) {
@@ -259,6 +271,34 @@ export default function FictionProjectsPage() {
     [token, selectedPlanId]
   );
 
+  const fetchPersonaObligations = React.useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!token || !selectedPlanId) {
+        setPersonaObligations([]);
+        setObligationsError(null);
+        setObligationsLoading(false);
+        return;
+      }
+
+      setObligationsLoading(true);
+      setObligationsError(null);
+      try {
+        const data = await fictionApi.getPersonaObligations(selectedPlanId, token);
+        if (isCancelled?.()) return;
+        setPersonaObligations(data.items ?? []);
+      } catch (err) {
+        if (isCancelled?.()) return;
+        const message = err instanceof ApiError ? err.message : 'Unable to load persona obligations.';
+        setObligationsError(message);
+        setPersonaObligations([]);
+      } finally {
+        if (isCancelled?.()) return;
+        setObligationsLoading(false);
+      }
+    },
+    [token, selectedPlanId]
+  );
+
   React.useEffect(() => {
     let cancelled = false;
     fetchBacklog(() => cancelled);
@@ -283,6 +323,14 @@ export default function FictionProjectsPage() {
     };
   }, [fetchActionLogs]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchPersonaObligations(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPersonaObligations]);
+
   const handleResume = React.useCallback((item: FictionBacklogItem) => {
     setResumeError(null);
     setResumeTarget(item);
@@ -297,6 +345,7 @@ export default function FictionProjectsPage() {
       setResumeError(null);
       try {
         await fictionApi.resumeBacklog(selectedPlanId, resumeTarget.backlogId, payload, token);
+        setResumeDefaults({ providerId: payload.providerId, modelId: payload.modelId ?? null });
         setResumeTarget(null);
         await fetchBacklog();
         await fetchActionLogs();
@@ -321,6 +370,9 @@ export default function FictionProjectsPage() {
   React.useEffect(() => {
     setResumeTarget(null);
     setResumeError(null);
+    setObligationActionError(null);
+    setObligationDialog(null);
+    setResumeDefaults({});
   }, [selectedPlanId, token]);
 
   const handleFulfillLore = React.useCallback(
@@ -350,6 +402,123 @@ export default function FictionProjectsPage() {
     [token, selectedPlanId, roster?.branchSlug, fetchLoreHistory]
   );
 
+  const handleObligationActionRequest = React.useCallback((obligation: PersonaObligation, action: 'resolve' | 'dismiss') => {
+    setObligationActionError(null);
+    setObligationDialog({ obligation, action });
+  }, []);
+
+  const handleObligationDialogSubmit = React.useCallback(
+    async (notes: string) => {
+      if (!token || !selectedPlanId || !obligationDialog) {
+        return;
+      }
+      setObligationActionId(obligationDialog.obligation.id);
+      setObligationActionError(null);
+      try {
+        await fictionApi.resolvePersonaObligation(
+          selectedPlanId,
+          obligationDialog.obligation.id,
+          {
+            action: obligationDialog.action,
+            source: 'console',
+            notes
+          },
+          token
+        );
+        setObligationDialog(null);
+        await fetchPersonaObligations();
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Unable to update persona obligation.';
+        setObligationActionError(message);
+      } finally {
+        setObligationActionId(null);
+      }
+    },
+    [token, selectedPlanId, obligationDialog, fetchPersonaObligations]
+  );
+
+  const handleObligationDialogClose = React.useCallback(() => {
+    if (obligationActionId) {
+      return;
+    }
+    setObligationDialog(null);
+  }, [obligationActionId]);
+
+  const handlePlanCreated = React.useCallback(
+    (plan: FictionPlanSummary) => {
+      fetchPlans(plan.id);
+      setPlanDialogOpen(false);
+    },
+    [fetchPlans]
+  );
+
+  const scrollToRoster = React.useCallback(() => {
+    rosterCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const staleBacklogItems = React.useMemo(() => {
+    if (!backlogItems || backlogItems.length === 0) {
+      return [];
+    }
+    const now = Date.now();
+    const thresholdMs = 60 * 60 * 1000;
+    return backlogItems.filter(item => {
+      const status = (item.status ?? '').toString().toLowerCase();
+      if (status !== 'in_progress') {
+        return false;
+      }
+      const stamp = item.updatedAtUtc ?? item.createdAtUtc;
+      if (!stamp) {
+        return false;
+      }
+      const updated = new Date(stamp);
+      if (Number.isNaN(updated.getTime())) {
+        return false;
+      }
+      return now - updated.getTime() > thresholdMs;
+    });
+  }, [backlogItems]);
+
+  const missingLoreRequirements = React.useMemo(
+    () =>
+      roster?.loreRequirements?.filter(req => (req.status ?? '').toLowerCase() !== 'ready') ?? [],
+    [roster]
+  );
+
+  const openPersonaObligations = React.useMemo(
+    () =>
+      personaObligations.filter(obligation => {
+        const normalized = (obligation.status ?? '').toLowerCase();
+        return normalized !== 'resolved' && normalized !== 'dismissed';
+      }),
+    [personaObligations]
+  );
+
+  const handleResumeAlertClick = React.useCallback(
+    (item: FictionBacklogItem) => {
+      setResumeError(null);
+      setResumeTarget(item);
+    },
+    []
+  );
+
+  const handleMissingLoreAlertClick = React.useCallback(() => {
+    scrollToRoster();
+  }, [scrollToRoster]);
+
+  const handleObligationAlertClick = React.useCallback(() => {
+    if (openPersonaObligations.length === 0 || obligationActionId) {
+      return;
+    }
+    setObligationDialog({ obligation: openPersonaObligations[0], action: 'resolve' });
+  }, [openPersonaObligations, obligationActionId]);
+
+  const showPlanAlerts =
+    Boolean(selectedPlanId) &&
+    (staleBacklogItems.length > 0 ||
+      missingLoreRequirements.length > 0 ||
+      openPersonaObligations.length > 0);
+
   if (!isAdmin) {
     return (
       <Alert severity="info">
@@ -368,10 +537,69 @@ export default function FictionProjectsPage() {
           Inspect backlog readiness, lore fulfillment, and persona context for each fiction plan.
         </Typography>
       </Box>
+      {showPlanAlerts && (
+        <Stack spacing={1}>
+          {staleBacklogItems.length > 0 && (
+            <Alert
+              severity="warning"
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => handleResumeAlertClick(staleBacklogItems[0])}
+                >
+                  Resume
+                </Button>
+              }
+            >
+              {staleBacklogItems.length} backlog item{staleBacklogItems.length === 1 ? '' : 's'} have been
+              in progress for over an hour.
+            </Alert>
+          )}
+          {missingLoreRequirements.length > 0 && (
+            <Alert
+              severity="info"
+              action={
+                <Button color="inherit" size="small" onClick={handleMissingLoreAlertClick}>
+                  Review lore
+                </Button>
+              }
+            >
+              {missingLoreRequirements.length} lore requirement{missingLoreRequirements.length === 1 ? '' : 's'}{' '}
+              still block downstream planners.
+            </Alert>
+          )}
+          {openPersonaObligations.length > 0 && (
+            <Alert
+              severity="warning"
+              action={
+                <Button color="inherit" size="small" onClick={handleObligationAlertClick}>
+                  Resolve
+                </Button>
+              }
+            >
+              {openPersonaObligations.length} persona obligation
+              {openPersonaObligations.length === 1 ? '' : 's'} awaiting follow-up.
+            </Alert>
+          )}
+        </Stack>
+      )}
       <Grid container spacing={3}>
         <Grid item xs={12} md={4}>
           <Card>
-            <CardHeader title="Plans" />
+            <CardHeader
+              title="Plans"
+              action={
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={() => setPlanDialogOpen(true)}
+                  disabled={plansLoading}
+                >
+                  New Plan
+                </Button>
+              }
+            />
             <CardContent sx={{ px: 0 }}>
               {plansLoading && <LinearProgress />}
               {plansError && (
@@ -429,10 +657,17 @@ export default function FictionProjectsPage() {
                   actionLogs={actionLogs}
                   actionLoading={actionLoading}
                   actionError={actionError}
+                  obligations={personaObligations}
+                  obligationsLoading={obligationsLoading}
+                  obligationsError={obligationsError}
+                  onResolveObligation={isAdmin ? handleObligationActionRequest : undefined}
+                  obligationActionId={obligationActionId}
+                  obligationActionError={obligationActionError}
+                  personaContext={personaContext}
                 />
               </CardContent>
             </Card>
-            <Card>
+            <Card ref={rosterCardRef}>
               <CardHeader
                 title={roster ? roster.planName : 'Roster'}
                 subheader={roster?.projectTitle}
@@ -516,11 +751,28 @@ export default function FictionProjectsPage() {
         open={Boolean(resumeTarget)}
         item={resumeTarget}
         defaultBranch={roster?.branchSlug ?? undefined}
+        defaultProviderId={resumeDefaults.providerId}
+        defaultModelId={resumeDefaults.modelId ?? undefined}
         submitting={resuming}
         error={resumeError}
         onClose={handleResumeDialogClose}
         onSubmit={handleResumeSubmit}
         accessToken={token}
+      />
+      <PersonaObligationActionDialog
+        open={Boolean(obligationDialog)}
+        obligation={obligationDialog?.obligation ?? null}
+        action={obligationDialog?.action ?? 'resolve'}
+        submitting={Boolean(obligationDialog && obligationActionId === obligationDialog.obligation.id)}
+        error={obligationActionError}
+        onSubmit={handleObligationDialogSubmit}
+        onClose={handleObligationDialogClose}
+      />
+      <FictionPlanWizardDialog
+        open={planDialogOpen}
+        accessToken={token}
+        onClose={() => setPlanDialogOpen(false)}
+        onCreated={handlePlanCreated}
       />
     </Stack>
   );

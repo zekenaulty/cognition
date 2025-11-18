@@ -169,6 +169,7 @@ builder.Services.AddScoped<Cognition.Clients.Agents.IAgentService, Cognition.Cli
 builder.Services.AddScoped<Cognition.Clients.Retrieval.IRetrievalService, Cognition.Clients.Retrieval.RetrievalService>();
 builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
 builder.Services.AddScoped<IFictionBacklogScheduler, FictionBacklogScheduler>();
+builder.Services.AddScoped<IFictionPlanCreator, FictionPlanCreator>();
 builder.Services.AddSingleton<IPlannerAlertPublisher, OpsWebhookAlertPublisher>();
 
 builder.Services.AddEndpointsApiExplorer();

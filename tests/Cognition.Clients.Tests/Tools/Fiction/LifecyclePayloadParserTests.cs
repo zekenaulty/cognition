@@ -49,6 +49,8 @@ public class LifecyclePayloadParserTests
         characters.Should().HaveCount(2);
         characters.Select(c => c.Name).Should().BeEquivalentTo("Captain Mira", "Analyst Brek");
         characters.All(c => c.Track).Should().BeTrue();
+        characters.First().ContinuityHooks.Should().NotBeNull();
+        characters.First().ContinuityHooks!.Should().ContainSingle("Debt to Admiral Kerr");
     }
 
     [Fact]

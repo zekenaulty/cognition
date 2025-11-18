@@ -91,7 +91,8 @@ internal static class LifecyclePayloadParser
                 Importance: obj.Value<string>("importance") ?? obj.Value<string>("tier"),
                 Summary: obj.Value<string>("summary") ?? obj.Value<string>("bio"),
                 Notes: obj.Value<string>("notes") ?? obj.Value<string>("continuity"),
-                Metadata: BuildMetadata(obj));
+                Metadata: BuildMetadata(obj),
+                ContinuityHooks: ExtractContinuityHooks(obj));
 
             results.Add(descriptor);
         }
@@ -158,6 +159,24 @@ internal static class LifecyclePayloadParser
         {
             ["raw"] = obj.ToString(Formatting.None)
         };
+
+    private static IReadOnlyList<string>? ExtractContinuityHooks(JObject obj)
+    {
+        if (!obj.TryGetValue("continuityHooks", out var token) || token is not JArray hooksArray)
+        {
+            return null;
+        }
+
+        var hooks = hooksArray
+            .OfType<JToken>()
+            .Select(t => t?.ToString())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return hooks.Length == 0 ? null : hooks;
+    }
 
     private static JToken? ParseJson(string json)
     {

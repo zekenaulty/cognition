@@ -6,6 +6,12 @@ Objective
 - Define `IPlannerTool`, `PlannerBase`, and supporting contracts so planners are metadata-driven, testable, and compose cleanly with existing tool infrastructure.
 - Outline migration steps to refactor in-flight fiction planners onto the shared foundation without stalling feature work.
 
+## Definition of Done
+- Vision, Iterative, Chapter Architect, Scroll Refiner, Scene Weaver (and any fiction alpha planners) execute via `PlannerBase`, with scripted end-to-end tests covering backlog checkpoints, transcripts, and metadata regression.
+- Planner metadata/templates are catalogued in a single registry, and non-fiction planner candidates have a documented adoption matrix that calls out prerequisites, blockers, and owners.
+- Ops-facing dashboards + webhook routes surface planner health, backlog/resume drift, and SLA alerts sourced from the shared telemetry contract; staging demo proves alert fanout (Slack/PagerDuty) works.
+- Rollout collateral (`planning_the_planner_rollout_recipe.md`, onboarding notes, CI templates) reflects the finalized contracts and provides a checklist other teams can follow without direct pairing.
+
 Current Status (2025-10-26)
 
 - PlannerBase plus shared telemetry/transcript infrastructure are stable; vision, iterative, chapter architect, scroll refiner, and scene weaver planners now derive from the base class with seeded templates (`planner.fiction.vision`, `planner.fiction.iterative`, `planner.fiction.chapterArchitect`, `planner.fiction.scrollRefiner`, `planner.fiction.sceneWeaver`).

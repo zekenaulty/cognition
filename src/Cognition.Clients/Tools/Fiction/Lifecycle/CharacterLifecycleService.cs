@@ -186,11 +186,92 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
                 await CreatePersonaMemoryAsync(persona, descriptor, request, slug, entity.WorldBibleEntryId, cancellationToken).ConfigureAwait(false);
             }
 
+            await UpsertPersonaObligationsAsync(request, descriptor, entity, persona, cancellationToken).ConfigureAwait(false);
+
             _logger.LogInformation(
                 isNew ? "FictionCharacterPromoted plan={PlanId} slug={Slug} persona={PersonaId}" : "FictionCharacterUpdated plan={PlanId} slug={Slug} persona={PersonaId}",
                 request.PlanId,
                 slug,
                 entity.PersonaId);
+        }
+    }
+
+    private async Task UpsertPersonaObligationsAsync(
+        CharacterLifecycleRequest request,
+        CharacterLifecycleDescriptor descriptor,
+        FictionCharacter character,
+        Persona persona,
+        CancellationToken cancellationToken)
+    {
+        if (descriptor.ContinuityHooks is null || descriptor.ContinuityHooks.Count == 0)
+        {
+            return;
+        }
+
+        var normalized = descriptor.ContinuityHooks
+            .Select(hook => new
+            {
+                Hook = hook?.Trim(),
+                Slug = string.IsNullOrWhiteSpace(hook) ? null : NormalizeSlug(hook)
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Hook) && !string.IsNullOrWhiteSpace(x.Slug))
+            .ToList();
+
+        if (normalized.Count == 0)
+        {
+            return;
+        }
+
+        var slugs = normalized.Select(x => x.Slug!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var existing = await _db.FictionPersonaObligations
+            .Where(o => o.FictionPlanId == request.PlanId && o.PersonaId == persona.Id && slugs.Contains(o.ObligationSlug))
+            .ToDictionaryAsync(o => o.ObligationSlug, StringComparer.OrdinalIgnoreCase, cancellationToken)
+            .ConfigureAwait(false);
+
+        var now = DateTime.UtcNow;
+        foreach (var entry in normalized)
+        {
+            var backlogId = TryReadDescriptorMetadataString(descriptor.Metadata, "backlogItemId");
+            if (!existing.TryGetValue(entry.Slug!, out var obligation))
+            {
+                obligation = new FictionPersonaObligation
+                {
+                    Id = Guid.NewGuid(),
+                    FictionPlanId = request.PlanId,
+                    PersonaId = persona.Id,
+                    FictionCharacterId = character.Id,
+                    ObligationSlug = entry.Slug!,
+                    Title = entry.Hook!,
+                    Description = entry.Hook,
+                    Status = FictionPersonaObligationStatus.Open,
+                    SourcePhase = request.Source,
+                    SourcePlanPassId = descriptor.CreatedByPlanPassId ?? request.PlanPassId,
+                    SourceConversationId = request.ConversationId,
+                    BranchSlug = request.BranchSlug,
+                    SourceBacklogId = backlogId,
+                    MetadataJson = SerializeMetadata(BuildObligationMetadata(descriptor, entry.Hook!, character, request, backlogId)),
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now
+                };
+                _db.FictionPersonaObligations.Add(obligation);
+                existing[entry.Slug!] = obligation;
+            }
+            else
+            {
+                obligation.Status = FictionPersonaObligationStatus.Open;
+                obligation.Title = entry.Hook!;
+                obligation.Description = string.IsNullOrWhiteSpace(obligation.Description) ? entry.Hook : obligation.Description;
+                obligation.FictionCharacterId ??= character.Id;
+                obligation.SourcePhase ??= request.Source;
+                obligation.SourcePlanPassId ??= descriptor.CreatedByPlanPassId ?? request.PlanPassId;
+                obligation.SourceConversationId ??= request.ConversationId;
+                obligation.BranchSlug ??= request.BranchSlug;
+                obligation.SourceBacklogId ??= backlogId;
+                obligation.MetadataJson ??= SerializeMetadata(BuildObligationMetadata(descriptor, entry.Hook!, character, request, backlogId));
+                obligation.ResolvedAtUtc = null;
+                obligation.ResolvedByActor = null;
+                obligation.UpdatedAtUtc = now;
+            }
         }
     }
 
@@ -523,6 +604,73 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
         }
 
         return metadata;
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildObligationMetadata(
+        CharacterLifecycleDescriptor descriptor,
+        string hook,
+        FictionCharacter character,
+        CharacterLifecycleRequest request,
+        string? backlogId)
+    {
+        var metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["characterId"] = character.Id,
+            ["characterSlug"] = character.Slug,
+            ["hook"] = hook
+        };
+
+        if (descriptor.Metadata is not null && descriptor.Metadata.TryGetValue("raw", out var raw) && raw is not null)
+        {
+            metadata["raw"] = raw;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.BranchSlug))
+        {
+            metadata["branchSlug"] = request.BranchSlug;
+        }
+
+        if (request.BranchLineage is { Count: > 0 })
+        {
+            metadata["branchLineage"] = request.BranchLineage;
+        }
+
+        if (!string.IsNullOrWhiteSpace(backlogId))
+        {
+            metadata["sourceBacklogId"] = backlogId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Source))
+        {
+            metadata["sourcePhase"] = request.Source;
+        }
+
+        if (descriptor.CreatedByPlanPassId.HasValue || request.PlanPassId.HasValue)
+        {
+            metadata["planPassId"] = descriptor.CreatedByPlanPassId ?? request.PlanPassId;
+        }
+
+        return metadata;
+    }
+
+    private static string? TryReadDescriptorMetadataString(IReadOnlyDictionary<string, object?>? metadata, string key)
+    {
+        if (metadata is null || metadata.Count == 0)
+        {
+            return null;
+        }
+
+        if (!metadata.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string s when !string.IsNullOrWhiteSpace(s) => s,
+            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
+            _ => value.ToString()
+        };
     }
 
     private static IReadOnlyDictionary<string, object?>? BuildLoreMetadata(

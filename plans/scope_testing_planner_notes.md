@@ -1,5 +1,10 @@
 Cohesion checks (what lines up / what's missing)
 
+Definition of Done
+- Scope token path refactor plan + planner framework plan each have their DoD met, and this note reflects any residual risks or escalations discovered while verifying.
+- Unit testing expansion coverage includes the guardrails enumerated here (conversation fallback, ScopePath canonicalization, ToolDispatcher propagation, vector invariants) with deterministic fakes wired into CI.
+- Plans workflow discipline (snapshot + dated step notes) is applied to every major action referenced here, with completed artifacts filed under `plans/completed/`.
+
 Planner framework depends on scope-path work
 Your "Planning the Planner Framework" explicitly calls out finishing scope-path first, then skeleton + pilots; the scope-path plan's checklist is still open. So the global order of operations is: Scope Path -> PlannerBase -> Pilot migration -> Unit tests expansion. Lock that in as the backbone. 
 

@@ -14,6 +14,15 @@ export type FictionPlanSummary = {
   status: string;
 };
 
+export type FictionProjectSummary = {
+  id: string;
+  title: string;
+  logline?: string | null;
+  status: string;
+  planCount: number;
+  activePlanCount: number;
+};
+
 export type LoreFulfillmentLog = {
   requirementId: string;
   requirementSlug: string;
@@ -175,4 +184,56 @@ export type ResumeBacklogPayload = {
   modelId?: string | null;
   taskId: string;
   branchSlug?: string | null;
+};
+
+export type PersonaObligation = {
+  id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  sourcePhase?: string | null;
+  branchSlug?: string | null;
+  branchLineage?: string[] | null;
+  personaId: string;
+  personaName: string;
+  fictionCharacterId?: string | null;
+  characterSlug?: string | null;
+  sourceBacklogId?: string | null;
+  metadata?: any;
+  createdAtUtc: string;
+  updatedAtUtc?: string | null;
+  resolvedAtUtc?: string | null;
+};
+
+export type PersonaObligationListResponse = {
+  items: PersonaObligation[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+export type ResolvePersonaObligationPayload = {
+  notes?: string | null;
+  source?: string | null;
+  action?: 'resolve' | 'dismiss' | string | null;
+};
+
+export type CreateFictionPlanPayload = {
+  projectId?: string | null;
+  projectTitle?: string | null;
+  projectLogline?: string | null;
+  name: string;
+  description?: string | null;
+  branchSlug?: string | null;
+  personaId: string;
+  agentId?: string | null;
+};
+
+export type AgentSummary = {
+  id: string;
+  personaId: string;
+  clientProfileId?: string | null;
+  rolePlay: boolean;
+  prefix?: string | null;
+  suffix?: string | null;
 };

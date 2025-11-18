@@ -92,6 +92,52 @@ public class FictionPlanBacklogItemConfiguration : IEntityTypeConfiguration<Fict
     }
 }
 
+public class FictionPersonaObligationConfiguration : IEntityTypeConfiguration<FictionPersonaObligation>
+{
+    public void Configure(EntityTypeBuilder<FictionPersonaObligation> b)
+    {
+        b.ToTable("fiction_persona_obligations");
+        b.HasKey(x => x.Id).HasName("pk_fiction_persona_obligations");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.FictionPlanId).HasColumnName("fiction_plan_id");
+        b.Property(x => x.PersonaId).HasColumnName("persona_id");
+        b.Property(x => x.FictionCharacterId).HasColumnName("fiction_character_id");
+        b.Property(x => x.ObligationSlug).HasColumnName("obligation_slug").HasMaxLength(256);
+        b.Property(x => x.Title).HasColumnName("title").HasMaxLength(512);
+        b.Property(x => x.Description).HasColumnName("description").HasMaxLength(2048);
+        b.Property(x => x.Status).HasColumnName("status").HasConversion<string>();
+        b.Property(x => x.SourcePhase).HasColumnName("source_phase").HasMaxLength(64);
+        b.Property(x => x.SourceBacklogId).HasColumnName("source_backlog_id").HasMaxLength(128);
+        b.Property(x => x.SourcePlanPassId).HasColumnName("source_plan_pass_id");
+        b.Property(x => x.SourceConversationId).HasColumnName("source_conversation_id");
+        b.Property(x => x.BranchSlug).HasColumnName("branch_slug").HasMaxLength(128);
+        b.Property(x => x.MetadataJson).HasColumnName("metadata_json").HasColumnType("jsonb");
+        b.Property(x => x.ResolvedAtUtc).HasColumnName("resolved_at_utc");
+        b.Property(x => x.ResolvedByActor).HasColumnName("resolved_by_actor").HasMaxLength(256);
+        b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+        b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+        b.HasOne(x => x.FictionPlan)
+            .WithMany(p => p.PersonaObligations)
+            .HasForeignKey(x => x.FictionPlanId)
+            .HasConstraintName("fk_fiction_persona_obligations_plan");
+
+        b.HasOne(x => x.Persona)
+            .WithMany()
+            .HasForeignKey(x => x.PersonaId)
+            .HasConstraintName("fk_fiction_persona_obligations_persona");
+
+        b.HasOne(x => x.FictionCharacter)
+            .WithMany()
+            .HasForeignKey(x => x.FictionCharacterId)
+            .HasConstraintName("fk_fiction_persona_obligations_character");
+
+        b.HasIndex(x => new { x.FictionPlanId, x.PersonaId, x.ObligationSlug })
+            .IsUnique()
+            .HasDatabaseName("ux_fiction_persona_obligations_plan_persona_slug");
+    }
+}
+
 public class FictionCharacterConfiguration : IEntityTypeConfiguration<FictionCharacter>
 {
     public void Configure(EntityTypeBuilder<FictionCharacter> b)

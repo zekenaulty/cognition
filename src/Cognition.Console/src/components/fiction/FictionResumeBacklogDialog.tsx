@@ -21,6 +21,8 @@ type Props = {
   open: boolean;
   item: FictionBacklogItem | null;
   defaultBranch?: string;
+  defaultProviderId?: string | null;
+  defaultModelId?: string | null;
   submitting?: boolean;
   error?: string | null;
   accessToken?: string | null;
@@ -32,6 +34,8 @@ export function FictionResumeBacklogDialog({
   open,
   item,
   defaultBranch,
+  defaultProviderId,
+  defaultModelId,
   submitting = false,
   error,
   onClose,
@@ -82,6 +86,9 @@ export function FictionResumeBacklogDialog({
           if (item?.providerId && normalized.some(p => p.id === item.providerId)) {
             return item.providerId;
           }
+          if (defaultProviderId && normalized.some(p => p.id === defaultProviderId)) {
+            return defaultProviderId;
+          }
           return normalized[0]?.id ?? '';
         });
       })
@@ -100,7 +107,7 @@ export function FictionResumeBacklogDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, accessToken, item?.providerId]);
+  }, [open, accessToken, item?.providerId, defaultProviderId]);
 
   React.useEffect(() => {
     if (!open || !accessToken || !providerId) {
@@ -130,6 +137,9 @@ export function FictionResumeBacklogDialog({
           if (item?.modelId && normalized.some(m => m.id === item.modelId)) {
             return item.modelId;
           }
+          if (defaultModelId && normalized.some(m => m.id === defaultModelId)) {
+            return defaultModelId;
+          }
           return normalized[0]?.id ?? '';
         });
       })
@@ -148,7 +158,7 @@ export function FictionResumeBacklogDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, accessToken, providerId, item?.modelId]);
+  }, [open, accessToken, providerId, item?.modelId, defaultModelId]);
 
   const canSubmit =
     Boolean(item) &&

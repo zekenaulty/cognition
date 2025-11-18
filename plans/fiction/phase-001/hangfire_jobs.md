@@ -2,6 +2,11 @@
 
 _Source of truth for fiction Hangfire job bindings; referenced by phase runner step notes._
 
+## Definition of Done
+- Every runner listed below enqueues via `IFictionWeaverJobClient` with provider/model metadata, publishes progress events, and has regression tests or staging runs verifying Hangfire/jobclient wiring.
+- Scroll/scene jobs block on lore/prereq checks and record transcripts/metrics, and ChapterArchitect job graduates from 🛠 status with blueprint seed data/tests.
+- Ops dashboards show job status + retries per phase, and console/backlog views consume the same telemetry.
+
 | Phase Runner | Job Name | Responsibilities | Agent Conversation Strategy | Status |
 | --- | --- | --- | --- | --- |
 | VisionPlannerJob | `fiction:vision:{planId}` | Generate author summary, book goals, story plan; write to `FictionPlan` + transcripts | Create/use `agent_author` conversation; each LLM call records conversation IDs | âœ… wired via `FictionWeaverJobs.RunVisionPlannerAsync` |

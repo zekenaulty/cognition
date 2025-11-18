@@ -22,6 +22,7 @@ public class FictionPlan : BaseEntity
     public List<FictionWorldBible> WorldBibles { get; set; } = [];
     public List<FictionCharacter> Characters { get; set; } = [];
     public List<FictionLoreRequirement> LoreRequirements { get; set; } = [];
+    public List<FictionPersonaObligation> PersonaObligations { get; set; } = [];
     public Guid? CurrentConversationPlanId { get; set; }
     public ConversationPlan? CurrentConversationPlan { get; set; }
 }

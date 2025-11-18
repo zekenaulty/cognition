@@ -7,6 +7,19 @@
 - Treat characters and lore as first-class data: planning phases must declare them up front, mint personas/agents immediately, and keep canon in sync.
 - Keep author personas, tool prompts, and world bible data under configuration so the experience is reproducible across jobs, consoles, and assistants.
 
+## Definition of Done
+- Vision ? scene pipelines execute end-to-end via Hangfire with backlog-driven resumes, lore automation, and persona obligations, and console operators can run/resume without DB edits.
+- Character + lore lifecycle rules enforce persona/world-bible minting, scroll/scene gating, and automated memory/lore updates with audit trails.
+- Backlog + lore telemetry plus console widgets expose branch status, SLA drift, and fulfillment/audit logs so Ops/Admins can monitor health.
+- Documentation across this plan + companion lifecycle/runner docs is updated to reflect the shipped behavior and any deferred follow-ups.
+
+## Status (2025-11-18)
+- Backlog resumes, persona obligations, and action logs are now callable from the console; the alpha loop no longer requires DB edits for day-to-day use.
+- Plan creation wizard + backlog alert cards now ship inside Fiction Projects/Telemetry, so alpha authors can kick off plans and see stalled work without CLI/seed hacks.
+- Server-side plan creation is now wired: `/api/fiction/projects` exposes project creation/listing and `POST /api/fiction/plans` seeds backlog + conversation metadata via a dedicated factory, so the console can build the wizard without CLI hacks.
+- Persona memories/world notes now surface inline with backlog obligations, resume dialogs fall back to provider/model defaults, and Planner Telemetry reuses the backlog alerts + dialogs so Ops can triage stale backlog, lore, and obligations without context-switching.
+- Next steps are explicitly user-facing: ship the plan creation wizard, backlog widgets that call out blocked work, and guided flows for fulfilling lore/closing obligations so authors can finish a chapter without help.
+
 ## Current Architecture Snapshot (Nov 2025)
 - **Phase runners** live in `src/Cognition.Clients/Tools/Fiction/Weaver/` (VisionPlannerRunner, IterativePlannerRunner, ChapterArchitectRunner, ScrollRefinerRunner, SceneWeaverRunner, WorldBibleManagerRunner) and inherit from `FictionPhaseRunnerBase` for logging + validations.
 - **Job orchestration** is handled by `FictionWeaverJobs`/`FictionWeaverJobClient` (Hangfire). They lock checkpoints (`FictionPlanCheckpoint`), publish `FictionPhaseProgressed` events, and write transcripts via `FictionPlanTranscript`.
@@ -21,7 +34,8 @@
 - Author persona context now flows through an `AuthorPersonaRegistry`; scroll/scene prompts load persona summaries + memories/world notes and automatically append new `PersonaMemory` entries after each pass.
 - FictionWeaver jobs enforce backlog metadata contracts (conversationPlanId, provider/model IDs, backlog task IDs) and fail early if clients omit them, keeping Hangfire + UI in sync. The API exposes backlog listings + resume endpoints so console resumes can hydrate `ConversationTask` metadata and trigger `FictionBacklogScheduler` without manual DB edits.
 - Console UX now surfaces branch-aware rosters, blocked-vs-ready lore dashboards, and author persona memories/world notes, with lore fulfillment actions invoking the new API in real time.
-- Remaining gaps sit in tooling (console still needs backlog/action cards + alerts), world-bible provenance wiring, and ~~surfacing of tracked characters/lore inside author dashboards~~ **live roster/telemetry visibility shipped via new API + console views** (branch-aware rosters, lore fulfillment dashboards, author persona memory panes).
+- Remaining gaps sit in tooling (console still needs backlog/action cards + alerts), world-bible provenance wiring, and ~~surfacing of tracked characters/lore inside author dashboards~~ **live roster/telemetry visibility shipped via new API + console views** (branch-aware rosters, lore fulfillment dashboards, author persona memory panes). Lore fulfillment automation now triggers Hangfire jobs once requirements sit Blocked beyond SLA, writes world-bible entries, and logs workflow audits so scroll/scene runners can proceed without manual intervention.
+- Planner Telemetry now mirrors the author-facing backlog wizard experience: backlog cards include persona context highlights, lore automation history exposes auto-runs/SLA breaches via chips, and the shared resume/obligation dialogs can be launched directly from telemetry alerts.
 
 ## Success Criteria
 - Vision/iterative planners emit detailed `characters[]` and `lore[]` payloads, flag importance, and automatically spin up personas/agents/memories when needed.

@@ -3,6 +3,7 @@ import {
   Alert,
   Box,
   Button,
+  ButtonGroup,
   Chip,
   LinearProgress,
   List,
@@ -17,7 +18,22 @@ import {
   Typography
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import { BacklogActionLog, FictionBacklogItem } from '../../types/fiction';
+import CheckIcon from '@mui/icons-material/Check';
+import HighlightOffIcon from '@mui/icons-material/HighlightOff';
+import {
+  AuthorPersonaContext,
+  BacklogActionLog,
+  FictionBacklogItem,
+  PersonaObligation
+} from '../../types/fiction';
+import {
+  buildActionContextLine,
+  buildActionMetadataLine,
+  formatObligationStatus,
+  formatResolutionNoteText,
+  isObligationOpen,
+  summarizeObligationMetadata
+} from './backlogUtils';
 
 type Props = {
   items?: FictionBacklogItem[] | null;
@@ -30,6 +46,13 @@ type Props = {
   actionLogs?: BacklogActionLog[] | null;
   actionLoading?: boolean;
   actionError?: string | null;
+  obligations?: PersonaObligation[] | null;
+  obligationsLoading?: boolean;
+  obligationsError?: string | null;
+  onResolveObligation?: (obligation: PersonaObligation, action: 'resolve' | 'dismiss') => void;
+  obligationActionId?: string | null;
+  obligationActionError?: string | null;
+  personaContext?: AuthorPersonaContext | null;
 };
 
 export function FictionBacklogPanel({
@@ -42,7 +65,14 @@ export function FictionBacklogPanel({
   isAdmin = false,
   actionLogs = [],
   actionLoading = false,
-  actionError = null
+  actionError = null,
+  obligations = [],
+  obligationsLoading = false,
+  obligationsError = null,
+  onResolveObligation,
+  obligationActionId = null,
+  obligationActionError = null,
+  personaContext = null
 }: Props) {
   if (loading) {
     return <LinearProgress />;
@@ -53,6 +83,25 @@ export function FictionBacklogPanel({
   }
 
   const backlogItems = items ?? [];
+  const obligationsByBacklogId = React.useMemo(() => {
+    if (!obligations || obligations.length === 0) {
+      return new Map<string, PersonaObligation[]>();
+    }
+    const map = new Map<string, PersonaObligation[]>();
+    obligations.forEach(entry => {
+      if (!entry.sourceBacklogId) {
+        return;
+      }
+      const key = entry.sourceBacklogId.toLowerCase();
+      const bucket = map.get(key);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        map.set(key, [entry]);
+      }
+    });
+    return map;
+  }, [obligations]);
 
   const renderTable = () => {
     if (backlogItems.length === 0) {
@@ -76,29 +125,36 @@ export function FictionBacklogPanel({
         </TableHead>
         <TableBody>
           {backlogItems.map(item => {
-            const canResume =
-              Boolean(onResume) &&
-              isAdmin &&
-              item.status !== 'Complete' &&
-              item.taskId &&
-              item.conversationPlanId &&
-              item.conversationId;
-
-            const resumeButton = canResume ? (
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<PlayArrowIcon />}
-                disabled={resumingId === item.id}
-                onClick={() => onResume?.(item)}
+            const resumeBlockedReason = getResumeBlockedReason(item, {
+              isAdmin,
+              hasResumeHandler: Boolean(onResume)
+            });
+            const isBusy = resumingId === item.id;
+            const resumeDisabled = Boolean(resumeBlockedReason) || isBusy;
+            const backlogKey = (item.backlogId ?? '').toLowerCase();
+            const linkedObligations = backlogKey ? obligationsByBacklogId.get(backlogKey) ?? [] : [];
+            const openLinkedObligations = linkedObligations.filter(entry => isObligationOpen(entry.status));
+            const resumeButton = (
+              <Tooltip
+                title={
+                  resumeBlockedReason
+                    ? resumeBlockedReason
+                    : isBusy
+                      ? 'Resume request in flight...'
+                      : 'Resume backlog item'
+                }
+                placement="left"
+                disableHoverListener={!resumeBlockedReason && !isBusy}
               >
-                Resume
-              </Button>
-            ) : (
-              <Tooltip title="Resume requires conversation + task metadata." placement="left">
                 <span>
-                  <Button variant="outlined" size="small" disabled startIcon={<PlayArrowIcon />}>
-                    Resume
+                  <Button
+                    variant={resumeBlockedReason ? 'outlined' : 'contained'}
+                    size="small"
+                    startIcon={<PlayArrowIcon />}
+                    disabled={resumeDisabled}
+                    onClick={() => onResume?.(item)}
+                  >
+                    {isBusy ? 'Resuming...' : 'Resume'}
                   </Button>
                 </span>
               </Tooltip>
@@ -118,6 +174,31 @@ export function FictionBacklogPanel({
                       <Typography variant="caption" color="text.secondary">
                         Branch: {item.branchSlug}
                       </Typography>
+                    )}
+                    {linkedObligations.length > 0 && (
+                      <Stack spacing={0.25}>
+                        <Chip
+                          size="small"
+                          color={openLinkedObligations.length > 0 ? 'warning' : 'default'}
+                          label={`${linkedObligations.length} linked obligation${linkedObligations.length === 1 ? '' : 's'}`}
+                        />
+                        {openLinkedObligations.length > 0 && (
+                          <Typography variant="caption" sx={{ color: 'warning.main' }}>
+                            {openLinkedObligations.length} open obligation
+                            {openLinkedObligations.length === 1 ? '' : 's'} tied to this backlog item.
+                          </Typography>
+                        )}
+                        {openLinkedObligations.length > 0 && onResolveObligation && (
+                          <Button
+                            size="small"
+                            variant="text"
+                            sx={{ alignSelf: 'flex-start', px: 0 }}
+                            onClick={() => onResolveObligation(openLinkedObligations[0], 'resolve')}
+                          >
+                            Review obligation
+                          </Button>
+                        )}
+                      </Stack>
                     )}
                   </Stack>
                 </TableCell>
@@ -153,7 +234,7 @@ export function FictionBacklogPanel({
                 </TableCell>
                 {isAdmin && onResume ? (
                   <TableCell align="right">
-                    {canResume ? resumeButton : <>{resumeButton}</>}
+                    {resumeButton}
                   </TableCell>
                 ) : null}
               </TableRow>
@@ -187,8 +268,11 @@ export function FictionBacklogPanel({
 
     return (
       <List dense sx={{ mt: 1 }}>
-        {actionLogs.map(log => (
-          <ListItem key={`${log.backlogId}-${log.timestampUtc}-${log.action}`}>
+        {actionLogs.map(log => {
+          const metadataLine = buildActionMetadataLine(log);
+          const contextLine = buildActionContextLine(log);
+          return (
+            <ListItem key={`${log.backlogId}-${log.timestampUtc}-${log.action}`}>
             <Stack spacing={0.25}>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                 {log.action} - {log.backlogId}
@@ -198,18 +282,183 @@ export function FictionBacklogPanel({
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Branch {log.branch}
-                {log.status ? ` - Status ${log.status}` : ''}
+                {log.status ? ` • Status ${formatStatus(log.status)}` : ''}
               </Typography>
+              {log.description && (
+                <Typography variant="caption" color="text.secondary">
+                  {log.description}
+                </Typography>
+              )}
+              {metadataLine && (
+                <Typography variant="caption" color="text.secondary">
+                  {metadataLine}
+                </Typography>
+              )}
+              {contextLine && (
+                <Typography variant="caption" color="text.secondary">
+                  {contextLine}
+                </Typography>
+              )}
             </Stack>
-          </ListItem>
-        ))}
+            </ListItem>
+          );
+        })}
       </List>
+    );
+  };
+
+  const renderObligations = () => {
+    if (obligationsLoading) {
+      return <LinearProgress sx={{ mt: 1 }} />;
+    }
+
+    if (obligationsError) {
+      return (
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          {obligationsError}
+        </Alert>
+      );
+    }
+
+    const obligationList = obligations ?? [];
+    if (obligationList.length === 0) {
+      return (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          No persona obligations recorded for this plan.
+        </Typography>
+      );
+    }
+
+    const openObligations = obligationList.filter(obligation => {
+      const status = (obligation.status ?? '').toLowerCase();
+      return status !== 'resolved' && status !== 'dismissed';
+    });
+    const displayedObligations = obligationList.slice(0, 6);
+
+    return (
+      <>
+        {openObligations.length > 0 && (
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            {openObligations.length} persona obligation{openObligations.length === 1 ? '' : 's'} awaiting attention.
+          </Alert>
+        )}
+        <List dense sx={{ mt: 1 }}>
+          {displayedObligations.map(obligation => {
+            const actionable = typeof onResolveObligation === 'function' && isObligationOpen(obligation.status);
+            const busy = obligationActionId === obligation.id;
+            const metadataSummary = summarizeObligationMetadata(obligation.metadata);
+            const personaHighlight =
+              personaContext && personaContext.personaId === obligation.personaId ? personaContext : null;
+            const memoryHighlights = personaHighlight?.memories?.slice(0, 2) ?? [];
+            const worldNoteHighlights = personaHighlight?.worldNotes?.slice(0, 2) ?? [];
+            return (
+              <ListItem
+                key={obligation.id}
+                secondaryAction={
+                  actionable ? (
+                    <ButtonGroup size="small" orientation="vertical">
+                      <Button
+                        variant="contained"
+                        color="success"
+                        startIcon={<CheckIcon />}
+                        disabled={busy}
+                        onClick={() => onResolveObligation?.(obligation, 'resolve')}
+                      >
+                        Resolve
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="warning"
+                        startIcon={<HighlightOffIcon />}
+                        disabled={busy}
+                        onClick={() => onResolveObligation?.(obligation, 'dismiss')}
+                      >
+                        Dismiss
+                      </Button>
+                    </ButtonGroup>
+                  ) : null
+                }
+              >
+                <Stack spacing={0.25}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {obligation.title}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Persona {obligation.personaName}
+                    {obligation.branchSlug ? ` • Branch ${obligation.branchSlug}` : ''}
+                    {obligation.sourcePhase ? ` • Source ${obligation.sourcePhase}` : ''}
+                  </Typography>
+                  {obligation.branchLineage && obligation.branchLineage.length > 1 && (
+                    <Typography variant="caption" color="text.secondary">
+                      {obligation.branchLineage.join(' → ')}
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.secondary">
+                    Status {formatObligationStatus(obligation.status)} • Created {formatRelative(obligation.createdAtUtc)}
+                    {obligation.resolvedAtUtc ? ` • Resolved ${formatRelative(obligation.resolvedAtUtc)}` : ''}
+                  </Typography>
+                  {obligation.sourceBacklogId && (
+                    <Typography variant="caption" color="text.secondary">
+                      Source Backlog: {obligation.sourceBacklogId}
+                    </Typography>
+                  )}
+                  {obligation.description && (
+                    <Typography variant="body2" color="text.secondary">
+                      {obligation.description}
+                    </Typography>
+                  )}
+                  {metadataSummary.otherEntries.length > 0 && (
+                    <Typography variant="caption" color="text.secondary">
+                      {metadataSummary.otherEntries.join(' â€¢ ')}
+                    </Typography>
+                  )}
+                  {metadataSummary.resolutionNotes.map(note => (
+                    <Typography key={note.id} variant="caption" color="text.secondary">
+                      {formatResolutionNote(note)}
+                    </Typography>
+                  ))}
+                  {personaHighlight && (memoryHighlights.length > 0 || worldNoteHighlights.length > 0) && (
+                    <Stack spacing={0.25}>
+                      {memoryHighlights.map((entry, index) => (
+                        <Typography key={`memory-${obligation.id}-${index}`} variant="caption" color="primary">
+                          Memory{memoryHighlights.length > 1 ? ` ${index + 1}` : ''}: {entry}
+                        </Typography>
+                      ))}
+                      {worldNoteHighlights.map((entry, index) => (
+                        <Typography key={`world-${obligation.id}-${index}`} variant="caption" color="primary">
+                          World Note{worldNoteHighlights.length > 1 ? ` ${index + 1}` : ''}: {entry}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  )}
+                </Stack>
+              </ListItem>
+            );
+          })}
+        </List>
+        {obligationActionError && (
+          <Alert severity="error" sx={{ mt: 1 }}>
+            {obligationActionError}
+          </Alert>
+        )}
+        {obligationList.length > displayedObligations.length && (
+          <Typography variant="caption" color="text.secondary">
+            Showing {displayedObligations.length} of {obligationList.length} obligations.
+          </Typography>
+        )}
+      </>
     );
   };
 
   return (
     <Stack spacing={3}>
       <Box sx={{ overflowX: 'auto' }}>{renderTable()}</Box>
+      <Box>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          Persona Obligations
+        </Typography>
+        {renderObligations()}
+      </Box>
       <Box>
         <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
           Action Log
@@ -270,3 +519,54 @@ function formatRelative(value?: string | null) {
   const days = Math.floor(hours / 24);
   return `${days}d ${hours % 24}h ${ahead ? 'from now' : 'ago'}`;
 }
+
+function formatResolutionNote(note: ReturnType<typeof summarizeObligationMetadata>['resolutionNotes'][number]) {
+  return formatResolutionNoteText(note, formatRelative);
+}
+
+function getResumeBlockedReason(
+  item: FictionBacklogItem,
+  options: { isAdmin: boolean; hasResumeHandler: boolean }
+): string | null {
+  if (!options.hasResumeHandler) {
+    return 'Resume action is not available for this plan.';
+  }
+
+  if (!options.isAdmin) {
+    return 'Administrator access required to resume backlog items.';
+  }
+
+  if (isBacklogCompleteStatus(item.status)) {
+    return 'Backlog item already complete.';
+  }
+
+  const missingFields: string[] = [];
+  if (!item.conversationPlanId) {
+    missingFields.push('conversation plan');
+  }
+  if (!item.conversationId) {
+    missingFields.push('conversation');
+  }
+  if (!item.taskId) {
+    missingFields.push('task');
+  }
+  if (!item.agentId) {
+    missingFields.push('agent');
+  }
+
+  if (missingFields.length > 0) {
+    return `Missing ${missingFields.join(', ')} metadata`;
+  }
+
+  return null;
+}
+
+function isBacklogCompleteStatus(status?: string | number | null) {
+  if (status === null || status === undefined) {
+    return false;
+  }
+
+  const normalized = status.toString().trim().toLowerCase();
+  return normalized === 'complete' || normalized === 'completed' || normalized === 'done' || normalized === '2';
+}
+

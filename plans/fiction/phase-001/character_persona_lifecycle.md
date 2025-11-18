@@ -5,6 +5,11 @@
 - Automatically mint and maintain `Persona`, `Agent`, `PersonaMemory`, and `FictionWorldBible*` rows the moment a character or lore pillar is declared important.
 - Guarantee writing personas reuse the correct author persona memories and carry their history into every LLM call.
 
+## Definition of Done
+- When `track=true`, personas/agents/world-bible entries + memories are created or updated automatically with provenance, and deterministic tests cover the lifecycle.
+- Lore requirements block scroll/scene execution until fulfilled, with automated fulfillment tooling producing audit trails and console UX exposing status/history.
+- Author personas always hydrate with latest memories/world notes; new prose appends memories + obligations, and dashboards display branch-aware roster + obligation metadata.
+
 ## Current Pain
 - World bible entries are created, but they are not linked to personas/agents; provenance is missing.
 - ~~Vision planner output is now structured, yet world-bible manager and consoles still need to display the roster so authors can track promotions.~~ Fiction plan roster API + console dashboards now expose tracked characters/lore with provenance; remaining gap is keeping world-bible lineage metadata in sync per branch.

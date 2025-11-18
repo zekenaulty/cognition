@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Api.Controllers;
+using Cognition.Api.Infrastructure.Planning;
 using Cognition.Clients.Tools.Fiction.Authoring;
 using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Fiction.Weaver;
@@ -41,6 +43,122 @@ public class FictionPlansControllerTests
     }
 
     [Fact]
+    public async Task Plan_workflow_resume_lore_and_obligation_resolution()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var project = new FictionProject { Id = Guid.NewGuid(), Title = "Saga" };
+        var plan = new FictionPlan { Id = Guid.NewGuid(), FictionProjectId = project.Id, FictionProject = project, Name = "Saga Draft", PrimaryBranchSlug = "main" };
+        var backlog = new FictionPlanBacklogItem
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            BacklogId = "outline-core-conflicts",
+            Description = "Outline conflicts",
+            Status = FictionPlanBacklogStatus.InProgress
+        };
+        var conversationPlan = new ConversationPlan
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = Guid.NewGuid(),
+            PersonaId = Guid.NewGuid(),
+            Title = "Backlog Conversation",
+            CreatedAt = DateTime.UtcNow,
+            Tasks = new List<ConversationTask>()
+        };
+        var task = new ConversationTask
+        {
+            Id = Guid.NewGuid(),
+            ConversationPlanId = conversationPlan.Id,
+            StepNumber = 1,
+            ToolName = "fiction.weaver.visionPlanner",
+            BacklogItemId = backlog.BacklogId,
+            Status = "Failed",
+            ArgsJson = "{}",
+            CreatedAt = DateTime.UtcNow
+        };
+        conversationPlan.Tasks.Add(task);
+        plan.CurrentConversationPlanId = conversationPlan.Id;
+
+        var requirement = new FictionLoreRequirement
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            RequirementSlug = "fracture-gate",
+            Title = "Fracture Gate Protocol",
+            Status = FictionLoreRequirementStatus.Planned
+        };
+
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Architect", Role = "planner" };
+        var obligation = new FictionPersonaObligation
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            ObligationSlug = "story-hook",
+            Title = "Document fracture fallout",
+            Description = "Capture consequences before next scene.",
+            SourceBacklogId = backlog.BacklogId,
+            Status = FictionPersonaObligationStatus.Open
+        };
+
+        db.FictionProjects.Add(project);
+        db.FictionPlans.Add(plan);
+        db.FictionPlanBacklogItems.Add(backlog);
+        db.ConversationPlans.Add(conversationPlan);
+        db.FictionLoreRequirements.Add(requirement);
+        db.Personas.Add(persona);
+        db.FictionPersonaObligations.Add(obligation);
+        await db.SaveChangesAsync();
+
+        var lifecycle = Substitute.For<ICharacterLifecycleService>();
+        lifecycle.ProcessAsync(Arg.Any<CharacterLifecycleRequest>(), Arg.Any<CancellationToken>())
+            .Returns(CharacterLifecycleResult.Empty);
+
+        var controller = CreateController(db, lifecycle, registry: null, backlogScheduler: Substitute.For<IFictionBacklogScheduler>());
+
+        var resumeRequest = new FictionPlansController.ResumeBacklogRequest(
+            conversationPlan.ConversationId,
+            conversationPlan.Id,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            task.Id,
+            "main");
+        await controller.ResumeBacklog(plan.Id, backlog.BacklogId, resumeRequest, CancellationToken.None);
+
+        var fulfillRequest = new FictionPlansController.FulfillLoreRequirementRequest(
+            WorldBibleEntryId: null,
+            Notes: "Automated via test",
+            ConversationId: Guid.NewGuid(),
+            PlanPassId: Guid.NewGuid(),
+            BranchSlug: "main",
+            BranchLineage: new[] { "main" },
+            Source: "test");
+        await controller.FulfillLoreRequirement(plan.Id, requirement.Id, fulfillRequest, CancellationToken.None);
+
+        var obligationRequest = new FictionPlansController.ResolvePersonaObligationRequest(
+            Notes: "Captured fallout in lore notes.",
+            Source: "console",
+            Action: "resolve");
+        await controller.ResolvePersonaObligation(plan.Id, obligation.Id, obligationRequest, CancellationToken.None);
+
+        (await db.FictionPlanBacklogItems.SingleAsync(b => b.Id == backlog.Id)).Status.Should().Be(FictionPlanBacklogStatus.Pending);
+        (await db.FictionLoreRequirements.SingleAsync(r => r.Id == requirement.Id)).Status.Should().Be(FictionLoreRequirementStatus.Ready);
+        var updatedObligation = await db.FictionPersonaObligations.SingleAsync(o => o.Id == obligation.Id);
+        updatedObligation.Status.Should().Be(FictionPersonaObligationStatus.Resolved);
+        updatedObligation.ResolvedAtUtc.Should().NotBeNull();
+        updatedObligation.MetadataJson.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
     public async Task GetPlans_ReturnsOrderedPlans()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()
@@ -65,6 +183,73 @@ public class FictionPlansControllerTests
         plans!.Should().HaveCount(2);
         plans![0].Name.Should().Be("Plan A");
         plans![1].Name.Should().Be("Plan B");
+    }
+
+    [Fact]
+    public async Task CreatePlan_ReturnsSummary_OnSuccess()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var project = new FictionProject { Id = Guid.NewGuid(), Title = "Atlas" };
+        var plan = new FictionPlan { Id = Guid.NewGuid(), FictionProjectId = project.Id, FictionProject = project, Name = "New Saga" };
+        var creator = Substitute.For<IFictionPlanCreator>();
+        creator.CreatePlanAsync(Arg.Any<FictionPlanCreationOptions>(), Arg.Any<CancellationToken>())
+            .Returns(plan);
+
+        var controller = CreateController(db, planCreator: creator);
+        var request = new FictionPlansController.CreateFictionPlanRequest(
+            ProjectId: project.Id,
+            ProjectTitle: null,
+            ProjectLogline: null,
+            Name: "New Saga",
+            Description: null,
+            BranchSlug: "main",
+            PersonaId: Guid.NewGuid(),
+            AgentId: Guid.NewGuid());
+
+        var response = await controller.CreatePlan(request, CancellationToken.None);
+
+        var created = response.Result as CreatedAtActionResult;
+        created.Should().NotBeNull();
+        var summary = created!.Value as FictionPlansController.FictionPlanSummary;
+        summary.Should().NotBeNull();
+        summary!.Id.Should().Be(plan.Id);
+        summary.Name.Should().Be("New Saga");
+        summary.ProjectTitle.Should().Be("Atlas");
+        await creator.Received().CreatePlanAsync(Arg.Any<FictionPlanCreationOptions>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreatePlan_ReturnsBadRequest_OnValidationFailure()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var creator = Substitute.For<IFictionPlanCreator>();
+        creator.CreatePlanAsync(Arg.Any<FictionPlanCreationOptions>(), Arg.Any<CancellationToken>())
+            .Returns<Task<FictionPlan>>(_ => throw new ValidationException("invalid"));
+
+        var controller = CreateController(db, planCreator: creator);
+        var request = new FictionPlansController.CreateFictionPlanRequest(
+            ProjectId: Guid.NewGuid(),
+            ProjectTitle: null,
+            ProjectLogline: null,
+            Name: "Saga",
+            Description: null,
+            BranchSlug: null,
+            PersonaId: Guid.NewGuid(),
+            AgentId: null);
+
+        var response = await controller.CreatePlan(request, CancellationToken.None);
+
+        var badRequest = response.Result as BadRequestObjectResult;
+        badRequest.Should().NotBeNull();
+        badRequest!.Value.Should().Be("invalid");
     }
 
     [Fact]
@@ -347,6 +532,71 @@ public class FictionPlansControllerTests
     }
 
     [Fact]
+    public async Task ResumeBacklog_requires_agent_and_provider_metadata()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Metadata Plan", PrimaryBranchSlug = "main" };
+        var backlog = new FictionPlanBacklogItem
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            BacklogId = "outline-core-conflicts",
+            Description = "Outline conflicts",
+            Status = FictionPlanBacklogStatus.InProgress
+        };
+        var conversationPlan = new ConversationPlan
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = Guid.NewGuid(),
+            PersonaId = Guid.NewGuid(),
+            Title = "Backlog Conversation",
+            CreatedAt = DateTime.UtcNow,
+            Tasks = new List<ConversationTask>()
+        };
+        var task = new ConversationTask
+        {
+            Id = Guid.NewGuid(),
+            ConversationPlanId = conversationPlan.Id,
+            StepNumber = 1,
+            ToolName = "fiction.weaver.visionPlanner",
+            BacklogItemId = backlog.BacklogId,
+            Status = "Failed",
+            ArgsJson = "{}",
+            CreatedAt = DateTime.UtcNow
+        };
+        conversationPlan.Tasks.Add(task);
+        plan.CurrentConversationPlanId = conversationPlan.Id;
+
+        db.FictionPlans.Add(plan);
+        db.FictionPlanBacklogItems.Add(backlog);
+        db.ConversationPlans.Add(conversationPlan);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, Substitute.For<ICharacterLifecycleService>(), registry: null, backlogScheduler: Substitute.For<IFictionBacklogScheduler>());
+        var baseRequest = new FictionPlansController.ResumeBacklogRequest(
+            conversationPlan.ConversationId,
+            conversationPlan.Id,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            task.Id,
+            "draft");
+
+        var missingAgentRequest = baseRequest with { AgentId = Guid.Empty };
+        var missingAgentResult = await controller.ResumeBacklog(plan.Id, backlog.BacklogId, missingAgentRequest, CancellationToken.None);
+        missingAgentResult.Result.Should().BeOfType<BadRequestObjectResult>();
+
+        var missingProviderRequest = baseRequest with { ProviderId = Guid.Empty, AgentId = Guid.NewGuid() };
+        var missingProviderResult = await controller.ResumeBacklog(plan.Id, backlog.BacklogId, missingProviderRequest, CancellationToken.None);
+        missingProviderResult.Result.Should().BeOfType<BadRequestObjectResult>();
+    }
+
+    [Fact]
     public async Task FulfillLoreRequirement_updates_status_and_emits_telemetry()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()
@@ -551,7 +801,7 @@ public class FictionPlansControllerTests
         var items = ok!.Value as IReadOnlyList<FictionPlansController.BacklogActionLogResponse>;
         items.Should().NotBeNull();
         items!.Should().HaveCount(1);
-        var log = items[0];
+        var log = items![0];
         log.Action.Should().Be("resume");
         log.BacklogId.Should().Be("outline-alpha");
         log.Actor.Should().Be("Tester");
@@ -593,6 +843,22 @@ public class FictionPlansControllerTests
 
         await controller.FulfillLoreRequirement(plan.Id, requirement.Id, fulfillRequest, CancellationToken.None);
 
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = fulfillRequest.ConversationId ?? Guid.Empty,
+            Kind = "fiction.lore.fulfillment",
+            Payload = JObject.FromObject(new
+            {
+                planId = plan.Id,
+                requirementId = requirement.Id,
+                requirementSlug = requirement.RequirementSlug,
+                branch = "main",
+                worldBibleEntryId = fulfillRequest.WorldBibleEntryId
+            })
+        });
+        await db.SaveChangesAsync();
+
         var history = await controller.GetLoreHistory(plan.Id, CancellationToken.None);
 
         var ok = history.Result as OkObjectResult;
@@ -600,19 +866,253 @@ public class FictionPlansControllerTests
         var payload = ok!.Value as IReadOnlyList<FictionPlansController.LoreFulfillmentLogResponse>;
         payload.Should().NotBeNull();
         payload!.Should().ContainSingle(entry => entry.RequirementSlug == "stellar-key");
-        payload[0].Source.Should().Be("console");
-        payload[0].WorldBibleEntryId.Should().Be(fulfillRequest.WorldBibleEntryId);
+        var historyEntry = payload![0];
+        historyEntry.Source.Should().Be("api");
+        historyEntry.WorldBibleEntryId.Should().Be(fulfillRequest.WorldBibleEntryId);
     }
+
+    [Fact]
+    public async Task GetPersonaObligations_returns_entries_for_plan()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Obligation Plan" };
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Archivist Dera", Role = "Keeper" };
+        var character = new FictionCharacter
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            Slug = "archivist-dera",
+            DisplayName = "Archivist Dera"
+        };
+        var obligation = new FictionPersonaObligation
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            FictionCharacterId = character.Id,
+            FictionCharacter = character,
+            ObligationSlug = "protect-codex",
+            Title = "Protect the Whisperglass Codex",
+            Description = "Keep the codex hidden.",
+            Status = FictionPersonaObligationStatus.Open,
+            SourcePhase = "vision",
+            BranchSlug = "main",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-1),
+            UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-10)
+        };
+
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.FictionCharacters.Add(character);
+        db.FictionPersonaObligations.Add(obligation);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var result = await controller.GetPersonaObligations(plan.Id, cancellationToken: CancellationToken.None);
+
+        var ok = result.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+        var payload = ok!.Value as FictionPlansController.PersonaObligationListResponse;
+        payload.Should().NotBeNull();
+        payload!.Items.Should().ContainSingle();
+        payload.TotalCount.Should().Be(1);
+        var obligationResponse = payload.Items[0];
+        obligationResponse.Title.Should().Be("Protect the Whisperglass Codex");
+        obligationResponse.Status.Should().Be(FictionPersonaObligationStatus.Open);
+        obligationResponse.PersonaName.Should().Be("Archivist Dera");
+    }
+
+    [Fact]
+    public async Task GetPersonaObligations_supports_pagination()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Pagination Plan" };
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Planner", Role = "Support" };
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        for (var i = 0; i < 3; i++)
+        {
+            db.FictionPersonaObligations.Add(new FictionPersonaObligation
+            {
+                Id = Guid.NewGuid(),
+                FictionPlanId = plan.Id,
+                FictionPlan = plan,
+                PersonaId = persona.Id,
+                Persona = persona,
+                ObligationSlug = $"obligation-{i}",
+                Title = $"Obligation {i}",
+                Status = FictionPersonaObligationStatus.Open,
+                CreatedAtUtc = DateTime.UtcNow.AddMinutes(-i),
+                UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-i)
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var result = await controller.GetPersonaObligations(plan.Id, page: 2, pageSize: 1, cancellationToken: CancellationToken.None);
+
+        var ok = result.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+        var payload = ok!.Value as FictionPlansController.PersonaObligationListResponse;
+        payload.Should().NotBeNull();
+        payload!.TotalCount.Should().Be(3);
+        payload.Page.Should().Be(2);
+        payload.PageSize.Should().Be(1);
+        payload.Items.Should().ContainSingle();
+        payload.Items[0].Title.Should().Be("Obligation 1");
+    }
+
+    [Fact]
+    public async Task ResolvePersonaObligation_marks_resolved_and_logs_event()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Resolve Plan" };
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Captain Mira", Role = "Lead" };
+        var character = new FictionCharacter
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            Slug = "captain-mira",
+            DisplayName = "Captain Mira"
+        };
+        var obligation = new FictionPersonaObligation
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            FictionCharacterId = character.Id,
+            FictionCharacter = character,
+            ObligationSlug = "repay-debt",
+            Title = "Repay Admiral Kerr",
+            Status = FictionPersonaObligationStatus.Open,
+            SourcePhase = "vision",
+            BranchSlug = "main",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-2),
+            UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
+        };
+
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.FictionCharacters.Add(character);
+        db.FictionPersonaObligations.Add(obligation);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var request = new FictionPlansController.ResolvePersonaObligationRequest("Debt cleared.", "console", null);
+        var response = await controller.ResolvePersonaObligation(plan.Id, obligation.Id, request, CancellationToken.None);
+
+        var ok = response.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+        var updated = await db.FictionPersonaObligations.SingleAsync(o => o.Id == obligation.Id);
+        updated.Status.Should().Be(FictionPersonaObligationStatus.Resolved);
+        updated.ResolvedAtUtc.Should().NotBeNull();
+        updated.MetadataJson.Should().NotBeNull();
+        var metadata = JsonDocument.Parse(updated.MetadataJson!);
+        metadata.RootElement.GetProperty("resolutionNotes").EnumerateArray().First().GetProperty("note").GetString().Should().Be("Debt cleared.");
+        metadata.RootElement.GetProperty("resolvedSource").GetString().Should().Be("console");
+
+        var workflow = await db.WorkflowEvents.SingleAsync();
+        workflow.Kind.Should().Be("fiction.persona.obligation");
+        workflow.Payload.Value<string>("action").Should().Be("resolved");
+        workflow.Payload["obligationId"]?.ToString().Should().Be(obligation.Id.ToString());
+    }
+
+    [Fact]
+    public async Task ResolvePersonaObligation_allows_dismiss_action()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Dismiss Plan" };
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Analyst Brek", Role = "Support" };
+        var character = new FictionCharacter
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            Slug = "analyst-brek",
+            DisplayName = "Analyst Brek"
+        };
+        var obligation = new FictionPersonaObligation
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            FictionCharacterId = character.Id,
+            FictionCharacter = character,
+            ObligationSlug = "investigate-signal",
+            Title = "Investigate rogue signal",
+            Status = FictionPersonaObligationStatus.Open,
+            SourcePhase = "vision",
+            BranchSlug = "main",
+            SourceBacklogId = "draft-scout-report",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-3),
+            UpdatedAtUtc = DateTime.UtcNow.AddHours(-3)
+        };
+
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.FictionCharacters.Add(character);
+        db.FictionPersonaObligations.Add(obligation);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var request = new FictionPlansController.ResolvePersonaObligationRequest("Dismissed due to scope change.", "console", "dismiss");
+        var response = await controller.ResolvePersonaObligation(plan.Id, obligation.Id, request, CancellationToken.None);
+
+        var ok = response.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+
+        var updated = await db.FictionPersonaObligations.SingleAsync(o => o.Id == obligation.Id);
+        updated.Status.Should().Be(FictionPersonaObligationStatus.Dismissed);
+        updated.ResolvedAtUtc.Should().NotBeNull();
+        updated.SourceBacklogId.Should().Be("draft-scout-report");
+
+        var workflow = await db.WorkflowEvents.SingleAsync();
+        workflow.Payload.Value<string>("action").Should().Be("dismissed");
+        workflow.Payload.Value<string>("sourceBacklogId").Should().Be("draft-scout-report");
+    }
+
     private static FictionPlansController CreateController(
         CognitionDbContext db,
         ICharacterLifecycleService? lifecycle = null,
         IAuthorPersonaRegistry? registry = null,
-        IFictionBacklogScheduler? backlogScheduler = null)
+        IFictionBacklogScheduler? backlogScheduler = null,
+        IFictionPlanCreator? planCreator = null)
         => new FictionPlansController(
             db,
             lifecycle ?? Substitute.For<ICharacterLifecycleService>(),
             registry ?? Substitute.For<IAuthorPersonaRegistry>(),
-            backlogScheduler ?? Substitute.For<IFictionBacklogScheduler>());
+            backlogScheduler ?? Substitute.For<IFictionBacklogScheduler>(),
+            planCreator ?? Substitute.For<IFictionPlanCreator>());
 }
 
 internal sealed class FictionPlansTestDbContext : CognitionDbContext
@@ -632,11 +1132,14 @@ internal sealed class FictionPlansTestDbContext : CognitionDbContext
             typeof(FictionLoreRequirement),
             typeof(FictionWorldBible),
             typeof(FictionWorldBibleEntry),
+            typeof(FictionPersonaObligation),
             typeof(Persona),
             typeof(Agent),
             typeof(FictionPlanBacklogItem),
             typeof(ConversationPlan),
             typeof(ConversationTask),
+            typeof(Conversation),
+            typeof(ConversationParticipant),
             typeof(WorkflowEvent)
         };
 
@@ -654,5 +1157,7 @@ internal sealed class FictionPlansTestDbContext : CognitionDbContext
         modelBuilder.Entity<Persona>().Ignore(p => p.NarrativeThemes);
         modelBuilder.Entity<Persona>().Ignore(p => p.DomainExpertise);
         modelBuilder.Entity<Persona>().Ignore(p => p.KnownPersonas);
+        modelBuilder.Entity<FictionPlan>().Ignore(p => p.PersonaObligations);
+        modelBuilder.Entity<Conversation>().Ignore(c => c.Metadata);
     }
 }

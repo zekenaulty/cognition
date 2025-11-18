@@ -1,22 +1,25 @@
-Prompt for next session (2025-11-16)
+Prompt for next session (2025-11-18)
 ------------------------------------
 
+Definition of Done
+- Backlog guardrails flag/auto-resume stale items per SLA with provider/model validation enforced server + console side, and telemetry proves the flows generate alerts.
+- Persona obligations exist end-to-end (model, API, scheduler, console actions with audit notes) and at least one staging scenario exercises resolve/dismiss.
+- Console workflow alerts + action feeds call out backlog/lore/obligation drift without relying on external dashboards, with regression tests covering resume → scheduler → lore job loops.
+
 Status recap
-- Lore fulfillment is no longer a database chore: `/api/fiction/plans/{id}/lore/{requirementId}/fulfill` records branch-aware provenance, emits lifecycle telemetry, and the console roster + lore summary cards update in real time.
-- Backlog and resumes are first-class citizens: `/api/fiction/plans/{id}/backlog` + `/resume` hydrate `ConversationTask` metadata, reset `FictionPlanBacklog` state, and hand control back to `FictionBacklogScheduler` with enforced provider/model/task IDs.
-- Branch-aware rosters, blocked-lore dashboards, and author persona memory panes are live in both Fiction Projects and Planner Telemetry, giving admins a full picture of canon health per branch.
-- Author personas now have end-to-end visibility: registry + prompt hydration were already in place, and the console surfaces persona summaries, latest memories, and world notes so obligations stay transparent.
-- Deterministic tests cover lineage propagation, fulfillment flows, and the backlog metadata contract so regressions in provenance or resume handling get caught immediately.
+- Lore fulfillment automation is live: the scheduler now queues Hangfire lore jobs when requirements linger in `Blocked`, the runner writes world-bible entries + marks requirements Ready, and API/console surfaces show fulfillment history automatically.
+- Backlog resumes remain metadata-safe: `/api/fiction/plans/{id}/backlog` + `/resume` enforce provider/model/task IDs, console backlog panels include resume controls plus action logs, and telemetry/workflow events stay in sync.
+- Branch-aware rosters, lore summaries, and author persona panes continue to reflect canon health in real time; lore history now appears directly in the roster so admins can see who fulfilled what and when.
+- Deterministic tests cover lore automation (scheduler ➝ job ➝ world bible entry) alongside the existing backlog contract/resume flows, keeping Hangfire + API behavior anchored.
 
 Next targets
-1. **Automate lore fulfillment + audit history:** Drive world-bible prompts/tooling when requirements are marked Blocked, persist fulfillment timelines, and expose “who/when/how” audits in both API and console (`plans/fiction/phase-001/plan-first-draft.md`, `character_persona_lifecycle.md`).
-2. **Console backlog actions + notifications:** Wire the new backlog/resume API into UI controls, add action logs/alerts, and ensure console resumes collect provider/model metadata before hitting Hangfire.
-3. **Author persona obligations:** Layer obligation tagging/change history onto the persona panes, add Ops alerts for persona drift, and thread obligations back into backlog items so follow-ups remain visible.
-4. **Telemetry + drift monitoring:** Publish backlog vs `FictionPhaseProgressed` drift, resume-success/timeout counters, and lore-fulfillment metrics to Ops dashboards; hook telemetry events back to console actions for auditing.
-5. **Regression suite expansion:** Add deterministic tests for backlog resumes (API -> scheduler -> Hangfire), lore fulfillment history, and persona obligation workflows before moving toward Milestone D feature unlocks.
+1. **Backlog guardrails + stale policies:** auto-resume or escalate when backlog items sit `InProgress` past SLA, enforce provider/model expectations during `/resume`, and surface branch dependency chains (blocked scenes, persona obligations) in the console.
+2. **Persona obligation loop:** introduce an obligation model tied to personas/backlog items, emit obligations when planners flag continuity hooks, and add UI actions to resolve obligations with audit logs.
+3. **Console workflow alerts:** add backlog/lore alert banners, notification hooks for automation events, and richer action feeds so admins can spot drift without opening telemetry dashboards.
+4. **Regression expansion:** build an end-to-end fixture for resume ➝ scheduler ➝ Hangfire ➝ lore job, plus persona obligation/regression tests before moving toward Milestone D unlocks.
 
 Getting started
-- Re-read `plans/fiction/phase-001/plan-first-draft.md` and `plans/fiction/phase-001/character_persona_lifecycle.md` to align on the refreshed priorities/checklists.
-- Catalog outstanding backlog items via the new `/api/fiction/plans/{id}/backlog` endpoint and decide which ones should be surfaced or auto-resumed in the console.
-- Sketch automation for world-bible fulfillment + persona obligations so design and telemetry requirements are clear before implementation.
-- Check `plans/hot_targeted_todo.md` for metadata/backlog TODOs that now unblock after the recent API/console work.
+- Re-read `plans/fiction/phase-001/plan-first-draft.md` + `character_persona_lifecycle.md` for the updated automation notes and open checklist items.
+- Inventory stale backlog items via `/api/fiction/plans/{id}/backlog`; decide which should auto-resume vs alert, and document provider/model expectations per phase for the upcoming `/resume` validator enhancements.
+- Sketch the persona obligation schema and console UX so obligation + guardrail work can progress in parallel.
+- Check `plans/hot_targeted_todo.md` for backlog/metadata tasks that now unblock with lore automation landed.

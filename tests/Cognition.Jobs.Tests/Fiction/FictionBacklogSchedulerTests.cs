@@ -6,8 +6,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Agents;
+using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
+using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Jobs;
+using Newtonsoft.Json.Linq;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -168,6 +172,191 @@ public class FictionBacklogSchedulerTests
             modelId,
             "main",
             Arg.Is<IReadOnlyDictionary<string, string>>(md => string.Equals(md["backlogItemId"], "draft-scene", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public async Task ScheduleAsync_queues_lore_fulfillment_when_blocked_beyond_sla()
+    {
+        await using var db = CreateDbContext();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Lore Plan",
+            PrimaryBranchSlug = "main"
+        };
+        db.FictionPlans.Add(plan);
+        db.FictionLoreRequirements.Add(new FictionLoreRequirement
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            RequirementSlug = "stellar-key",
+            Title = "Stellar Key",
+            Status = FictionLoreRequirementStatus.Blocked,
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-3),
+            UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
+        });
+        await db.SaveChangesAsync();
+
+        var jobClient = Substitute.For<IFictionWeaverJobClient>();
+        var scheduler = new FictionBacklogScheduler(db, jobClient, NullLogger<FictionBacklogScheduler>.Instance);
+
+        var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var metadata = new Dictionary<string, string>
+        {
+            ["providerId"] = providerId.ToString(),
+            ["modelId"] = modelId.ToString()
+        };
+
+        var context = new FictionPhaseExecutionContext(
+            plan.Id,
+            agentId,
+            conversationId,
+            "main",
+            Metadata: metadata);
+
+        await scheduler.ScheduleAsync(
+            plan,
+            FictionPhase.VisionPlanner,
+            FictionPhaseResult.Success(FictionPhase.VisionPlanner),
+            context,
+            CancellationToken.None);
+
+        jobClient.Received(1).EnqueueLoreFulfillment(
+            plan.Id,
+            Arg.Any<Guid>(),
+            agentId,
+            conversationId,
+            providerId,
+            modelId,
+            "main",
+            Arg.Any<IReadOnlyDictionary<string, string>>());
+
+        var requirement = await db.FictionLoreRequirements.SingleAsync();
+        requirement.MetadataJson.Should().Contain("autoFulfillmentRequestedUtc");
+    }
+
+    [Fact]
+    public async Task ScheduleAsync_auto_resumes_stale_inprogress_items_and_logs_action()
+    {
+        await using var db = CreateDbContext();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Auto Resume Plan",
+            PrimaryBranchSlug = "main"
+        };
+
+        var persona = new Persona
+        {
+            Id = Guid.NewGuid(),
+            Name = "Author",
+            Role = "writer",
+            Voice = "steady"
+        };
+
+        var agent = new Agent
+        {
+            Id = Guid.NewGuid(),
+            PersonaId = persona.Id,
+            Persona = persona,
+            RolePlay = false
+        };
+
+        var conversation = new Conversation
+        {
+            Id = Guid.NewGuid(),
+            AgentId = agent.Id,
+            Agent = agent,
+            Title = "Backlog Conversation"
+        };
+
+        var conversationPlan = new ConversationPlan
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversation.Id,
+            Conversation = conversation,
+            PersonaId = persona.Id,
+            Persona = persona,
+            Title = "Resume Tasks"
+        };
+
+        plan.CurrentConversationPlanId = conversationPlan.Id;
+
+        var backlogItem = new FictionPlanBacklogItem
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            BacklogId = "draft-scene-42",
+            Description = "Draft the final scene",
+            Status = FictionPlanBacklogStatus.InProgress,
+            Outputs = new[] { "scene-draft" },
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-4),
+            UpdatedAtUtc = DateTime.UtcNow.AddHours(-3),
+            InProgressAtUtc = DateTime.UtcNow.AddHours(-3)
+        };
+
+        var conversationTask = new ConversationTask
+        {
+            Id = Guid.NewGuid(),
+            ConversationPlanId = conversationPlan.Id,
+            ConversationPlan = conversationPlan,
+            StepNumber = 1,
+            Thought = "Run scene weaver",
+            ToolName = "fiction.scene.weaver",
+            ArgsJson = "{}",
+            Status = "Running",
+            BacklogItemId = backlogItem.BacklogId,
+            Error = "timeout",
+            Observation = "stalled"
+        };
+
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.Agents.Add(agent);
+        db.Conversations.Add(conversation);
+        db.ConversationPlans.Add(conversationPlan);
+        db.ConversationTasks.Add(conversationTask);
+        db.FictionPlanBacklogItems.Add(backlogItem);
+        await db.SaveChangesAsync();
+
+        var jobClient = Substitute.For<IFictionWeaverJobClient>();
+        var scheduler = new FictionBacklogScheduler(db, jobClient, NullLogger<FictionBacklogScheduler>.Instance);
+
+        var providerId = Guid.NewGuid();
+        var metadata = new Dictionary<string, string>
+        {
+            ["providerId"] = providerId.ToString()
+        };
+
+        var context = new FictionPhaseExecutionContext(
+            plan.Id,
+            agent.Id,
+            conversation.Id,
+            "main",
+            Metadata: metadata);
+
+        await scheduler.ScheduleAsync(
+            plan,
+            FictionPhase.SceneWeaver,
+            FictionPhaseResult.Success(FictionPhase.SceneWeaver),
+            context,
+            CancellationToken.None);
+
+        var updatedTask = await db.ConversationTasks.SingleAsync(t => t.Id == conversationTask.Id);
+        updatedTask.Status.Should().Be("Pending");
+        updatedTask.Error.Should().BeNull();
+        updatedTask.Observation.Should().BeNull();
+
+        var actionEvent = await db.WorkflowEvents.SingleAsync();
+        actionEvent.Kind.Should().Be("fiction.backlog.action");
+        actionEvent.Payload.Value<string>("action").Should().Be("auto-resume");
+        actionEvent.Payload.Value<string>("backlogId").Should().Be(backlogItem.BacklogId);
+        actionEvent.Payload.Value<string>("source").Should().Be("automation");
     }
 
     [Fact]
@@ -346,7 +535,14 @@ public class FictionBacklogSchedulerTests
                 typeof(FictionChapterSection),
                 typeof(FictionChapterScene),
                 typeof(FictionWorldBible),
-                typeof(FictionPlanPass)
+                typeof(FictionPlanPass),
+                typeof(FictionLoreRequirement),
+                typeof(Persona),
+                typeof(Agent),
+                typeof(Conversation),
+                typeof(ConversationPlan),
+                typeof(ConversationTask),
+                typeof(WorkflowEvent)
             };
 
             foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
@@ -372,6 +568,23 @@ public class FictionBacklogSchedulerTests
             modelBuilder.Entity<FictionChapterSection>().Ignore(x => x.Metadata);
             modelBuilder.Entity<FictionChapterScene>().Ignore(x => x.Metadata);
             modelBuilder.Entity<FictionPlanPass>().Ignore(x => x.Metadata);
+            modelBuilder.Entity<Persona>().Ignore(x => x.OutboundLinks);
+            modelBuilder.Entity<Persona>().Ignore(x => x.InboundLinks);
+            modelBuilder.Entity<Persona>().Ignore(x => x.KnownPersonas);
+            modelBuilder.Entity<Persona>().Ignore(x => x.SignatureTraits);
+            modelBuilder.Entity<Persona>().Ignore(x => x.NarrativeThemes);
+            modelBuilder.Entity<Persona>().Ignore(x => x.DomainExpertise);
+            modelBuilder.Entity<Agent>().Ignore(x => x.ClientProfile);
+            modelBuilder.Entity<Agent>().Ignore(x => x.ToolBindings);
+            modelBuilder.Entity<Agent>().Ignore(x => x.State);
+            modelBuilder.Entity<Conversation>().Ignore(x => x.Participants);
+            modelBuilder.Entity<Conversation>().Ignore(x => x.Messages);
+            modelBuilder.Entity<Conversation>().Ignore(x => x.Summaries);
+            modelBuilder.Entity<Conversation>().Ignore(x => x.Metadata);
+            modelBuilder.Entity<ConversationPlan>().Ignore(x => x.Tasks);
+            modelBuilder.Entity<ConversationPlan>().Ignore(x => x.Conversation);
+            modelBuilder.Entity<ConversationPlan>().Ignore(x => x.Persona);
+            modelBuilder.Entity<ConversationTask>().Ignore(x => x.ConversationPlan);
 
             var stringArrayConverter = new ValueConverter<string[]?, string?>(
                 v => v == null ? null : JsonSerializer.Serialize(v, JsonSerializerOptions.Default),

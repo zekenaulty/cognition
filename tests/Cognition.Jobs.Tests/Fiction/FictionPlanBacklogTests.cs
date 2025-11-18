@@ -189,6 +189,59 @@ public class FictionPlanBacklogTests
     }
 
     [Fact]
+    public async Task LoreFulfillmentJob_creates_world_bible_entry_and_marks_requirement_ready()
+    {
+        await using var db = CreateDbContext();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Lore Automation Plan",
+            PrimaryBranchSlug = "main"
+        };
+        db.FictionPlans.Add(plan);
+
+        var requirement = new FictionLoreRequirement
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            RequirementSlug = "stellar-key",
+            Title = "Stellar Key",
+            Status = FictionLoreRequirementStatus.Blocked,
+            Description = "Ancient artifact binding the two branches.",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-3),
+            UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
+        };
+        db.FictionLoreRequirements.Add(requirement);
+        await db.SaveChangesAsync();
+
+        var jobs = CreateJobs(db, enableWorkflowLogging: true);
+
+        await jobs.RunLoreFulfillmentAsync(
+            plan.Id,
+            requirement.Id,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "main",
+            metadata: null,
+            cancellationToken: CancellationToken.None);
+
+        var updated = await db.FictionLoreRequirements.SingleAsync(r => r.Id == requirement.Id);
+        updated.Status.Should().Be(FictionLoreRequirementStatus.Ready);
+        updated.WorldBibleEntryId.Should().NotBeNull();
+        updated.MetadataJson.Should().Contain("autoFulfillmentCompletedUtc");
+
+        var entry = await db.FictionWorldBibleEntries.SingleAsync(e => e.Id == updated.WorldBibleEntryId);
+        entry.EntryName.Should().Be("Stellar Key");
+        entry.Content.Summary.Should().Contain("Ancient artifact");
+
+        db.WorkflowEvents.Should().HaveCount(1);
+        db.WorkflowEvents.Single().Kind.Should().Be("fiction.lore.fulfillment");
+    }
+
+    [Fact]
     public async Task VisionPlanner_CreatesConversationTasksForBacklog()
     {
         await using var db = CreateDbContext();
@@ -457,10 +510,16 @@ public class FictionPlanBacklogTests
     }
 
     private static FictionWeaverJobs CreateJobs(CognitionDbContext db, params IFictionPhaseRunner[] runners)
+        => CreateJobsInternal(db, false, runners);
+
+    private static FictionWeaverJobs CreateJobs(CognitionDbContext db, bool enableWorkflowLogging, params IFictionPhaseRunner[] runners)
+        => CreateJobsInternal(db, enableWorkflowLogging, runners);
+
+    private static FictionWeaverJobs CreateJobsInternal(CognitionDbContext db, bool enableWorkflowLogging, params IFictionPhaseRunner[] runners)
     {
         var bus = Substitute.For<IBus>();
         var notifier = Substitute.For<IPlanProgressNotifier>();
-        var workflowLogger = new WorkflowEventLogger(db, enabled: false);
+        var workflowLogger = new WorkflowEventLogger(db, enableWorkflowLogging);
         var scheduler = Substitute.For<IFictionBacklogScheduler>();
         var logger = NullLogger<FictionWeaverJobs>.Instance;
         var scopePaths = ScopePathBuilderTestHelper.CreateBuilder();
@@ -502,7 +561,11 @@ public class FictionPlanBacklogTests
                 typeof(ConversationTask),
                 typeof(Conversation),
                 typeof(Persona),
-                typeof(Agent)
+                typeof(Agent),
+                typeof(FictionLoreRequirement),
+                typeof(FictionWorldBible),
+                typeof(FictionWorldBibleEntry),
+                typeof(WorkflowEvent)
             };
 
             foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())

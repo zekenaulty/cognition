@@ -7,9 +7,11 @@ using System.Threading.Tasks;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 
 namespace Cognition.Jobs;
 
@@ -17,6 +19,8 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
 {
     private const string DefaultBranch = "main";
     private const string DefaultWorldBibleDomain = "core";
+    private static readonly TimeSpan BacklogResumeThreshold = TimeSpan.FromMinutes(60);
+    private static readonly TimeSpan LoreFulfillmentThreshold = TimeSpan.FromMinutes(45);
 
     private readonly CognitionDbContext _db;
     private readonly IFictionWeaverJobClient _jobs;
@@ -48,6 +52,18 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        if (!TryResolveProvider(context.Metadata, out var providerId))
+        {
+            _logger.LogWarning("Unable to resolve providerId for plan {PlanId}, skipping scheduling.", plan.Id);
+            return;
+        }
+
+        var modelId = TryResolveModel(context.Metadata);
+        var branch = ResolveBranchSlug(plan, context);
+
+        await AutoResumeStaleBacklogItemsAsync(plan, branch, backlogItems, context, cancellationToken).ConfigureAwait(false);
+        await AutoQueueLoreFulfillmentAsync(plan, branch, context, providerId, modelId, cancellationToken).ConfigureAwait(false);
+
         if (backlogItems.Count == 0)
         {
             return;
@@ -65,15 +81,6 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             _logger.LogWarning("Backlog item {BacklogId} for plan {PlanId} does not map to a runnable phase.", readyItem.BacklogId, plan.Id);
             return;
         }
-
-        if (!TryResolveProvider(context.Metadata, out var providerId))
-        {
-            _logger.LogWarning("Unable to resolve providerId for backlog item {BacklogId} on plan {PlanId}.", readyItem.BacklogId, plan.Id);
-            return;
-        }
-
-        var modelId = TryResolveModel(context.Metadata);
-        var branch = ResolveBranchSlug(plan, context);
 
         await EnsureTargetsAsync(plan.Id, readyItem, backlogItems, branch, cancellationToken).ConfigureAwait(false);
 
@@ -179,6 +186,160 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             case FictionPhase.IterativePlanner:
                 await EnsureIterationMetadataAsync(planId, item, cancellationToken).ConfigureAwait(false);
                 break;
+        }
+    }
+
+    private async Task AutoResumeStaleBacklogItemsAsync(
+        FictionPlan plan,
+        string branch,
+        IReadOnlyList<FictionPlanBacklogItem> backlogItems,
+        FictionPhaseExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        if (backlogItems.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var cutoff = now - BacklogResumeThreshold;
+        var staleItems = backlogItems
+            .Where(item => item.Status == FictionPlanBacklogStatus.InProgress)
+            .Where(item =>
+            {
+                var stamp = item.UpdatedAtUtc ?? item.InProgressAtUtc;
+                if (!stamp.HasValue)
+                {
+                    stamp = item.CreatedAtUtc;
+                }
+
+                return stamp.Value <= cutoff;
+            })
+            .ToList();
+
+        if (staleItems.Count == 0)
+        {
+            return;
+        }
+
+        var backlogIdSet = new HashSet<string>(
+            staleItems
+                .Select(item => item.BacklogId)
+                .Where(id => !string.IsNullOrWhiteSpace(id)),
+            StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, List<ConversationTask>>? taskLookup = null;
+        if (plan.CurrentConversationPlanId.HasValue && backlogIdSet.Count > 0)
+        {
+            var tasks = await _db.ConversationTasks
+                .Where(t => t.ConversationPlanId == plan.CurrentConversationPlanId.Value && t.BacklogItemId != null)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            taskLookup = tasks
+                .Where(t => t.BacklogItemId is not null && backlogIdSet.Contains(t.BacklogItemId))
+                .GroupBy(t => t.BacklogItemId!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        }
+
+        foreach (var item in staleItems)
+        {
+            var previousTimestamp = item.UpdatedAtUtc ?? item.InProgressAtUtc ?? item.CreatedAtUtc;
+            var age = now - previousTimestamp;
+
+            item.Status = FictionPlanBacklogStatus.Pending;
+            item.InProgressAtUtc = null;
+            item.CompletedAtUtc = null;
+            item.UpdatedAtUtc = now;
+
+            if (taskLookup is not null &&
+                !string.IsNullOrWhiteSpace(item.BacklogId) &&
+                taskLookup.TryGetValue(item.BacklogId, out var tasks))
+            {
+                foreach (var task in tasks)
+                {
+                    task.Status = "Pending";
+                    task.Error = null;
+                    task.Observation = null;
+                    task.UpdatedAtUtc = now;
+                }
+            }
+
+            LogAutoResumeBacklogAction(plan, item, branch, context, age);
+            _logger.LogWarning(
+                "Backlog item {BacklogId} for plan {PlanId} was in progress for {Age:g}. Automatically reset to pending.",
+                item.BacklogId,
+                plan.Id,
+                age);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task AutoQueueLoreFulfillmentAsync(
+        FictionPlan plan,
+        string branch,
+        FictionPhaseExecutionContext context,
+        Guid providerId,
+        Guid? modelId,
+        CancellationToken cancellationToken)
+    {
+        if (context.ConversationId == Guid.Empty)
+        {
+            return;
+        }
+
+        var cutoff = DateTime.UtcNow - LoreFulfillmentThreshold;
+        var requirements = await _db.FictionLoreRequirements
+            .Where(r => r.FictionPlanId == plan.Id && r.Status == FictionLoreRequirementStatus.Blocked && r.WorldBibleEntryId == null)
+            .Where(r => (r.UpdatedAtUtc ?? r.CreatedAtUtc) <= cutoff)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (requirements.Count == 0)
+        {
+            return;
+        }
+
+        var metadataUpdated = false;
+        foreach (var requirement in requirements)
+        {
+            var metadata = LoreRequirementMetadata.FromJson(requirement.MetadataJson);
+            if (metadata.AutoFulfillmentRequestedUtc.HasValue)
+            {
+                continue;
+            }
+
+            metadata.AutoFulfillmentRequestedUtc = DateTime.UtcNow;
+            requirement.MetadataJson = metadata.Serialize();
+            metadataUpdated = true;
+
+            var jobMetadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["autoFulfillment"] = "true",
+                ["requirementId"] = requirement.Id.ToString(),
+                ["branchSlug"] = branch
+            };
+
+            _jobs.EnqueueLoreFulfillment(
+                plan.Id,
+                requirement.Id,
+                context.AgentId,
+                context.ConversationId,
+                providerId,
+                modelId,
+                branch,
+                jobMetadata);
+
+            _logger.LogInformation(
+                "Queued lore fulfillment automation for requirement {RequirementId} on plan {PlanId}.",
+                requirement.Id,
+                plan.Id);
+        }
+
+        if (metadataUpdated)
+        {
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -619,6 +780,48 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         {
             metadata[key] = value;
         }
+    }
+
+    private void LogAutoResumeBacklogAction(
+        FictionPlan plan,
+        FictionPlanBacklogItem backlog,
+        string branch,
+        FictionPhaseExecutionContext context,
+        TimeSpan age)
+    {
+        if (context.ConversationId == Guid.Empty)
+        {
+            return;
+        }
+
+        var planName = string.IsNullOrWhiteSpace(plan.Name) ? $"Plan {plan.Id:N}" : plan.Name;
+        var payload = new JObject
+        {
+            ["planId"] = plan.Id,
+            ["planName"] = planName,
+            ["backlogId"] = backlog.BacklogId,
+            ["description"] = backlog.Description,
+            ["action"] = "auto-resume",
+            ["branch"] = branch,
+            ["status"] = backlog.Status.ToString(),
+            ["source"] = "automation",
+            ["conversationId"] = context.ConversationId,
+            ["agentId"] = context.AgentId,
+            ["age"] = age.TotalSeconds
+        };
+
+        if (plan.CurrentConversationPlanId.HasValue)
+        {
+            payload["conversationPlanId"] = plan.CurrentConversationPlanId.Value;
+        }
+
+        _db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = context.ConversationId,
+            Kind = "fiction.backlog.action",
+            Payload = payload,
+            Timestamp = DateTime.UtcNow
+        });
     }
 
     private static string ResolveBranchSlug(FictionPlan plan, FictionPhaseExecutionContext context)

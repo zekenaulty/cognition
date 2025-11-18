@@ -1,5 +1,16 @@
 # Hot Targeted TODO
 
+## Status
+- Backlog resume + persona obligation UX now ships inside the console, so alpha users can actually unblock plans without CLI/editor help. API guardrails + controller regression prove the loop works.
+- Tooling debt remains, but it’s scoped: the open gaps are all forward-looking user flows (persona resolution modal polish, telemetry cards, planner orchestration for actual authors) rather than admin-only dashboards.
+- Treat the remaining tasks below as “what’s left before an author can reliably run a plan” instead of another engineering checklist.
+
+## Definition of Done
+- Alpha fiction backlog loop (API + console) resumes tasks with normalized status gates, required provider/model metadata, and action log/obligation UX fixes verified in staging.
+- ScopePath enforcement + cosine scoring + sandbox/foundry orchestration deliverables from linked plans are merged and demoed in staging without open P0 bugs.
+- Planner health dashboards expose SLA/backlog/resume metrics and Ops routing hooks (Slack/PagerDuty) with alerting playbooks captured in `planning_the_planner` artifacts.
+- Non-fiction planner inventory + migration matrix exist in `planning_the_planner` docs, and legacy runner scaffolding/CI gaps identified here are either removed or tracked as scoped follow-ups.
+
 ## Cross-Plan Backbone
 
 - **Alpha focus:** work remains seed-data only; no production rollout choreography is required (plans/planning_the_planner.md:8-13).
@@ -9,18 +20,22 @@
 
 - None currently. Re-evaluate after the non-fiction inventory surfaces migration gaps or CI debt.
 
+## Latest Findings
+
+- Fiction backlog console review uncovered critical gaps: Resume ignores required agent/provider metadata and lets `complete`/numeric statuses re-run; persona obligation lists hide open items beyond the first six, omit descriptions/notes, and allow resolve/dismiss without audit logs; action log rows drop the description/context payload. Address these inside `FictionBacklogPanel` plus the backing API before calling the alpha loop “done.”
+
 ## Priority Action Stack
 
-1. Automate the fiction backlog console loop: wire the new `/api/fiction/plans/{id}/backlog` + `/resume` endpoints into UI controls, add action logging/alerts, and ensure resumes collect provider/model metadata before Hangfire enqueues (plans/fiction/phase-001/plan-first-draft.md, plans/_next_session_prompt.md).
-2. Normalize ScopePath usage post-review: audit for lingering `ScopePath.Parse`/direct constructors, add analyzer baselines, and document the factory-only contract (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
-3. Replace the in-memory vector score with cosine similarity so offline tests mirror OpenSearch behavior (tests/Cognition.Data.Vectors.Tests/*, plans/alpha_security_observability_hardening.md).
-4. Land the sandbox + foundry missing pieces: implement the OOPS worker, queue/approval Hangfire jobs, and exercise HGTF end-to-end with integration tests (docs/specs/human_gated_tool_foundry.md, plans/alpha_security_observability_hardening.md).
-5. Wire structured correlation logging now that planner quotas and authorization policies are in place (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
-6. Catalogue non-fiction planners and adjacent orchestrators that should adopt PlannerBase; capture template prerequisites and scope expectations (plans/planning_the_planner.md:184, plans/_next_session_prompt.md, plans/scope_token_path_refactor.md:25-45).
-7. Draft the non-fiction migration matrix and seed checklist updates in plans/planning_the_planner_rollout_recipe.md to cover non-fiction specifics (plans/planning_the_planner_rollout_recipe.md, plans/planning_the_planner.md:189-195).
-8. Identify and remove remaining legacy runner scaffolding/tests that duplicate PlannerBase functionality; update CI/lint gates to enforce scripted pipeline coverage (plans/_next_session_prompt.md, plans/planning_the_planner.md:185).
-9. Prototype multi-channel Ops routing (Slack, PagerDuty) using the validated webhook payloads; define acknowledgement semantics and Ops override metadata (plans/_next_session_prompt.md:14-16, plans/planning_the_planner.md:186).
-10. Extend planner health dashboards with alert drill-downs, backlog/resume drift metrics, SLA visualisations, and recent transcript surfacing for upcoming planners (plans/_next_session_prompt.md:17-19, plans/planning_the_planner.md:187, 205-206).
+1. Ship the persona-obligation modal follow-ups: inline note history + resolve/dismiss CTA parity across Fiction Projects + Planner Telemetry pages (plans/fiction/phase-001/session_20251116_action_plan.md).
+2. Let authors actually kick off a plan from the console (new plan wizard, persona selection, initial backlog seed) so we test the loop with humans, not seed data (plans/fiction/phase-001/plan-first-draft.md).
+3. Expand backlog telemetry widgets to include end-user alerts (stale backlog card, blocked lore popover) rather than admin-only metrics (plans/_next_session_prompt.md).
+4. Normalize ScopePath usage post-review: audit for lingering `ScopePath.Parse`/direct constructors, add analyzer baselines, and document the factory-only contract (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
+5. Replace the in-memory vector score with cosine similarity so offline tests mirror OpenSearch behavior (tests/Cognition.Data.Vectors.Tests/*, plans/alpha_security_observability_hardening.md).
+6. Land the sandbox + foundry missing pieces: implement the OOPS worker, queue/approval Hangfire jobs, and exercise HGTF end-to-end with integration tests (docs/specs/human_gated_tool_foundry.md, plans/alpha_security_observability_hardening.md).
+7. Wire structured correlation logging now that planner quotas and authorization policies are in place (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
+8. Catalogue non-fiction planners and adjacent orchestrators that should adopt PlannerBase; capture template prerequisites and scope expectations (plans/planning_the_planner.md:184, plans/_next_session_prompt.md, plans/scope_token_path_refactor.md:25-45).
+9. Draft the non-fiction migration matrix and seed checklist updates in plans/planning_the_planner_rollout_recipe.md to cover non-fiction specifics (plans/planning_the_planner_rollout_recipe.md, plans/planning_the_planner.md:189-195).
+10. Identify and remove remaining legacy runner scaffolding/tests that duplicate PlannerBase functionality; update CI/lint gates to enforce scripted pipeline coverage (plans/_next_session_prompt.md, plans/planning_the_planner.md:185).
 
 ## Fast Follow Improvements
 

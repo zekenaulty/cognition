@@ -8,6 +8,12 @@ A lightweight, shared workflow for planning work, tracking steps, and keeping an
 - Do work in discrete steps; each step gets its own step note file.
 - Keep a scratchpad for quick notes and cross-assistant handoffs.
 
+## Maintaining a Clear Definition of Done
+- Every plan must capture a concise, testable definition of done (DoD) up front: what user-facing change ships, what data/API contracts stabilize, and what verification proves it works.
+- Keep the DoD realistic—opt for thin vertical slices that can land inside a sprint/iteration instead of ever-growing horizontal work. If new scope appears, log it in the backlog or a follow-up plan unless it blocks the current DoD.
+- Tie each step note back to the DoD. If an action does not directly close a DoD checkbox, call out why (e.g., prerequisite, bug fix uncovered while verifying).
+- Closure means more than code written: API + console cleaned up, tests/telemetry updated, docs/readmes touched, and staging exercised. Leave no ambiguous “we’ll finish that later” gaps.
+
 ## Folder Structure
 - Plan documents: `plans/<plan-key>.md`
 - Step notes: `plans/<plan-key>_step_YYYYMMDD_HHMM_{topic}.md`

@@ -30,6 +30,9 @@ public class FictionWeaverJobClient : IFictionWeaverJobClient
     public string EnqueueSceneWeaver(Guid planId, Guid agentId, Guid conversationId, Guid sceneId, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null)
         => _jobs.Enqueue<FictionWeaverJobs>(w => w.RunSceneWeaverAsync(planId, agentId, conversationId, sceneId, providerId, modelId, branchSlug, Copy(metadata), CancellationToken.None));
 
+    public string EnqueueLoreFulfillment(Guid planId, Guid requirementId, Guid agentId, Guid conversationId, Guid providerId, Guid? modelId = null, string branchSlug = "main", IReadOnlyDictionary<string, string>? metadata = null)
+        => _jobs.Enqueue<FictionWeaverJobs>(w => w.RunLoreFulfillmentAsync(planId, requirementId, agentId, conversationId, providerId, modelId, branchSlug, Copy(metadata), CancellationToken.None));
+
     private static IReadOnlyDictionary<string, string>? Copy(IReadOnlyDictionary<string, string>? metadata)
     {
         if (metadata is null) return null;

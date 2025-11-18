@@ -5,6 +5,12 @@ Objective
 - Prioritize quick wins in the data layer before expanding to service, client, jobs, and API surfaces.
 - Deliver a sustainable workflow (projects, fixtures, tooling) so future stories can add tests without friction.
 
+## Definition of Done
+- All targeted test projects (`Cognition.Data.Relational/Vectors/Clients/Jobs/Api.Tests`) exist in `tests/` and run green in CI with deterministic fakes (ScriptedLLM, ScriptedEmbeddingsClient, InMemoryVectorStore) wired via shared helpers.
+- Phase 1-3 suites cover the specific invariants listed here (scope retrieval, hashing, QueryDslBuilder, ToolDispatcher, JWT/password helpers) with failures blocking regressions before scope-path/planner cutovers.
+- Job + API regression nets (Phase 4/5) either ship or have an explicit deferral documented with owner/date, and developer docs explain how to author/run the suites locally (`dotnet test`, watch mode).
+- Coverage deltas + notable gaps are tracked in step notes so future work can build from a clean baseline rather than rediscovering missing scenarios.
+
 Scope
 - New test projects targeting `Cognition.Data.Relational`, `Cognition.Data.Vectors`, `Cognition.Clients`, `Cognition.Jobs`, and `Cognition.Api` infrastructure.
 - Test harness utilities (DbContext factories, fake HTTP clients, stubs) required for unit coverage.

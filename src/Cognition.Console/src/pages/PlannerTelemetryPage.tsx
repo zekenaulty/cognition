@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   Alert,
   AlertTitle,
@@ -46,11 +46,20 @@ import {
 } from '../types/diagnostics';
 import {
   AuthorPersonaContext,
+  BacklogActionLog,
+  FictionBacklogItem,
   FictionLoreRequirementItem,
   FictionPlanRoster,
-  LoreBranchSummary
+  LoreBranchSummary,
+  LoreFulfillmentLog,
+  PersonaObligation,
+  ResumeBacklogPayload
 } from '../types/fiction';
 import { FictionRosterPanel } from '../components/fiction/FictionRosterPanel';
+import { FictionBacklogPanel } from '../components/fiction/FictionBacklogPanel';
+import { FictionResumeBacklogDialog } from '../components/fiction/FictionResumeBacklogDialog';
+import { PersonaObligationActionDialog } from '../components/fiction/PersonaObligationActionDialog';
+import { isObligationOpen, normalizeObligationStatus } from '../components/fiction/backlogUtils';
 
 type AlertDescriptor = {
   id: string;
@@ -79,6 +88,29 @@ export default function PlannerTelemetryPage() {
   const [loreSummary, setLoreSummary] = React.useState<LoreBranchSummary[]>([]);
   const [loreSummaryLoading, setLoreSummaryLoading] = React.useState(false);
   const [loreSummaryError, setLoreSummaryError] = React.useState<string | null>(null);
+  const [planLoreHistory, setPlanLoreHistory] = React.useState<Record<string, LoreFulfillmentLog[]>>({});
+  const [planLoreHistoryLoading, setPlanLoreHistoryLoading] = React.useState(false);
+  const [planLoreHistoryError, setPlanLoreHistoryError] = React.useState<string | null>(null);
+  const [planObligations, setPlanObligations] = React.useState<PersonaObligation[]>([]);
+  const [planObligationsLoading, setPlanObligationsLoading] = React.useState(false);
+  const [planObligationsError, setPlanObligationsError] = React.useState<string | null>(null);
+  const [planActionLogs, setPlanActionLogs] = React.useState<BacklogActionLog[]>([]);
+  const [planActionLoading, setPlanActionLoading] = React.useState(false);
+  const [planActionError, setPlanActionError] = React.useState<string | null>(null);
+  const [planBacklogItems, setPlanBacklogItems] = React.useState<FictionBacklogItem[]>([]);
+  const [planBacklogLoading, setPlanBacklogLoading] = React.useState(false);
+  const [planBacklogError, setPlanBacklogError] = React.useState<string | null>(null);
+  const [resumeTarget, setResumeTarget] = React.useState<FictionBacklogItem | null>(null);
+  const [resuming, setResuming] = React.useState(false);
+  const [resumeError, setResumeError] = React.useState<string | null>(null);
+  const [resumeDefaults, setResumeDefaults] = React.useState<{ providerId?: string; modelId?: string | null }>({});
+  const [obligationDialog, setObligationDialog] = React.useState<{
+    obligation: PersonaObligation;
+    action: 'resolve' | 'dismiss';
+  } | null>(null);
+  const [obligationActionId, setObligationActionId] = React.useState<string | null>(null);
+  const [obligationActionError, setObligationActionError] = React.useState<string | null>(null);
+  const rosterCardRef = React.useRef<HTMLDivElement | null>(null);
 
   const loadReports = React.useCallback(
     async (isRefresh = false) => {
@@ -137,6 +169,24 @@ export default function PlannerTelemetryPage() {
       setPlanRosterPersonaError(null);
       setLoreSummary([]);
       setLoreSummaryError(null);
+      setPlanLoreHistory({});
+      setPlanLoreHistoryError(null);
+      setPlanLoreHistoryLoading(false);
+      setPlanObligations([]);
+      setPlanObligationsError(null);
+      setPlanObligationsLoading(false);
+      setPlanActionLogs([]);
+      setPlanActionError(null);
+      setPlanActionLoading(false);
+      setPlanBacklogItems([]);
+      setPlanBacklogError(null);
+      setPlanBacklogLoading(false);
+      setResumeTarget(null);
+      setResumeError(null);
+      setObligationDialog(null);
+      setObligationActionError(null);
+      setObligationActionId(null);
+      setResumeDefaults({});
       return;
     }
     let cancelled = false;
@@ -146,6 +196,14 @@ export default function PlannerTelemetryPage() {
     setPlanRosterPersonaError(null);
     setLoreSummaryLoading(true);
     setLoreSummaryError(null);
+    setPlanLoreHistoryLoading(true);
+    setPlanLoreHistoryError(null);
+    setPlanObligationsLoading(true);
+    setPlanObligationsError(null);
+    setPlanActionLoading(true);
+    setPlanActionError(null);
+    setPlanBacklogLoading(true);
+    setPlanBacklogError(null);
     fictionApi
       .getPlanRoster(rosterPlanId, token)
       .then(data => {
@@ -208,10 +266,121 @@ export default function PlannerTelemetryPage() {
           setLoreSummaryLoading(false);
         }
       });
+    fictionApi
+      .getLoreHistory(rosterPlanId, token)
+      .then(data => {
+        if (cancelled) {
+          return;
+        }
+        const grouped: Record<string, LoreFulfillmentLog[]> = {};
+        data.forEach(entry => {
+          const key = entry.requirementId.toLowerCase();
+          if (!grouped[key]) {
+            grouped[key] = [];
+          }
+          grouped[key].push(entry);
+        });
+        setPlanLoreHistory(grouped);
+      })
+      .catch(err => {
+        if (!cancelled) {
+          const message = err instanceof ApiError ? err.message : 'Unable to load lore history.';
+          setPlanLoreHistoryError(message);
+          setPlanLoreHistory({});
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPlanLoreHistoryLoading(false);
+        }
+      });
+    fictionApi
+      .getPersonaObligations(rosterPlanId, token)
+      .then(data => {
+        if (!cancelled) {
+          setPlanObligations(data.items ?? []);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          const message = err instanceof ApiError ? err.message : 'Unable to load persona obligations.';
+          setPlanObligationsError(message);
+          setPlanObligations([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPlanObligationsLoading(false);
+        }
+      });
+    fictionApi
+      .getBacklogActions(rosterPlanId, token)
+      .then(data => {
+        if (!cancelled) {
+          setPlanActionLogs(data ?? []);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          const message = err instanceof ApiError ? err.message : 'Unable to load backlog action logs.';
+          setPlanActionError(message);
+          setPlanActionLogs([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPlanActionLoading(false);
+        }
+      });
+    fictionApi
+      .getPlanBacklog(rosterPlanId, token)
+      .then(items => {
+        if (!cancelled) {
+          setPlanBacklogItems(items);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          const message = err instanceof ApiError ? err.message : 'Unable to load plan backlog.';
+          setPlanBacklogError(message);
+          setPlanBacklogItems([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPlanBacklogLoading(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, [token, rosterPlanId]);
+
+  React.useEffect(() => {
+    setResumeDefaults({});
+  }, [rosterPlanId]);
+
+  const refreshPlanBacklog = React.useCallback(
+    async (planId: string) => {
+      if (!token) {
+        setPlanBacklogItems([]);
+        return;
+      }
+      setPlanBacklogLoading(true);
+      setPlanBacklogError(null);
+      try {
+        const items = await fictionApi.getPlanBacklog(planId, token);
+        setPlanBacklogItems(items);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Unable to load plan backlog.';
+        setPlanBacklogError(message);
+        setPlanBacklogItems([]);
+      } finally {
+        setPlanBacklogLoading(false);
+      }
+    },
+    [token]
+  );
 
   const handleFulfillLore = React.useCallback(
     async (requirement: FictionLoreRequirementItem) => {
@@ -250,12 +419,170 @@ export default function PlannerTelemetryPage() {
     return (plannerReport.alerts ?? []).map(mapServerAlert);
   }, [plannerReport]);
 
+  const handleResumeBacklog = React.useCallback((item: FictionBacklogItem) => {
+    setResumeTarget(item);
+    setResumeError(null);
+  }, []);
+
+  const handleResumeDialogClose = React.useCallback(() => {
+    if (resuming) {
+      return;
+    }
+    setResumeTarget(null);
+    setResumeError(null);
+  }, [resuming]);
+
+  const handleResumeSubmit = React.useCallback(
+    async (payload: ResumeBacklogPayload) => {
+      if (!token || !rosterPlanId || !resumeTarget) {
+        setResumeError('Missing backlog metadata for resume request.');
+        return;
+      }
+      setResuming(true);
+      setResumeError(null);
+      try {
+        await fictionApi.resumeBacklog(rosterPlanId, resumeTarget.backlogId, payload, token);
+        setResumeDefaults({ providerId: payload.providerId, modelId: payload.modelId ?? null });
+        setResumeTarget(null);
+        await refreshPlanBacklog(rosterPlanId);
+        try {
+          const logs = await fictionApi.getBacklogActions(rosterPlanId, token);
+          setPlanActionLogs(logs ?? []);
+          setPlanActionError(null);
+        } catch (err) {
+          const message = err instanceof ApiError ? err.message : 'Unable to refresh backlog action logs.';
+          setPlanActionError(message);
+        }
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Unable to resume backlog item.';
+        setResumeError(message);
+      } finally {
+        setResuming(false);
+      }
+    },
+    [token, rosterPlanId, resumeTarget, refreshPlanBacklog]
+  );
+
+  const handleObligationActionRequest = React.useCallback(
+    (obligation: PersonaObligation, action: 'resolve' | 'dismiss') => {
+      if (obligationActionId) {
+        return;
+      }
+      setObligationDialog({ obligation, action });
+      setObligationActionError(null);
+    },
+    [obligationActionId]
+  );
+
+  const handleObligationDialogClose = React.useCallback(() => {
+    if (obligationActionId) {
+      return;
+    }
+    setObligationDialog(null);
+  }, [obligationActionId]);
+
+  const handleObligationDialogSubmit = React.useCallback(
+    async (notes?: string | null, action?: 'resolve' | 'dismiss') => {
+      if (!token || !rosterPlanId || !obligationDialog) {
+        setObligationActionError('Missing obligation context.');
+        return;
+      }
+      const target = obligationDialog.obligation;
+      setObligationActionId(target.id);
+      setObligationActionError(null);
+      try {
+        const payload = {
+          notes: notes ?? undefined,
+          source: 'console',
+          action: action ?? obligationDialog.action
+        };
+        const updated = await fictionApi.resolvePersonaObligation(rosterPlanId, target.id, payload, token);
+        setPlanObligations(items => items.map(item => (item.id === updated.id ? updated : item)));
+        setObligationDialog(null);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'Unable to update persona obligation.';
+        setObligationActionError(message);
+      } finally {
+        setObligationActionId(null);
+      }
+    },
+    [token, rosterPlanId, obligationDialog]
+  );
+
   const alerts = React.useMemo(() => {
     if (!openSearchReport) {
       return serverAlerts;
     }
     return [...serverAlerts, ...buildOpenSearchAlerts(openSearchReport)];
   }, [serverAlerts, openSearchReport]);
+
+  const planStaleBacklogItems = React.useMemo(() => {
+    if (!planBacklogItems || planBacklogItems.length === 0) {
+      return [];
+    }
+    const now = Date.now();
+    const thresholdMs = 60 * 60 * 1000;
+    return planBacklogItems.filter(item => {
+      const status = (item.status ?? '').toString().toLowerCase();
+      if (status !== 'in_progress') {
+        return false;
+      }
+      const stamp = item.updatedAtUtc ?? item.createdAtUtc;
+      if (!stamp) {
+        return false;
+      }
+      const updated = new Date(stamp);
+      if (Number.isNaN(updated.getTime())) {
+        return false;
+      }
+      return now - updated.getTime() > thresholdMs;
+    });
+  }, [planBacklogItems]);
+
+  const planMissingLoreRequirements = React.useMemo(
+    () => planRoster?.loreRequirements?.filter(req => (req.status ?? '').toLowerCase() !== 'ready') ?? [],
+    [planRoster]
+  );
+
+  const planOpenObligations = React.useMemo(
+    () => planObligations.filter(obligation => isObligationOpen(obligation.status)),
+    [planObligations]
+  );
+
+  const resolvedObligationCount = React.useMemo(
+    () => planObligations.filter(obligation => normalizeObligationStatus(obligation.status) === 'resolved').length,
+    [planObligations]
+  );
+
+  const dismissedObligationCount = React.useMemo(
+    () => planObligations.filter(obligation => normalizeObligationStatus(obligation.status) === 'dismissed').length,
+    [planObligations]
+  );
+
+  const planAlertCount =
+    planStaleBacklogItems.length + planMissingLoreRequirements.length + planOpenObligations.length;
+
+  const scrollToRoster = React.useCallback(() => {
+    rosterCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const handlePlanResumeAlertClick = React.useCallback(() => {
+    if (planStaleBacklogItems.length === 0) {
+      return;
+    }
+    handleResumeBacklog(planStaleBacklogItems[0]);
+  }, [planStaleBacklogItems, handleResumeBacklog]);
+
+  const handlePlanLoreAlertClick = React.useCallback(() => {
+    scrollToRoster();
+  }, [scrollToRoster]);
+
+  const handlePlanObligationAlertClick = React.useCallback(() => {
+    if (planOpenObligations.length === 0) {
+      return;
+    }
+    handleObligationActionRequest(planOpenObligations[0], 'resolve');
+  }, [planOpenObligations, handleObligationActionRequest]);
 
   if (!isAdmin) {
     return (
@@ -345,6 +672,73 @@ export default function PlannerTelemetryPage() {
           ))}
         </Stack>
       )}
+
+      <Card ref={rosterCardRef}>
+        <CardHeader
+          title="Backlog Alerts"
+          subheader={
+            !rosterPlanId
+              ? 'Select a plan to inspect backlog alerts.'
+              : planAlertCount === 0
+                ? 'No stale backlog, lore, or obligation alerts detected.'
+                : `${planAlertCount} active alert${planAlertCount === 1 ? '' : 's'} for the selected plan.`
+          }
+        />
+        <CardContent>
+          {!rosterPlanId ? (
+            <Typography variant="body2" color="text.secondary">
+              Choose a plan from the roster switcher below to review backlog alerts.
+            </Typography>
+          ) : planAlertCount === 0 ? (
+            <Alert severity="success" variant="outlined">
+              Planner backlog, lore fulfillment, and persona obligations are healthy.
+            </Alert>
+          ) : (
+            <Stack spacing={1}>
+              {planStaleBacklogItems.length > 0 && (
+                <Alert
+                  severity="warning"
+                  action={
+                    <Button color="inherit" size="small" onClick={handlePlanResumeAlertClick}>
+                      Resume
+                    </Button>
+                  }
+                >
+                  {planStaleBacklogItems.length} backlog item
+                  {planStaleBacklogItems.length === 1 ? '' : 's'} are stuck in progress. Launch the resume dialog to refill metadata
+                  and nudge the scheduler.
+                </Alert>
+              )}
+              {planMissingLoreRequirements.length > 0 && (
+                <Alert
+                  severity="info"
+                  action={
+                    <Button color="inherit" size="small" onClick={handlePlanLoreAlertClick}>
+                      Review lore
+                    </Button>
+                  }
+                >
+                  {planMissingLoreRequirements.length} lore requirement
+                  {planMissingLoreRequirements.length === 1 ? '' : 's'} remain blocked. Jump to the roster panel to fulfill the gaps.
+                </Alert>
+              )}
+              {planOpenObligations.length > 0 && (
+                <Alert
+                  severity="warning"
+                  action={
+                    <Button color="inherit" size="small" onClick={handlePlanObligationAlertClick}>
+                      Resolve
+                    </Button>
+                  }
+                >
+                  {planOpenObligations.length} persona obligation
+                  {planOpenObligations.length === 1 ? '' : 's'} require attention. Use the modal to resolve or dismiss them.
+                </Alert>
+              )}
+            </Stack>
+          )}
+        </CardContent>
+      </Card>
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={8}>
@@ -818,6 +1212,69 @@ export default function PlannerTelemetryPage() {
       </Card>
       <Card>
         <CardHeader
+          title="Plan Backlog"
+          subheader={
+            rosterPlanId
+              ? `${plannerReport.backlog.plans.find(plan => plan.planId === rosterPlanId)?.planName ?? 'Backlog items'} • ${planBacklogItems.length} items • ${planOpenObligations.length} open obligations`
+              : 'Select a plan to inspect backlog status and persona obligations.'
+          }
+          action={
+            <FormControl size="small" sx={{ minWidth: 220 }} disabled={(plannerReport.backlog.plans ?? []).length === 0}>
+              <InputLabel id="backlog-plan-label">Plan</InputLabel>
+              <Select
+                labelId="backlog-plan-label"
+                label="Plan"
+                value={rosterPlanId ?? ''}
+                onChange={event => setRosterPlanId(event.target.value ? (event.target.value as string) : null)}
+              >
+                {(plannerReport.backlog.plans ?? []).map(plan => (
+                  <MenuItem key={plan.planId} value={plan.planId}>
+                    {plan.planName}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          }
+        />
+        <CardContent>
+          {(plannerReport.backlog.plans ?? []).length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No backlog plans detected yet.
+            </Typography>
+          ) : (
+            <>
+              {planObligations.length > 0 && (
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
+                  <Chip size="small" color="warning" label={`${planOpenObligations.length} open obligations`} />
+                  <Chip size="small" color="success" variant="outlined" label={`${resolvedObligationCount} resolved`} />
+                  <Chip size="small" color="default" variant="outlined" label={`${dismissedObligationCount} dismissed`} />
+                </Stack>
+              )}
+              <FictionBacklogPanel
+                items={planBacklogItems}
+                loading={planBacklogLoading}
+                error={planBacklogError}
+                placeholder="Select a plan to inspect its backlog."
+                onResume={handleResumeBacklog}
+                resumingId={resuming && resumeTarget ? resumeTarget.id : null}
+                isAdmin={isAdmin}
+                actionLogs={planActionLogs}
+                actionLoading={planActionLoading}
+                actionError={planActionError}
+                obligations={planObligations}
+                obligationsLoading={planObligationsLoading}
+                obligationsError={planObligationsError}
+                onResolveObligation={handleObligationActionRequest}
+                obligationActionId={obligationActionId}
+                obligationActionError={obligationActionError}
+                personaContext={planRosterPersona}
+              />
+            </>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader
           title="Character & Lore Roster"
           subheader={
             planRoster
@@ -853,6 +1310,9 @@ export default function PlannerTelemetryPage() {
               loading={rosterLoading}
               error={rosterError}
               onFulfillLore={handleFulfillLore}
+              loreHistory={planLoreHistory}
+              loreHistoryLoading={planLoreHistoryLoading}
+              loreHistoryError={planLoreHistoryError}
             />
           )}
         </CardContent>
@@ -1057,6 +1517,27 @@ export default function PlannerTelemetryPage() {
           )}
         </CardContent>
       </Card>
+      <FictionResumeBacklogDialog
+        open={Boolean(resumeTarget)}
+        item={resumeTarget}
+        defaultBranch={planRoster?.branchSlug ?? undefined}
+        defaultProviderId={resumeDefaults.providerId}
+        defaultModelId={resumeDefaults.modelId ?? undefined}
+        submitting={resuming}
+        error={resumeError}
+        onClose={handleResumeDialogClose}
+        onSubmit={handleResumeSubmit}
+        accessToken={token}
+      />
+      <PersonaObligationActionDialog
+        open={Boolean(obligationDialog)}
+        obligation={obligationDialog?.obligation ?? null}
+        action={obligationDialog?.action ?? 'resolve'}
+        submitting={Boolean(obligationDialog && obligationActionId === obligationDialog.obligation.id)}
+        error={obligationActionError}
+        onSubmit={notes => handleObligationDialogSubmit(notes)}
+        onClose={handleObligationDialogClose}
+      />
     </Stack>
   );
 }

@@ -23,6 +23,8 @@ namespace Cognition.Jobs;
 
 public class FictionWeaverJobs
 {
+    private const string DefaultBranch = "main";
+    private const string DefaultWorldBibleDomain = "core";
     private readonly CognitionDbContext _db;
     private readonly ILogger<FictionWeaverJobs> _logger;
     private readonly IReadOnlyDictionary<FictionPhase, IFictionPhaseRunner> _runnerLookup;
@@ -143,6 +145,80 @@ public class FictionWeaverJobs
             FictionPhase.SceneWeaver,
             CreateContext(planId, agentId, conversationId, branchSlug, providerId, modelId, metadata, chapterSceneId: chapterSceneId),
             cancellationToken);
+
+    public async Task RunLoreFulfillmentAsync(
+        Guid planId,
+        Guid requirementId,
+        Guid agentId,
+        Guid conversationId,
+        Guid providerId,
+        Guid? modelId = null,
+        string branchSlug = "main",
+        IReadOnlyDictionary<string, string>? metadata = null,
+        CancellationToken cancellationToken = default)
+    {
+        var requirement = await _db.FictionLoreRequirements
+            .Include(r => r.FictionPlan)
+            .FirstOrDefaultAsync(r => r.Id == requirementId && r.FictionPlanId == planId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (requirement is null)
+        {
+            _logger.LogWarning("Lore requirement {RequirementId} was not found for plan {PlanId}.", requirementId, planId);
+            return;
+        }
+
+        if (requirement.Status != FictionLoreRequirementStatus.Blocked || requirement.WorldBibleEntryId.HasValue)
+        {
+            _logger.LogDebug("Lore requirement {RequirementId} is not eligible for automation (status={Status}, entry={EntryId}).", requirement.Id, requirement.Status, requirement.WorldBibleEntryId);
+            return;
+        }
+
+        var normalizedBranch = string.IsNullOrWhiteSpace(branchSlug) ? DefaultBranch : branchSlug.Trim();
+        var worldBible = await GetOrCreateWorldBibleAsync(planId, normalizedBranch, cancellationToken).ConfigureAwait(false);
+        var entrySlug = NormalizeSlug(string.IsNullOrWhiteSpace(requirement.RequirementSlug) ? requirement.Title : requirement.RequirementSlug);
+        entrySlug = await EnsureUniqueWorldBibleSlugAsync(worldBible.Id, entrySlug, cancellationToken).ConfigureAwait(false);
+
+        var sequence = await GetNextWorldBibleSequenceAsync(worldBible.Id, cancellationToken).ConfigureAwait(false);
+        var summary = requirement.Description ?? requirement.Notes ?? $"Auto fulfillment for {requirement.Title}";
+        var autoNote = $"Auto-fulfilled on {DateTime.UtcNow:O}";
+
+        var entry = new FictionWorldBibleEntry
+        {
+            FictionWorldBibleId = worldBible.Id,
+            EntrySlug = entrySlug,
+            EntryName = string.IsNullOrWhiteSpace(requirement.Title) ? entrySlug : requirement.Title,
+            Content = new FictionWorldBibleEntryContent
+            {
+                Category = "lore",
+                Summary = summary,
+                Status = "ready",
+                ContinuityNotes = BuildContinuityNotes(requirement, autoNote),
+                Branch = normalizedBranch,
+                UpdatedAtUtc = DateTime.UtcNow
+            },
+            ChangeType = FictionWorldBibleChangeType.Update,
+            Sequence = sequence
+        };
+
+        _db.FictionWorldBibleEntries.Add(entry);
+
+        requirement.WorldBibleEntryId = entry.Id;
+        requirement.Status = FictionLoreRequirementStatus.Ready;
+        requirement.UpdatedAtUtc = DateTime.UtcNow;
+        requirement.Notes = AppendNote(requirement.Notes, autoNote);
+
+        var metadataModel = LoreRequirementMetadata.FromJson(requirement.MetadataJson);
+        metadataModel.AutoFulfillmentCompletedUtc = DateTime.UtcNow;
+        requirement.MetadataJson = metadataModel.Serialize();
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        var payload = BuildLoreFulfillmentPayload(planId, requirement, entry, normalizedBranch, metadata);
+        await _workflowLogger.LogAsync(conversationId, "fiction.lore.fulfillment", payload).ConfigureAwait(false);
+
+        _logger.LogInformation("Lore requirement {RequirementId} auto-fulfilled and linked to world bible entry {EntryId}.", requirement.Id, entry.Id);
+    }
 
     private static FictionPhaseExecutionContext CreateContext(
         Guid planId,
@@ -1267,6 +1343,101 @@ public class FictionWeaverJobs
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<FictionWorldBible> GetOrCreateWorldBibleAsync(Guid planId, string branch, CancellationToken cancellationToken)
+    {
+        var query = _db.FictionWorldBibles
+            .Where(b => b.FictionPlanId == planId && b.Domain == DefaultWorldBibleDomain);
+
+        if (!string.IsNullOrWhiteSpace(branch))
+        {
+            query = query.Where(b => b.BranchSlug == branch);
+        }
+
+        var worldBible = await query.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        if (worldBible is not null)
+        {
+            return worldBible;
+        }
+
+        worldBible = new FictionWorldBible
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = planId,
+            Domain = DefaultWorldBibleDomain,
+            BranchSlug = branch
+        };
+
+        _db.FictionWorldBibles.Add(worldBible);
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return worldBible;
+    }
+
+    private async Task<int> GetNextWorldBibleSequenceAsync(Guid worldBibleId, CancellationToken cancellationToken)
+    {
+        var max = await _db.FictionWorldBibleEntries
+            .Where(e => e.FictionWorldBibleId == worldBibleId)
+            .MaxAsync(e => (int?)e.Sequence, cancellationToken)
+            .ConfigureAwait(false);
+
+        return (max ?? 0) + 1;
+    }
+
+    private async Task<string> EnsureUniqueWorldBibleSlugAsync(Guid worldBibleId, string candidate, CancellationToken cancellationToken)
+    {
+        var slug = candidate;
+        var counter = 1;
+        while (await _db.FictionWorldBibleEntries.AnyAsync(e => e.FictionWorldBibleId == worldBibleId && e.EntrySlug == slug, cancellationToken).ConfigureAwait(false))
+        {
+            slug = $"{candidate}-{++counter}";
+        }
+
+        return slug;
+    }
+
+    private static string[] BuildContinuityNotes(FictionLoreRequirement requirement, string autoNote)
+    {
+        var notes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(requirement.Notes))
+        {
+            notes.Add(requirement.Notes!);
+        }
+
+        notes.Add(autoNote);
+        return notes.ToArray();
+    }
+
+    private static string AppendNote(string? existing, string note)
+        => string.IsNullOrWhiteSpace(existing)
+            ? note
+            : $"{existing}{Environment.NewLine}{note}";
+
+    private static JObject BuildLoreFulfillmentPayload(
+        Guid planId,
+        FictionLoreRequirement requirement,
+        FictionWorldBibleEntry entry,
+        string branchSlug,
+        IReadOnlyDictionary<string, string>? metadata)
+    {
+        var payload = new JObject
+        {
+            ["planId"] = planId,
+            ["planName"] = requirement.FictionPlan?.Name ?? string.Empty,
+            ["requirementId"] = requirement.Id,
+            ["requirementSlug"] = requirement.RequirementSlug,
+            ["title"] = requirement.Title,
+            ["action"] = "fulfilled",
+            ["branch"] = branchSlug,
+            ["status"] = requirement.Status.ToString(),
+            ["worldBibleEntryId"] = entry.Id,
+            ["notes"] = requirement.Notes,
+            ["source"] = metadata is not null && metadata.TryGetValue("autoFulfillment", out var flag) && string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase)
+                ? "automation"
+                : "job"
+        };
+
+        return payload;
+    }
+
     private async Task<FictionPlanCheckpoint> GetOrCreateCheckpointAsync(Guid planId, string phaseKey, CancellationToken cancellationToken)
     {
         var checkpoint = await _db.Set<FictionPlanCheckpoint>()
@@ -1429,4 +1600,25 @@ public class FictionWeaverJobs
         FictionPhaseStatus.Failed => "failed",
         _ => status.ToString().ToLowerInvariant()
     };
+
+    private static string NormalizeSlug(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return $"entry-{Guid.NewGuid():N}";
+        }
+
+        var normalized = new string(value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray());
+
+        while (normalized.Contains("--", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        return normalized.Trim('-');
+    }
 }

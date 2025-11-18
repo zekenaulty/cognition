@@ -2,12 +2,18 @@ import { OpenSearchDiagnosticsReport, PlannerHealthReport } from '../types/diagn
 import {
   BacklogActionLog,
   AuthorPersonaContext,
+  AgentSummary,
+  CreateFictionPlanPayload,
   FictionBacklogItem,
   FictionPlanRoster,
   FictionPlanSummary,
+  FictionProjectSummary,
   FulfillLoreRequirementPayload,
   LoreFulfillmentLog,
   LoreBranchSummary,
+  PersonaObligation,
+  PersonaObligationListResponse,
+  ResolvePersonaObligationPayload,
   ResumeBacklogPayload
 } from '../types/fiction';
 
@@ -212,6 +218,9 @@ export const api = {
       accessToken
     ),
 
+  listAgents: (accessToken?: string) =>
+    request<AgentSummary[]>('/api/agents', {}, accessToken),
+
   // type comes from backend enum: 0=User, 1=Assistant, 2=Agent, 3=RolePlayCharacter (or string if enum serialized as string)
   listPersonas: (accessToken?: string) => request<Array<{ id: string; name: string; type?: number | 'User' | 'Assistant' | 'Agent' | 'RolePlayCharacter' }>>('/api/personas', {}, accessToken),
   getPersona: (id: string, accessToken?: string) => request<any>(`/api/personas/${id}`, {}, accessToken),
@@ -270,6 +279,18 @@ export const fictionApi = {
     request<FictionBacklogItem[]>(`/api/fiction/plans/${planId}/backlog`, {}, accessToken),
   getBacklogActions: (planId: string, accessToken?: string) =>
     request<BacklogActionLog[]>(`/api/fiction/plans/${planId}/backlog/actions`, {}, accessToken),
+  getPersonaObligations: (planId: string, accessToken?: string, page = 1, pageSize = 50) =>
+    request<PersonaObligationListResponse>(
+      `/api/fiction/plans/${planId}/persona-obligations?page=${page}&pageSize=${pageSize}`,
+      {},
+      accessToken
+    ),
+  resolvePersonaObligation: (planId: string, obligationId: string, payload: ResolvePersonaObligationPayload, accessToken?: string) =>
+    request<PersonaObligation>(
+      `/api/fiction/plans/${planId}/persona-obligations/${obligationId}/resolve`,
+      { method: 'POST', body: JSON.stringify(payload ?? {}) },
+      accessToken
+    ),
   getLoreHistory: (planId: string, accessToken?: string) =>
     request<LoreFulfillmentLog[]>(`/api/fiction/plans/${planId}/lore/history`, {}, accessToken),
   resumeBacklog: (planId: string, backlogId: string, payload: ResumeBacklogPayload, accessToken?: string) =>
@@ -279,7 +300,21 @@ export const fictionApi = {
       accessToken
     ),
   listPlans: (accessToken?: string) =>
-    request<FictionPlanSummary[]>('/api/fiction/plans', {}, accessToken)
+    request<FictionPlanSummary[]>('/api/fiction/plans', {}, accessToken),
+  listProjects: (accessToken?: string) =>
+    request<FictionProjectSummary[]>('/api/fiction/projects', {}, accessToken),
+  createProject: (payload: { Title: string; Logline?: string | null }, accessToken?: string) =>
+    request<FictionProjectSummary>(
+      '/api/fiction/projects',
+      { method: 'POST', body: JSON.stringify(payload) },
+      accessToken
+    ),
+  createPlan: (payload: CreateFictionPlanPayload, accessToken?: string) =>
+    request<FictionPlanSummary>(
+      '/api/fiction/plans',
+      { method: 'POST', body: JSON.stringify(payload) },
+      accessToken
+    )
 }
 
 export async function fetchImageMessages(accessToken: string, conversationId: string): Promise<any[]> {

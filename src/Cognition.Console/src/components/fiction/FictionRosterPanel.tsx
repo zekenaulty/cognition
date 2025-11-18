@@ -274,22 +274,41 @@ export function FictionRosterPanel({
                 </Typography>
               ) : (
                 <List dense sx={{ mt: 1 }}>
-                  {flattenedHistory.map(event => (
-                    <ListItem key={`${event.requirementId}-${event.timestampUtc}-${event.action}`} sx={{ py: 0.5 }}>
-                      <ListItemText
-                        primary={
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {event.requirementSlug} &mdash; {event.action}
-                          </Typography>
-                        }
-                        secondary={
-                          <Typography variant="caption" color="text.secondary">
-                            {event.actor ?? 'Unknown actor'} via {event.source} on branch {event.branch} &middot; {formatRelative(event.timestampUtc)}
-                          </Typography>
-                        }
-                      />
-                    </ListItem>
-                  ))}
+                  {flattenedHistory.map(event => {
+                    const badges = getFulfillmentBadges(event);
+                    return (
+                      <ListItem key={`${event.requirementId}-${event.timestampUtc}-${event.action}`} sx={{ py: 0.5 }}>
+                        <ListItemText
+                          primary={
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {event.requirementSlug} &mdash; {event.action}
+                              </Typography>
+                              {badges.isAutomation && <Chip size="small" color="primary" label="Auto-Run" />}
+                              {badges.slaBreach && <Chip size="small" color="error" label="SLA Breach" />}
+                            </Stack>
+                          }
+                          secondary={
+                            <Stack spacing={0.25}>
+                              <Typography variant="caption" color="text.secondary">
+                                {event.actor ?? 'Unknown actor'} via {event.source} on branch {event.branch} &middot; {formatRelative(event.timestampUtc)}
+                              </Typography>
+                              {event.status && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Status: {event.status}
+                                </Typography>
+                              )}
+                              {event.notes && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {event.notes}
+                                </Typography>
+                              )}
+                            </Stack>
+                          }
+                        />
+                      </ListItem>
+                    );
+                  })}
                 </List>
               )}
             </Box>
@@ -378,4 +397,13 @@ function formatRelative(value?: string | null) {
   if (hours < 24) return `${hours}h ${minutes % 60}m ${future ? 'from now' : 'ago'}`;
   const days = Math.floor(hours / 24);
   return `${days}d ${hours % 24}h ${future ? 'from now' : 'ago'}`;
+}
+
+function getFulfillmentBadges(event: LoreFulfillmentLog) {
+  const normalizedAction = (event.action ?? '').toLowerCase();
+  const normalizedSource = (event.source ?? '').toLowerCase();
+  const normalizedStatus = (event.status ?? '').toLowerCase();
+  const isAutomation = normalizedSource.includes('auto') || normalizedAction.includes('auto');
+  const slaBreach = normalizedAction.includes('sla') || normalizedStatus.includes('sla');
+  return { isAutomation, slaBreach };
 }

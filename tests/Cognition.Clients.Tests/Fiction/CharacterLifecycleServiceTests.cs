@@ -80,6 +80,53 @@ public sealed class CharacterLifecycleServiceTests
     }
 
     [Fact]
+    public async Task ProcessAsync_creates_persona_obligations_from_continuity_hooks()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new CharacterLifecycleTestDbContext(options);
+        var project = new FictionProject { Id = Guid.NewGuid(), Title = "Obligation Saga" };
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = project.Id,
+            FictionProject = project,
+            Name = "Plan Obligations"
+        };
+
+        db.FictionProjects.Add(project);
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var service = new CharacterLifecycleService(db, NullLogger<CharacterLifecycleService>.Instance);
+        var descriptor = new CharacterLifecycleDescriptor(
+            Name: "Archivist Dera",
+            Track: true,
+            Slug: "archivist-dera",
+            Summary: "Scholar guarding forbidden lore.",
+            ContinuityHooks: new[] { "Protect the Whisperglass Codex", "Repay the quiet debt to the Dustbound." });
+
+        var request = new CharacterLifecycleRequest(
+            plan.Id,
+            ConversationId: Guid.NewGuid(),
+            PlanPassId: Guid.NewGuid(),
+            new[] { descriptor },
+            Array.Empty<LoreRequirementDescriptor>(),
+            Source: "vision",
+            BranchSlug: "draft");
+
+        await service.ProcessAsync(request, CancellationToken.None);
+
+        var obligations = await db.FictionPersonaObligations.OrderBy(o => o.Title).ToListAsync();
+        obligations.Should().HaveCount(2);
+        obligations.Select(o => o.Status).Should().OnlyContain(status => status == FictionPersonaObligationStatus.Open);
+        obligations.Select(o => o.BranchSlug).Should().OnlyContain(branch => branch == "draft");
+        obligations.Select(o => o.SourcePhase).Should().OnlyContain(phase => phase == "vision");
+    }
+
+    [Fact]
     public async Task ProcessAsync_links_characters_to_existing_world_bible_entry()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()
@@ -231,6 +278,7 @@ internal sealed class CharacterLifecycleTestDbContext : CognitionDbContext
         typeof(FictionLoreRequirement),
         typeof(FictionWorldBible),
         typeof(FictionWorldBibleEntry),
+        typeof(FictionPersonaObligation),
         typeof(Persona),
         typeof(Agent),
         typeof(PersonaMemory)
@@ -258,6 +306,7 @@ internal sealed class CharacterLifecycleTestDbContext : CognitionDbContext
         modelBuilder.Entity<FictionPlan>().Ignore(x => x.Backlog);
         modelBuilder.Entity<FictionPlan>().Ignore(x => x.Transcripts);
         modelBuilder.Entity<FictionPlan>().Ignore(x => x.StoryMetrics);
+        modelBuilder.Entity<FictionPlan>().Ignore(x => x.PersonaObligations);
 
         modelBuilder.Entity<Agent>().Ignore(a => a.State);
         modelBuilder.Entity<Persona>().Ignore(p => p.SignatureTraits);

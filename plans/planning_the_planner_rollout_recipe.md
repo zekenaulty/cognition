@@ -2,6 +2,11 @@
 
 This recipe documents the end-to-end checklist for migrating a planner onto `PlannerBase`, seeding prompts, wiring telemetry/alerts, and rolling the change through lower environments. Treat it as the canonical runbook for future fiction and non-fiction planners.
 
+## Definition of Done
+- Every planner migration walks through Sections 1-4 with evidence captured in a step note: code diff, seeded templates, updated pipeline tests, and Ops alert validation.
+- Lower environments (dev + staging) demonstrate healthy `PlannerHealthReport` entries for the new planner plus a synthetic Ops alert acknowledged by the target channel.
+- README / plan docs and rollout matrix entries link back to this recipe so future teams can follow it without tribal knowledge.
+
 ## 1. Code Preparation
 
 1. **Baseline**  
@@ -87,4 +92,3 @@ This recipe documents the end-to-end checklist for migrating a planner onto `Pla
 - [ ] Step note recorded.  
 - [ ] Lower env deployment validated (planner diagnostics + Ops webhook).  
 - [ ] Legacy code scheduled for cleanup once rollout is stable.
-

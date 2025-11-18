@@ -4,6 +4,11 @@
 - Drafting concerns that should be addressed after the current fiction backlog/lifecycle work ships.
 - No engineering assigned yet; this document is a parking lot for the next infrastructure-focused session.
 
+## Definition of Done
+- Each topic below has an owner, a concrete remediation issue/plan, and acceptance tests or guidelines checked into the repo (e.g., routing map, scope analyzer, telemetry contract doc).
+- API surface boundaries, scope discipline rules, telemetry contracts, and versioning hygiene are reflected in docs/linters so new work automatically adheres to them.
+- Author metadata + service responsibility decisions are codified (schema change or explicit defer note) so they no longer block upcoming planner/lore work.
+
 ## Topics to Revisit
 
 ### 1. API Surface Drift
