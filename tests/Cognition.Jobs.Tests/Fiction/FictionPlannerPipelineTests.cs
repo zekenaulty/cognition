@@ -218,7 +218,7 @@ public class FictionPlannerPipelineTests
 
         agentService.TotalCalls.Should().Be(5);
         agentService.RemainingResponses.Should().Be(0);
-        authorRegistry.Received(2).AppendMemoryAsync(
+        await authorRegistry.Received(2).AppendMemoryAsync(
             Arg.Any<Guid>(),
             Arg.Any<AuthorPersonaMemoryEntry>(),
             Arg.Any<CancellationToken>());
@@ -347,7 +347,7 @@ public class FictionPlannerPipelineTests
         result.Status.Should().Be(FictionPhaseStatus.Blocked);
         result.Data.Should().ContainKey("blockedLoreRequirements");
         agentService.TotalCalls.Should().Be(0);
-        authorRegistry.DidNotReceiveWithAnyArgs().AppendMemoryAsync(default, default!, default);
+        await authorRegistry.DidNotReceiveWithAnyArgs().AppendMemoryAsync(default, default!, default);
     }
 
     private static async Task<PlanGraph> SeedPlanGraphAsync(CognitionDbContext db)
