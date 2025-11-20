@@ -11,7 +11,9 @@ public readonly record struct ScopePathProjection(
 {
     public static bool TryCreate(ScopeToken scope, out ScopePathProjection projection)
     {
+#pragma warning disable RS0030 // Do not use banned APIs
         var path = ScopePathFactory.Create(scope);
+#pragma warning restore RS0030 // Do not use banned APIs
         if (path.Principal.IsEmpty)
         {
             projection = default;

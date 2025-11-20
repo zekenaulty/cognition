@@ -1,3 +1,4 @@
 # ScopePath creation must go through ScopePathBuilder / ScopePathFactory.
 M:Cognition.Contracts.ScopeToken.ToScopePath -> Use IScopePathBuilder.Build or ScopePathFactory.Create.
 M:Cognition.Clients.Scope.ScopePathBuilder.#ctor -> Use IScopePathBuilder from DI (TRACK-482).
+T:Cognition.Contracts.Scopes.ScopePathFactory;Use IScopePathBuilder (TRACK-482).

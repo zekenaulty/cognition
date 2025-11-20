@@ -24,6 +24,8 @@ public readonly partial record struct ScopeToken(
 
     public override string ToString()
     {
+#pragma warning disable RS0030 // Do not use banned APIs
         return ScopePathFactory.Create(this).Canonical;
+#pragma warning restore RS0030 // Do not use banned APIs
     }
 }

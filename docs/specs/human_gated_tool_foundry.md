@@ -296,8 +296,8 @@ public async Task DisableForScopeAsync(Guid toolVersionId, ScopePath scope, stri
 7.3 Resolve (membership test on prefix hashes)
 public async Task<ToolResolution?> ResolveAsync(ToolResolutionRequest req, ScopeToken scope, CancellationToken ct)
 {
-    var canonical = scope.CanonicalPath; // built via ScopePathFactory
-    var callerHashes = _hashing.ComputePrefixHashes(ScopePath.Parse(canonical)).Select(p => p.Hex).ToHashSet();
+    var scopePath = _scopePathBuilder.Build(scope);
+    var callerHashes = _hashing.ComputePrefixHashes(scopePath).Select(p => p.Hex).ToHashSet();
 
     var toolDefs = await _db.ToolDefinitions
         .Where(d => d.CapabilityTags.Contains(req.Capability)) // JSONB contains or join table

@@ -52,12 +52,16 @@ public sealed class ScopePathBuilder : IScopePathBuilder
 {
     public ScopePath Build(ScopeToken scopeToken)
     {
+#pragma warning disable RS0030 // Do not use banned APIs
         return ScopePathFactory.Create(scopeToken);
+#pragma warning restore RS0030 // Do not use banned APIs
     }
 
     public bool TryBuild(ScopeToken scopeToken, out ScopePath scopePath)
     {
+#pragma warning disable RS0030 // Do not use banned APIs
         scopePath = ScopePathFactory.Create(scopeToken);
+#pragma warning restore RS0030 // Do not use banned APIs
         return !IsEmpty(scopePath);
     }
 
