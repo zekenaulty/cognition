@@ -29,7 +29,7 @@
 1. Ship the persona-obligation modal follow-ups: inline note history + resolve/dismiss CTA parity across Fiction Projects + Planner Telemetry pages (plans/fiction/phase-001/session_20251116_action_plan.md).
 2. Let authors actually kick off a plan from the console (new plan wizard, persona selection, initial backlog seed) so we test the loop with humans, not seed data (plans/fiction/phase-001/plan-first-draft.md).
 3. Expand backlog telemetry widgets to include end-user alerts (stale backlog card, blocked lore popover) rather than admin-only metrics (plans/_next_session_prompt.md).
-4. Normalize ScopePath usage post-review: audit for lingering `ScopePath.Parse`/direct constructors, add analyzer baselines, and document the factory-only contract (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
+4. [Done] Normalize ScopePath usage post-review: audit for lingering `ScopePath.Parse`/direct constructors, add analyzer baselines, and document the factory-only contract (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
 5. Replace the in-memory vector score with cosine similarity so offline tests mirror OpenSearch behavior (tests/Cognition.Data.Vectors.Tests/*, plans/alpha_security_observability_hardening.md).
 6. Land the sandbox + foundry missing pieces: implement the OOPS worker, queue/approval Hangfire jobs, and exercise HGTF end-to-end with integration tests (docs/specs/human_gated_tool_foundry.md, plans/alpha_security_observability_hardening.md).
 7. Wire structured correlation logging now that planner quotas and authorization policies are in place (plans/alpha_security_observability_hardening.md, plans/planning_the_planner.md:183-205).
