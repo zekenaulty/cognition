@@ -20,20 +20,22 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
     private const string DefaultBranch = "main";
     private const string DefaultWorldBibleDomain = "core";
     private static readonly TimeSpan BacklogResumeThreshold = TimeSpan.FromMinutes(60);
-    private static readonly TimeSpan LoreFulfillmentThreshold = TimeSpan.FromMinutes(45);
 
     private readonly CognitionDbContext _db;
     private readonly IFictionWeaverJobClient _jobs;
     private readonly ILogger<FictionBacklogScheduler> _logger;
+    private readonly FictionAutomationOptions _automationOptions;
 
     public FictionBacklogScheduler(
         CognitionDbContext db,
         IFictionWeaverJobClient jobs,
-        ILogger<FictionBacklogScheduler> logger)
+        ILogger<FictionBacklogScheduler> logger,
+        Microsoft.Extensions.Options.IOptions<FictionAutomationOptions>? automationOptions = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _automationOptions = automationOptions?.Value ?? new FictionAutomationOptions();
     }
 
     public async Task ScheduleAsync(
@@ -289,7 +291,8 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             return;
         }
 
-        var cutoff = DateTime.UtcNow - LoreFulfillmentThreshold;
+        var now = DateTime.UtcNow;
+        var cutoff = now - _automationOptions.LoreAutoFulfillmentSla;
         var requirements = await _db.FictionLoreRequirements
             .Where(r => r.FictionPlanId == plan.Id && r.Status == FictionLoreRequirementStatus.Blocked && r.WorldBibleEntryId == null)
             .Where(r => (r.UpdatedAtUtc ?? r.CreatedAtUtc) <= cutoff)
@@ -305,12 +308,25 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         foreach (var requirement in requirements)
         {
             var metadata = LoreRequirementMetadata.FromJson(requirement.MetadataJson);
+            var branchContext = metadata.ResolveBranchContext(plan.PrimaryBranchSlug, branch);
+            var lastUpdatedAt = requirement.UpdatedAtUtc ?? requirement.CreatedAtUtc;
+            var age = now - lastUpdatedAt;
             if (metadata.AutoFulfillmentRequestedUtc.HasValue)
             {
                 continue;
             }
 
-            metadata.AutoFulfillmentRequestedUtc = DateTime.UtcNow;
+            metadata.AutoFulfillmentRequestedUtc = now;
+            metadata.BranchSlug ??= branchContext.Slug;
+            metadata.BranchLineage ??= branchContext.Lineage;
+            if (context.ConversationId != Guid.Empty)
+            {
+                metadata.AutoFulfillmentConversationId ??= context.ConversationId;
+            }
+            if (context.AgentId != Guid.Empty)
+            {
+                metadata.AutoFulfillmentAgentId ??= context.AgentId;
+            }
             requirement.MetadataJson = metadata.Serialize();
             metadataUpdated = true;
 
@@ -318,8 +334,16 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             {
                 ["autoFulfillment"] = "true",
                 ["requirementId"] = requirement.Id.ToString(),
-                ["branchSlug"] = branch
+                ["branchSlug"] = branchContext.Slug,
+                ["slaMinutes"] = ((int)Math.Round(_automationOptions.LoreAutoFulfillmentSla.TotalMinutes)).ToString(CultureInfo.InvariantCulture)
             };
+
+            if (metadata.BranchLineage is { Count: > 0 })
+            {
+                jobMetadata["branchLineage"] = string.Join(",", metadata.BranchLineage);
+            }
+
+            LogLoreAutomationRequest(plan, requirement, branchContext, context, age);
 
             _jobs.EnqueueLoreFulfillment(
                 plan.Id,
@@ -328,7 +352,7 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
                 context.ConversationId,
                 providerId,
                 modelId,
-                branch,
+                branchContext.Slug,
                 jobMetadata);
 
             _logger.LogInformation(
@@ -819,6 +843,64 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         {
             ConversationId = context.ConversationId,
             Kind = "fiction.backlog.action",
+            Payload = payload,
+            Timestamp = DateTime.UtcNow
+        });
+    }
+
+    private void LogLoreAutomationRequest(
+        FictionPlan plan,
+        FictionLoreRequirement requirement,
+        LoreBranchContext branchContext,
+        FictionPhaseExecutionContext context,
+        TimeSpan age)
+    {
+        var payload = new JObject
+        {
+            ["planId"] = plan.Id,
+            ["planName"] = plan.Name,
+            ["requirementId"] = requirement.Id,
+            ["requirementSlug"] = requirement.RequirementSlug,
+            ["title"] = requirement.Title,
+            ["action"] = "auto-requested",
+            ["branch"] = branchContext.Slug,
+            ["status"] = requirement.Status.ToString(),
+            ["source"] = "automation",
+            ["age"] = age.TotalSeconds,
+            ["requestedAtUtc"] = DateTime.UtcNow,
+            ["slaMinutes"] = (int)Math.Round(_automationOptions.LoreAutoFulfillmentSla.TotalMinutes)
+        };
+
+        if (branchContext.Lineage is { Count: > 0 })
+        {
+            payload["branchLineage"] = new JArray(branchContext.Lineage);
+        }
+
+        if (context.ConversationId != Guid.Empty)
+        {
+            payload["conversationId"] = context.ConversationId;
+        }
+
+        if (context.AgentId != Guid.Empty)
+        {
+            payload["agentId"] = context.AgentId;
+        }
+
+        if (TryResolveProvider(context.Metadata, out var providerId))
+        {
+            payload["providerId"] = providerId;
+        }
+
+        var modelId = TryResolveModel(context.Metadata);
+        if (modelId.HasValue)
+        {
+            payload["modelId"] = modelId.Value;
+        }
+
+        _db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = context.ConversationId,
+            Kind = "fiction.lore.fulfillment",
             Payload = payload,
             Timestamp = DateTime.UtcNow
         });

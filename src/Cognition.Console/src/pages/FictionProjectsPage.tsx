@@ -408,7 +408,7 @@ export default function FictionProjectsPage() {
   }, []);
 
   const handleObligationDialogSubmit = React.useCallback(
-    async (notes: string) => {
+    async (payload: { notes: string; voiceDrift?: boolean | null }) => {
       if (!token || !selectedPlanId || !obligationDialog) {
         return;
       }
@@ -421,7 +421,9 @@ export default function FictionProjectsPage() {
           {
             action: obligationDialog.action,
             source: 'console',
-            notes
+            notes: payload.notes,
+            voiceDrift: payload.voiceDrift,
+            backlogId: obligationDialog.obligation.sourceBacklogId ?? null
           },
           token
         );

@@ -16,6 +16,7 @@ using Cognition.Contracts.Events;
 using Cognition.Testing.Utilities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -237,8 +238,14 @@ public class FictionPlanBacklogTests
         entry.EntryName.Should().Be("Stellar Key");
         entry.Content.Summary.Should().Contain("Ancient artifact");
 
-        db.WorkflowEvents.Should().HaveCount(1);
-        db.WorkflowEvents.Single().Kind.Should().Be("fiction.lore.fulfillment");
+        var workflowEvents = db.WorkflowEvents.ToList();
+        workflowEvents.Count(e => e.Kind == "fiction.lore.fulfillment").Should().BeGreaterOrEqualTo(1);
+        workflowEvents.Any(e =>
+                e.Kind == "fiction.lore.fulfillment" &&
+                e.Payload is JObject payload &&
+                string.Equals(payload.Value<string>("action"), "fulfilled", StringComparison.OrdinalIgnoreCase))
+            .Should()
+            .BeTrue();
     }
 
     [Fact]

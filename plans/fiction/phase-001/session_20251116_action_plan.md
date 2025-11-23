@@ -1,14 +1,15 @@
-# Phase 001 – Session 2025-11-16 Action Plan
+# Phase 001 - Session 2025-11-16 Action Plan
 
 ## Definition of Done
 - Backlog console widgets consume `/backlog` + `/resume`, enforce metadata requirements, and emit telemetry/audit logs; admins can resume items without CLI/SQL.
 - Lore fulfillment automation triggers off SLA breaches, records provenance/timelines, and console users can review/approve history.
-- Persona obligations are created/tagged/resolved through API + console flows with alerts for aging items, and regression tests cover backlog → scheduler → lore + obligation loops.
+- Persona obligations are created/tagged/resolved through API + console flows with alerts for aging items, and regression tests cover backlog -> scheduler -> lore + obligation loops.
 
 ## Status (2025-11-18)
-- Backlog + obligation UX is live in Fiction Projects and Planner Telemetry, and an end-to-end regression anchors the resume → fulfill → resolve workflow.
+- Backlog + obligation UX is live in Fiction Projects and Planner Telemetry, and an end-to-end regression anchors the resume -> fulfill -> resolve workflow.
 - Persona obligations now include inline persona-memory/world notes, resume dialogs apply default provider/model metadata, and Planner Telemetry exposes the same backlog alerts + dialogs so Ops can triage stale backlog, lore, and obligations in one place.
 - Remaining work is explicitly user-facing (plan creation CTA, backlog alert cards, lore auto-fulfillment), so keep the stack focused on features end users can touch.
+- Lore auto-fulfillment now emits workflow events with branch lineage, request/completion timestamps, SLA minutes, and automation agent/conversation IDs; console/telemetry timelines surface these fields with SLA/automation badges.
 
 ## Snapshot
 - Backlog + resume APIs are live and metadata contracts are enforced end-to-end (ConversationTask.ProviderId/ModelId/TaskId/ConversationPlanId).
@@ -26,7 +27,7 @@
 2. **Lore fulfillment automation pipeline**
    - Trigger fulfillment tool runs when requirements stay `Blocked` beyond SLA; capture `conversationId/planPassId/source` metadata from assistants.
    - Persist fulfillment timelines + branch lineage history per requirement; expose in API + console detail views.
-   - Publish lifecycle telemetry (request → draft → approval) tied to specific backlog items / Hangfire jobs.
+   - Publish lifecycle telemetry (request -> draft -> approval) tied to specific backlog items / Hangfire jobs.
 
 3. **Persona obligation tagging + drift monitoring**
    - Extend persona context payload with outstanding obligations, change history, and Ops alerts when memories drift off prompt baselines.
@@ -35,11 +36,11 @@
 
 4. **Telemetry & dashboard enrichments**
    - Pipe backlog vs `FictionPhaseProgressed` drift, resume success/timeout counters, and lore SLA metrics into Planner Telemetry visualizations.
-   - Add branch-aware filters and alerting (e.g., “branch alt-beta has 4 blocked lore items for >6h”).
+   - Add branch-aware filters and alerting (e.g., "branch alt-beta has 4 blocked lore items for >6h").
    - Ensure console actions log to telemetry streams for audit trails.
 
 5. **Regression coverage & contracts**
-   - Add deterministic tests for backlog resume (API → scheduler → Hangfire) and lore fulfillment propagation (branch lineage, metadata contract).
+   - Add deterministic tests for backlog resume (API -> scheduler -> Hangfire) and lore fulfillment propagation (branch lineage, metadata contract).
    - Cover persona obligation workflows and backlog metadata serialization in both API + jobs layers.
    - Extend console unit tests (hooks/components) once backlog widgets + lore timelines are implemented.
 

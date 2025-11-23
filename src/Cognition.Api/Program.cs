@@ -61,6 +61,8 @@ builder.Services.AddOptions<OpsAlertingOptions>()
     .ValidateOnStart();
 builder.Services.AddOptions<PlannerQuotaOptions>()
     .Bind(builder.Configuration.GetSection(PlannerQuotaOptions.SectionName));
+builder.Services.AddOptions<FictionAutomationOptions>()
+    .Bind(builder.Configuration.GetSection(FictionAutomationOptions.SectionName));
 builder.Services.AddSingleton<IValidateOptions<OpsAlertingOptions>, OpsAlertingOptionsValidator>();
 builder.Services.AddScoped<Cognition.Api.Infrastructure.ScopePath.ScopePathBackfillService>();
 

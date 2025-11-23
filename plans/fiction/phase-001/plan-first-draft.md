@@ -18,6 +18,8 @@
 - Plan creation wizard + backlog alert cards now ship inside Fiction Projects/Telemetry, so alpha authors can kick off plans and see stalled work without CLI/seed hacks.
 - Server-side plan creation is now wired: `/api/fiction/projects` exposes project creation/listing and `POST /api/fiction/plans` seeds backlog + conversation metadata via a dedicated factory, so the console can build the wizard without CLI hacks.
 - Persona memories/world notes now surface inline with backlog obligations, resume dialogs fall back to provider/model defaults, and Planner Telemetry reuses the backlog alerts + dialogs so Ops can triage stale backlog, lore, and obligations without context-switching.
+- Persona obligations now require resolution notes, tag backlog/task/conversation sources, log resolution history (including voice-drift flags), and surface aging/drift cues in console dialogs and telemetry timelines.
+- Backlog resume contract hardened: conversation tasks persist provider/model/agent IDs, API enforces/telemeters contract mismatches (`fiction.backlog.contract` events), and an end-to-end resume -> scheduler -> lore job regression now asserts workflow events + metadata propagation.
 - Next steps are explicitly user-facing: ship the plan creation wizard, backlog widgets that call out blocked work, and guided flows for fulfilling lore/closing obligations so authors can finish a chapter without help.
 
 ## Current Architecture Snapshot (Nov 2025)
@@ -195,6 +197,9 @@
 - [ ] Backlog-driven orchestration + resume UX polish so user-facing progress, resumes, and dashboards stay authoritative (server-side guardrails landed; UI/console + telemetry still pending).
 - [x] Author persona context hydration + automatic memory append validated end-to-end (Immediate Priority #3 / Milestone H).
   - [x] Console/API surfacing for tracked characters + lore requirements with branch lineage (Immediate Priority #4 / Milestone D). _Fiction plan roster endpoint + console projects page are live._
+- [x] Lore auto-fulfillment telemetry + SLA: blocked requirements queue Hangfire auto-runs with branch lineage, automation conversation/agent IDs, request/completion timestamps, and SLA minutes logged to workflow events and console timelines.
+- [x] Persona obligations: resolution requires notes, records backlog/task/conversation sources, logs history (including voice-drift flags), and surfaces aging/drift cues in console + telemetry.
+- [x] Backlog resume metadata contract enforced; contract drift/mismatch emits workflow events, conversation tasks persist provider/agent/model IDs, and a resume->scheduler->lore job regression guards the loop.
 - [ ] Hangfire + front-end backlog metadata contract signed off, telemetry hooks live, and Scenario #1 rehearsal recorded.
 - [ ] CharacterLifecycleService + lore requirement migrations landed with telemetry (`FictionCharacterPromoted`, `FictionLoreRequirementBlocked`) and Scenarios #2/#4 ready to run.
 - [ ] Acceptance scenarios 1-4 rehearsed with artifacts (videos/logs) attached to the Phase 001 completion report.

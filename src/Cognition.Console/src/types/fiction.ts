@@ -28,6 +28,7 @@ export type LoreFulfillmentLog = {
   requirementSlug: string;
   action: string;
   branch: string;
+  branchLineage?: string[] | null;
   actor?: string | null;
   actorId?: string | null;
   source: string;
@@ -37,6 +38,11 @@ export type LoreFulfillmentLog = {
   conversationId?: string | null;
   planPassId?: string | null;
   timestampUtc: string;
+  requestedAtUtc?: string | null;
+  completedAtUtc?: string | null;
+  automationConversationId?: string | null;
+  automationAgentId?: string | null;
+  slaMinutes?: number | null;
 };
 
 export type BacklogActionLog = {
@@ -216,6 +222,10 @@ export type ResolvePersonaObligationPayload = {
   notes?: string | null;
   source?: string | null;
   action?: 'resolve' | 'dismiss' | string | null;
+  backlogId?: string | null;
+  taskId?: string | null;
+  conversationId?: string | null;
+  voiceDrift?: boolean | null;
 };
 
 export type CreateFictionPlanPayload = {

@@ -19,7 +19,7 @@ type Props = {
   action: 'resolve' | 'dismiss';
   submitting: boolean;
   error?: string | null;
-  onSubmit: (notes: string) => void;
+  onSubmit: (payload: { notes: string; voiceDrift?: boolean | null }) => void;
   onClose: () => void;
 };
 
@@ -33,10 +33,12 @@ export function PersonaObligationActionDialog({
   onClose
 }: Props) {
   const [notes, setNotes] = React.useState('');
+  const [voiceDrift, setVoiceDrift] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
       setNotes('');
+      setVoiceDrift(false);
     }
   }, [open, obligation?.id, action]);
 
@@ -50,7 +52,7 @@ export function PersonaObligationActionDialog({
   const handleSubmit = (evt: React.FormEvent) => {
     evt.preventDefault();
     if (!disabled) {
-      onSubmit(notes.trim());
+      onSubmit({ notes: notes.trim(), voiceDrift });
     }
   };
 
@@ -83,6 +85,20 @@ export function PersonaObligationActionDialog({
                 ))}
               </Stack>
             )}
+            {metadata.resolutionNotes.length > 0 && (
+              <Stack spacing={0.25}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  Resolution history
+                </Typography>
+                {metadata.resolutionNotes.map(note => (
+                  <Typography key={note.id} variant="caption" color="text.secondary">
+                    {note.actor ? `${note.actor}: ` : ''}
+                    {note.note}
+                    {note.timestamp ? ` (${note.timestamp})` : ''}
+                  </Typography>
+                ))}
+              </Stack>
+            )}
             <TextField
               label="Resolution notes"
               value={notes}
@@ -94,6 +110,21 @@ export function PersonaObligationActionDialog({
               helperText="Explain what changed or why this obligation is being closed."
               autoFocus
             />
+            <Stack direction="row" spacing={1} alignItems="center">
+              <input
+                type="checkbox"
+                id="voiceDrift"
+                checked={voiceDrift}
+                onChange={evt => setVoiceDrift(evt.target.checked)}
+                disabled={submitting}
+                style={{ width: 16, height: 16 }}
+              />
+              <label htmlFor="voiceDrift">
+                <Typography variant="caption" color="text.secondary">
+                  Flag voice drift noted in this resolution
+                </Typography>
+              </label>
+            </Stack>
             {error && <Alert severity="error">{error}</Alert>}
           </Stack>
         </DialogContent>

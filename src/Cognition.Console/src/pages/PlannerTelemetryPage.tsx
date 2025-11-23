@@ -482,7 +482,7 @@ export default function PlannerTelemetryPage() {
   }, [obligationActionId]);
 
   const handleObligationDialogSubmit = React.useCallback(
-    async (notes?: string | null, action?: 'resolve' | 'dismiss') => {
+    async (payload?: { notes: string; voiceDrift?: boolean | null }, action?: 'resolve' | 'dismiss') => {
       if (!token || !rosterPlanId || !obligationDialog) {
         setObligationActionError('Missing obligation context.');
         return;
@@ -492,9 +492,11 @@ export default function PlannerTelemetryPage() {
       setObligationActionError(null);
       try {
         const payload = {
-          notes: notes ?? undefined,
+          notes: payload?.notes ?? undefined,
+          voiceDrift: payload?.voiceDrift,
           source: 'console',
-          action: action ?? obligationDialog.action
+          action: action ?? obligationDialog.action,
+          backlogId: target.sourceBacklogId ?? null
         };
         const updated = await fictionApi.resolvePersonaObligation(rosterPlanId, target.id, payload, token);
         setPlanObligations(items => items.map(item => (item.id === updated.id ? updated : item)));
@@ -544,6 +546,21 @@ export default function PlannerTelemetryPage() {
     [planRoster]
   );
 
+  const planDriftObligations = React.useMemo(
+    () => planObligations.filter(obligation => summarizeObligationMetadata(obligation.metadata).voiceDrift),
+    [planObligations]
+  );
+
+  const planAgingObligations = React.useMemo(() => {
+    const thresholdMs = AGING_THRESHOLD_HOURS * 60 * 60 * 1000;
+    return planObligations.filter(obligation => {
+      if (!obligation.createdAtUtc) return false;
+      const created = new Date(obligation.createdAtUtc);
+      if (Number.isNaN(created.getTime())) return false;
+      return Date.now() - created.getTime() > thresholdMs;
+    });
+  }, [planObligations]);
+
   const planOpenObligations = React.useMemo(
     () => planObligations.filter(obligation => isObligationOpen(obligation.status)),
     [planObligations]
@@ -560,7 +577,11 @@ export default function PlannerTelemetryPage() {
   );
 
   const planAlertCount =
-    planStaleBacklogItems.length + planMissingLoreRequirements.length + planOpenObligations.length;
+    planStaleBacklogItems.length +
+    planMissingLoreRequirements.length +
+    planOpenObligations.length +
+    planDriftObligations.length +
+    planAgingObligations.length;
 
   const scrollToRoster = React.useCallback(() => {
     rosterCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -718,11 +739,11 @@ export default function PlannerTelemetryPage() {
                     </Button>
                   }
                 >
-                  {planMissingLoreRequirements.length} lore requirement
-                  {planMissingLoreRequirements.length === 1 ? '' : 's'} remain blocked. Jump to the roster panel to fulfill the gaps.
-                </Alert>
-              )}
-              {planOpenObligations.length > 0 && (
+              {planMissingLoreRequirements.length} lore requirement
+              {planMissingLoreRequirements.length === 1 ? '' : 's'} remain blocked. Jump to the roster panel to fulfill the gaps.
+            </Alert>
+          )}
+          {planOpenObligations.length > 0 && (
                 <Alert
                   severity="warning"
                   action={
@@ -731,14 +752,26 @@ export default function PlannerTelemetryPage() {
                     </Button>
                   }
                 >
-                  {planOpenObligations.length} persona obligation
-                  {planOpenObligations.length === 1 ? '' : 's'} require attention. Use the modal to resolve or dismiss them.
-                </Alert>
-              )}
-            </Stack>
+              {planOpenObligations.length} persona obligation
+              {planOpenObligations.length === 1 ? '' : 's'} require attention. Use the modal to resolve or dismiss them.
+            </Alert>
           )}
-        </CardContent>
-      </Card>
+          {planDriftObligations.length > 0 && (
+            <Alert severity="info">
+              {planDriftObligations.length} persona obligation
+              {planDriftObligations.length === 1 ? '' : 's'} flagged for voice drift. Review resolutions to reset tone.
+            </Alert>
+          )}
+          {planAgingObligations.length > 0 && (
+            <Alert severity="warning">
+              {planAgingObligations.length} persona obligation
+              {planAgingObligations.length === 1 ? '' : 's'} aging without resolution (>{AGING_THRESHOLD_HOURS}h).
+            </Alert>
+          )}
+        </Stack>
+      )}
+    </CardContent>
+  </Card>
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={8}>
@@ -1535,7 +1568,7 @@ export default function PlannerTelemetryPage() {
         action={obligationDialog?.action ?? 'resolve'}
         submitting={Boolean(obligationDialog && obligationActionId === obligationDialog.obligation.id)}
         error={obligationActionError}
-        onSubmit={notes => handleObligationDialogSubmit(notes)}
+        onSubmit={payload => handleObligationDialogSubmit(payload)}
         onClose={handleObligationDialogClose}
       />
     </Stack>

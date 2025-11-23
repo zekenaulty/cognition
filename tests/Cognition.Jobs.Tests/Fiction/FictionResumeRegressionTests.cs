@@ -15,6 +15,7 @@ using Cognition.Testing.Utilities;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Newtonsoft.Json.Linq;
 using NSubstitute;
 using Rebus.Bus;
 using Xunit;
@@ -117,7 +118,13 @@ public class FictionResumeRegressionTests
 
         // Verify Workflow Event
         var events = await db.WorkflowEvents.ToListAsync();
-        events.Should().ContainSingle(e => e.Kind == "fiction.lore.fulfillment");
+        events.Count(e => e.Kind == "fiction.lore.fulfillment").Should().BeGreaterOrEqualTo(1);
+        events.Any(e =>
+                e.Kind == "fiction.lore.fulfillment" &&
+                e.Payload is JObject payload &&
+                string.Equals(payload.Value<string>("action"), "fulfilled", StringComparison.OrdinalIgnoreCase))
+            .Should()
+            .BeTrue();
     }
 
     // --- Helpers ---

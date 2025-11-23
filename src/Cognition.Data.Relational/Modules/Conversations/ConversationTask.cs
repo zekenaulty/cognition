@@ -21,4 +21,9 @@ public class ConversationTask : BaseEntity
     public string? Status { get; set; } // Pending/Success/Failure
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string? BacklogItemId { get; set; }
+
+    // Metadata to align backlog resumes with provider/model/agent contracts
+    public Guid? ProviderId { get; set; }
+    public Guid? ModelId { get; set; }
+    public Guid? AgentId { get; set; }
 }

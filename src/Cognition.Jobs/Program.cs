@@ -81,6 +81,8 @@ builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
 builder.Services.AddTransient<IFictionBacklogScheduler, FictionBacklogScheduler>();
 builder.Services.AddOptions<PlannerQuotaOptions>()
     .Bind(builder.Configuration.GetSection(PlannerQuotaOptions.SectionName));
+builder.Services.AddOptions<FictionAutomationOptions>()
+    .Bind(builder.Configuration.GetSection(FictionAutomationOptions.SectionName));
 
 var workflowEventsEnabled = builder.Configuration.GetValue("WorkflowEvents:Enabled", true);
 builder.Services.AddScoped(sp => new WorkflowEventLogger(sp.GetRequiredService<CognitionDbContext>(), workflowEventsEnabled));

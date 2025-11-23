@@ -33,6 +33,7 @@ public class FictionWeaverJobs
     private readonly WorkflowEventLogger _workflowLogger;
     private readonly IFictionBacklogScheduler _backlogScheduler;
     private readonly IScopePathBuilder _scopePaths;
+    private readonly FictionAutomationOptions _automationOptions;
     private static readonly JsonSerializerOptions MetadataSerializerOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -46,7 +47,8 @@ public class FictionWeaverJobs
         WorkflowEventLogger workflowLogger,
         IFictionBacklogScheduler backlogScheduler,
         IScopePathBuilder scopePathBuilder,
-        ILogger<FictionWeaverJobs> logger)
+        ILogger<FictionWeaverJobs> logger,
+        Microsoft.Extensions.Options.IOptions<FictionAutomationOptions>? automationOptions = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -56,6 +58,7 @@ public class FictionWeaverJobs
         _workflowLogger = workflowLogger ?? throw new ArgumentNullException(nameof(workflowLogger));
         _backlogScheduler = backlogScheduler ?? throw new ArgumentNullException(nameof(backlogScheduler));
         _scopePaths = scopePathBuilder ?? throw new ArgumentNullException(nameof(scopePathBuilder));
+        _automationOptions = automationOptions?.Value ?? new FictionAutomationOptions();
     }
 
     public Task<FictionPhaseResult> RunVisionPlannerAsync(
@@ -157,6 +160,7 @@ public class FictionWeaverJobs
         IReadOnlyDictionary<string, string>? metadata = null,
         CancellationToken cancellationToken = default)
     {
+        var slaMinutes = (int)Math.Round(_automationOptions.LoreAutoFulfillmentSla.TotalMinutes);
         var requirement = await _db.FictionLoreRequirements
             .Include(r => r.FictionPlan)
             .FirstOrDefaultAsync(r => r.Id == requirementId && r.FictionPlanId == planId, cancellationToken)
@@ -174,50 +178,93 @@ public class FictionWeaverJobs
             return;
         }
 
-        var normalizedBranch = string.IsNullOrWhiteSpace(branchSlug) ? DefaultBranch : branchSlug.Trim();
-        var worldBible = await GetOrCreateWorldBibleAsync(planId, normalizedBranch, cancellationToken).ConfigureAwait(false);
-        var entrySlug = NormalizeSlug(string.IsNullOrWhiteSpace(requirement.RequirementSlug) ? requirement.Title : requirement.RequirementSlug);
-        entrySlug = await EnsureUniqueWorldBibleSlugAsync(worldBible.Id, entrySlug, cancellationToken).ConfigureAwait(false);
-
-        var sequence = await GetNextWorldBibleSequenceAsync(worldBible.Id, cancellationToken).ConfigureAwait(false);
-        var summary = requirement.Description ?? requirement.Notes ?? $"Auto fulfillment for {requirement.Title}";
-        var autoNote = $"Auto-fulfilled on {DateTime.UtcNow:O}";
-
-        var entry = new FictionWorldBibleEntry
-        {
-            FictionWorldBibleId = worldBible.Id,
-            EntrySlug = entrySlug,
-            EntryName = string.IsNullOrWhiteSpace(requirement.Title) ? entrySlug : requirement.Title,
-            Content = new FictionWorldBibleEntryContent
-            {
-                Category = "lore",
-                Summary = summary,
-                Status = "ready",
-                ContinuityNotes = BuildContinuityNotes(requirement, autoNote),
-                Branch = normalizedBranch,
-                UpdatedAtUtc = DateTime.UtcNow
-            },
-            ChangeType = FictionWorldBibleChangeType.Update,
-            Sequence = sequence
-        };
-
-        _db.FictionWorldBibleEntries.Add(entry);
-
-        requirement.WorldBibleEntryId = entry.Id;
-        requirement.Status = FictionLoreRequirementStatus.Ready;
-        requirement.UpdatedAtUtc = DateTime.UtcNow;
-        requirement.Notes = AppendNote(requirement.Notes, autoNote);
-
         var metadataModel = LoreRequirementMetadata.FromJson(requirement.MetadataJson);
-        metadataModel.AutoFulfillmentCompletedUtc = DateTime.UtcNow;
-        requirement.MetadataJson = metadataModel.Serialize();
+        metadataModel.AutoFulfillmentRequestedUtc ??= DateTime.UtcNow;
+        var branchContext = metadataModel.ResolveBranchContext(requirement.FictionPlan?.PrimaryBranchSlug, branchSlug);
+        var normalizedBranch = string.IsNullOrWhiteSpace(branchContext.Slug) ? DefaultBranch : branchContext.Slug;
+        var attemptPayload = BuildLoreAutomationEventPayload(
+            "auto-attempt",
+            planId,
+            requirement,
+            branchContext,
+            metadataModel,
+            metadata,
+            conversationId,
+            agentId,
+            slaMinutes);
+        await _workflowLogger.LogAsync(conversationId, "fiction.lore.fulfillment", attemptPayload).ConfigureAwait(false);
 
-        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var worldBible = await GetOrCreateWorldBibleAsync(planId, normalizedBranch, cancellationToken).ConfigureAwait(false);
+            var entrySlug = NormalizeSlug(string.IsNullOrWhiteSpace(requirement.RequirementSlug) ? requirement.Title : requirement.RequirementSlug);
+            entrySlug = await EnsureUniqueWorldBibleSlugAsync(worldBible.Id, entrySlug, cancellationToken).ConfigureAwait(false);
 
-        var payload = BuildLoreFulfillmentPayload(planId, requirement, entry, normalizedBranch, metadata);
-        await _workflowLogger.LogAsync(conversationId, "fiction.lore.fulfillment", payload).ConfigureAwait(false);
+            var sequence = await GetNextWorldBibleSequenceAsync(worldBible.Id, cancellationToken).ConfigureAwait(false);
+            var summary = requirement.Description ?? requirement.Notes ?? $"Auto fulfillment for {requirement.Title}";
+            var autoNote = $"Auto-fulfilled on {DateTime.UtcNow:O}";
 
-        _logger.LogInformation("Lore requirement {RequirementId} auto-fulfilled and linked to world bible entry {EntryId}.", requirement.Id, entry.Id);
+            var entry = new FictionWorldBibleEntry
+            {
+                FictionWorldBibleId = worldBible.Id,
+                EntrySlug = entrySlug,
+                EntryName = string.IsNullOrWhiteSpace(requirement.Title) ? entrySlug : requirement.Title,
+                Content = new FictionWorldBibleEntryContent
+                {
+                    Category = "lore",
+                    Summary = summary,
+                    Status = "ready",
+                    ContinuityNotes = BuildContinuityNotes(requirement, autoNote),
+                    Branch = normalizedBranch,
+                    UpdatedAtUtc = DateTime.UtcNow
+                },
+                ChangeType = FictionWorldBibleChangeType.Update,
+                Sequence = sequence
+            };
+
+            _db.FictionWorldBibleEntries.Add(entry);
+
+            requirement.WorldBibleEntryId = entry.Id;
+            requirement.Status = FictionLoreRequirementStatus.Ready;
+            requirement.UpdatedAtUtc = DateTime.UtcNow;
+            requirement.Notes = AppendNote(requirement.Notes, autoNote);
+
+            metadataModel.AutoFulfillmentCompletedUtc = DateTime.UtcNow;
+            metadataModel.BranchSlug ??= normalizedBranch;
+            metadataModel.BranchLineage ??= branchContext.Lineage;
+            if (conversationId != Guid.Empty)
+            {
+                metadataModel.AutoFulfillmentConversationId ??= conversationId;
+            }
+            if (agentId != Guid.Empty)
+            {
+                metadataModel.AutoFulfillmentAgentId ??= agentId;
+            }
+            requirement.MetadataJson = metadataModel.Serialize();
+
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            var payload = BuildLoreFulfillmentPayload(planId, requirement, entry, branchContext, metadata, conversationId, agentId, metadataModel, slaMinutes);
+            await _workflowLogger.LogAsync(conversationId, "fiction.lore.fulfillment", payload).ConfigureAwait(false);
+
+            _logger.LogInformation("Lore requirement {RequirementId} auto-fulfilled and linked to world bible entry {EntryId}.", requirement.Id, entry.Id);
+        }
+        catch (Exception ex)
+        {
+            var failurePayload = BuildLoreAutomationEventPayload(
+                "auto-failed",
+                planId,
+                requirement,
+                branchContext,
+                metadataModel,
+                metadata,
+                conversationId,
+                agentId,
+                slaMinutes,
+                ex.Message);
+            await _workflowLogger.LogAsync(conversationId, "fiction.lore.fulfillment", failurePayload).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static FictionPhaseExecutionContext CreateContext(
@@ -1415,8 +1462,12 @@ public class FictionWeaverJobs
         Guid planId,
         FictionLoreRequirement requirement,
         FictionWorldBibleEntry entry,
-        string branchSlug,
-        IReadOnlyDictionary<string, string>? metadata)
+        LoreBranchContext branchContext,
+        IReadOnlyDictionary<string, string>? metadata,
+        Guid conversationId,
+        Guid agentId,
+        LoreRequirementMetadata metadataModel,
+        int slaMinutes)
     {
         var payload = new JObject
         {
@@ -1426,14 +1477,105 @@ public class FictionWeaverJobs
             ["requirementSlug"] = requirement.RequirementSlug,
             ["title"] = requirement.Title,
             ["action"] = "fulfilled",
-            ["branch"] = branchSlug,
+            ["branch"] = branchContext.Slug,
             ["status"] = requirement.Status.ToString(),
             ["worldBibleEntryId"] = entry.Id,
             ["notes"] = requirement.Notes,
             ["source"] = metadata is not null && metadata.TryGetValue("autoFulfillment", out var flag) && string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase)
                 ? "automation"
-                : "job"
+                : "job",
+            ["conversationId"] = conversationId,
+            ["agentId"] = agentId,
+            ["slaMinutes"] = slaMinutes
         };
+
+        if (branchContext.Lineage is { Count: > 0 })
+        {
+            payload["branchLineage"] = new JArray(branchContext.Lineage);
+        }
+
+        if (metadataModel.AutoFulfillmentRequestedUtc.HasValue)
+        {
+            payload["autoFulfillmentRequestedAtUtc"] = metadataModel.AutoFulfillmentRequestedUtc.Value;
+        }
+
+        if (metadataModel.AutoFulfillmentCompletedUtc.HasValue)
+        {
+            payload["autoFulfillmentCompletedAtUtc"] = metadataModel.AutoFulfillmentCompletedUtc.Value;
+        }
+
+        if (metadataModel.AutoFulfillmentConversationId.HasValue)
+        {
+            payload["automationConversationId"] = metadataModel.AutoFulfillmentConversationId.Value;
+        }
+
+        if (metadataModel.AutoFulfillmentAgentId.HasValue)
+        {
+            payload["automationAgentId"] = metadataModel.AutoFulfillmentAgentId.Value;
+        }
+
+        return payload;
+    }
+
+    private static JObject BuildLoreAutomationEventPayload(
+        string action,
+        Guid planId,
+        FictionLoreRequirement requirement,
+        LoreBranchContext branchContext,
+        LoreRequirementMetadata metadataModel,
+        IReadOnlyDictionary<string, string>? metadata,
+        Guid conversationId,
+        Guid agentId,
+        int slaMinutes,
+        string? error = null)
+    {
+        var payload = new JObject
+        {
+            ["planId"] = planId,
+            ["planName"] = requirement.FictionPlan?.Name ?? string.Empty,
+            ["requirementId"] = requirement.Id,
+            ["requirementSlug"] = requirement.RequirementSlug,
+            ["title"] = requirement.Title,
+            ["action"] = action,
+            ["branch"] = branchContext.Slug,
+            ["status"] = requirement.Status.ToString(),
+            ["source"] = metadata is not null && metadata.TryGetValue("autoFulfillment", out var flag) && string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase)
+                ? "automation"
+                : "job",
+            ["conversationId"] = conversationId,
+            ["agentId"] = agentId,
+            ["slaMinutes"] = slaMinutes
+        };
+
+        if (branchContext.Lineage is { Count: > 0 })
+        {
+            payload["branchLineage"] = new JArray(branchContext.Lineage);
+        }
+
+        if (metadataModel.AutoFulfillmentRequestedUtc.HasValue)
+        {
+            payload["autoFulfillmentRequestedAtUtc"] = metadataModel.AutoFulfillmentRequestedUtc.Value;
+        }
+
+        if (metadataModel.AutoFulfillmentCompletedUtc.HasValue)
+        {
+            payload["autoFulfillmentCompletedAtUtc"] = metadataModel.AutoFulfillmentCompletedUtc.Value;
+        }
+
+        if (metadataModel.AutoFulfillmentConversationId.HasValue)
+        {
+            payload["automationConversationId"] = metadataModel.AutoFulfillmentConversationId.Value;
+        }
+
+        if (metadataModel.AutoFulfillmentAgentId.HasValue)
+        {
+            payload["automationAgentId"] = metadataModel.AutoFulfillmentAgentId.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            payload["error"] = error;
+        }
 
         return payload;
     }

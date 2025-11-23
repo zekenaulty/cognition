@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
@@ -20,6 +21,7 @@ using Cognition.Jobs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Newtonsoft.Json.Linq;
 
@@ -35,6 +37,7 @@ public sealed class FictionPlansController : ControllerBase
     private readonly IAuthorPersonaRegistry _authorPersonaRegistry;
     private readonly IFictionBacklogScheduler _backlogScheduler;
     private readonly IFictionPlanCreator _planCreator;
+    private readonly IOptions<FictionAutomationOptions> _automationOptions;
     private static readonly JsonSerializerOptions MetadataSerializerOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -45,13 +48,15 @@ public sealed class FictionPlansController : ControllerBase
         ICharacterLifecycleService lifecycleService,
         IAuthorPersonaRegistry authorPersonaRegistry,
         IFictionBacklogScheduler backlogScheduler,
-        IFictionPlanCreator planCreator)
+        IFictionPlanCreator planCreator,
+        IOptions<FictionAutomationOptions> automationOptions)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _lifecycleService = lifecycleService ?? throw new ArgumentNullException(nameof(lifecycleService));
         _authorPersonaRegistry = authorPersonaRegistry ?? throw new ArgumentNullException(nameof(authorPersonaRegistry));
         _backlogScheduler = backlogScheduler ?? throw new ArgumentNullException(nameof(backlogScheduler));
         _planCreator = planCreator ?? throw new ArgumentNullException(nameof(planCreator));
+        _automationOptions = automationOptions ?? throw new ArgumentNullException(nameof(automationOptions));
     }
 
     [HttpGet]
@@ -292,11 +297,23 @@ public sealed class FictionPlansController : ControllerBase
                 continue;
             }
 
+            var branchLineage = TryReadStringArray(payload, "branchLineage");
+            var requestedAtUtc = TryReadDateTime(payload, "requestedAtUtc")
+                ?? TryReadDateTime(payload, "autoFulfillmentRequestedAtUtc")
+                ?? TryReadDateTime(payload, "fulfilledAtUtc");
+            var completedAtUtc = TryReadDateTime(payload, "autoFulfillmentCompletedAtUtc")
+                ?? TryReadDateTime(payload, "fulfilledAtUtc");
+            var automationConversationId = TryReadGuid(payload, "automationConversationId");
+            var automationAgentId = TryReadGuid(payload, "automationAgentId");
+            var slaMinutes = payload.Value<int?>("slaMinutes")
+                ?? (int)Math.Round(_automationOptions.Value.LoreAutoFulfillmentSla.TotalMinutes);
+
             logs.Add(new LoreFulfillmentLogResponse(
                 requirementId.Value,
                 payload.Value<string>("requirementSlug") ?? "(unknown)",
                 payload.Value<string>("action") ?? "fulfilled",
                 payload.Value<string>("branch") ?? plan.PrimaryBranchSlug ?? "main",
+                branchLineage,
                 payload.Value<string>("actor"),
                 payload.Value<string>("actorId"),
                 payload.Value<string>("source") ?? "api",
@@ -305,7 +322,12 @@ public sealed class FictionPlansController : ControllerBase
                 payload.Value<string>("status"),
                 payload.Value<string>("conversationId"),
                 payload.Value<string>("planPassId"),
-                evt.Timestamp));
+                evt.Timestamp,
+                requestedAtUtc,
+                completedAtUtc,
+                automationConversationId,
+                automationAgentId,
+                slaMinutes));
 
             if (logs.Count >= 100)
             {
@@ -349,6 +371,16 @@ public sealed class FictionPlansController : ControllerBase
             return BadRequest("AgentId and ProviderId are required to resume a backlog item.");
         }
 
+        if (!request.ModelId.HasValue || request.ModelId == Guid.Empty)
+        {
+            return BadRequest("ModelId is required to resume a backlog item.");
+        }
+
+        if (request.TaskId == Guid.Empty)
+        {
+            return BadRequest("TaskId is required to resume a backlog item.");
+        }
+
         if (backlog.Status == FictionPlanBacklogStatus.Complete)
         {
             return Conflict($"Backlog item '{backlog.BacklogId}' is already complete.");
@@ -365,6 +397,10 @@ public sealed class FictionPlansController : ControllerBase
         }
 
         if (plan.CurrentConversationPlanId.HasValue && plan.CurrentConversationPlanId.Value != conversationPlan.Id)
+        {
+            return BadRequest("ConversationPlan does not match the plan's current conversation context.");
+        }
+        else if (!plan.CurrentConversationPlanId.HasValue)
         {
             plan.CurrentConversationPlanId = conversationPlan.Id;
         }
@@ -385,6 +421,28 @@ public sealed class FictionPlansController : ControllerBase
             : request.BranchSlug.Trim();
 
         var args = DeserializeArgs(conversationTask.ArgsJson);
+        var existingProviderId = conversationTask.ProviderId ?? TryGetGuidArg(args, "providerId");
+        var existingAgentId = conversationTask.AgentId ?? TryGetGuidArg(args, "agentId");
+        var existingModelId = conversationTask.ModelId ?? TryGetGuidArg(args, "modelId");
+
+        if (existingProviderId.HasValue && existingProviderId.Value != request.ProviderId)
+        {
+            await LogBacklogContractEventAsync(plan, backlog, request, "provider-mismatch", cancellationToken).ConfigureAwait(false);
+            return BadRequest("Conversation task metadata mismatch (provider).");
+        }
+
+        if (existingAgentId.HasValue && existingAgentId.Value != request.AgentId)
+        {
+            await LogBacklogContractEventAsync(plan, backlog, request, "agent-mismatch", cancellationToken).ConfigureAwait(false);
+            return BadRequest("Conversation task metadata mismatch (agent).");
+        }
+
+        if (existingModelId.HasValue && existingModelId.Value != request.ModelId)
+        {
+            await LogBacklogContractEventAsync(plan, backlog, request, "model-mismatch", cancellationToken).ConfigureAwait(false);
+            return BadRequest("Conversation task metadata mismatch (model).");
+        }
+
         SetArg(args, "planId", plan.Id);
         SetArg(args, "agentId", request.AgentId);
         SetArg(args, "conversationId", request.ConversationId);
@@ -394,6 +452,9 @@ public sealed class FictionPlansController : ControllerBase
         SetArg(args, "backlogItemId", backlog.BacklogId);
 
         conversationTask.ArgsJson = JsonSerializer.Serialize(args, MetadataSerializerOptions);
+        conversationTask.ProviderId ??= request.ProviderId;
+        conversationTask.ModelId ??= request.ModelId;
+        conversationTask.AgentId ??= request.AgentId;
         conversationTask.Status = "Pending";
         conversationTask.Error = null;
         conversationTask.Observation = null;
@@ -575,6 +636,11 @@ public sealed class FictionPlansController : ControllerBase
         [FromBody] ResolvePersonaObligationRequest request,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(request.Notes))
+        {
+            return BadRequest("Resolution notes are required.");
+        }
+
         var obligation = await _db.FictionPersonaObligations
             .Include(o => o.Persona)
             .Include(o => o.FictionCharacter)
@@ -601,15 +667,25 @@ public sealed class FictionPlansController : ControllerBase
         }
 
         var metadata = PersonaObligationMetadata.FromJson(obligation.MetadataJson);
-        if (!string.IsNullOrWhiteSpace(request.Notes))
-        {
-            metadata.AddResolutionNote(request.Notes!, DateTime.UtcNow, ResolveActorName(HttpContext));
-        }
+        metadata.AddResolutionNote(request.Notes!, DateTime.UtcNow, ResolveActorName(HttpContext));
         metadata.SetResolvedSource(request.Source ?? "api");
+        metadata.SetResolutionContext(
+            request.BacklogId ?? obligation.SourceBacklogId,
+            request.TaskId,
+            request.ConversationId ?? obligation.SourceConversationId?.ToString());
+        metadata.SetVoiceDriftFlag(request.VoiceDrift);
 
         obligation.Status = targetStatus;
         obligation.ResolvedAtUtc = DateTime.UtcNow;
         obligation.ResolvedByActor = ResolveActorName(HttpContext);
+        if (string.IsNullOrWhiteSpace(obligation.SourceBacklogId) && !string.IsNullOrWhiteSpace(request.BacklogId))
+        {
+            obligation.SourceBacklogId = request.BacklogId;
+        }
+        if (!obligation.SourceConversationId.HasValue && Guid.TryParse(request.ConversationId, out var resolvedConversationId))
+        {
+            obligation.SourceConversationId = resolvedConversationId;
+        }
         obligation.MetadataJson = metadata.Serialize();
         obligation.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -1032,6 +1108,38 @@ public sealed class FictionPlansController : ControllerBase
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task LogBacklogContractEventAsync(
+        FictionPlan plan,
+        FictionPlanBacklogItem backlog,
+        ResumeBacklogRequest request,
+        string code,
+        CancellationToken cancellationToken)
+    {
+        var payload = new JObject
+        {
+            ["planId"] = plan.Id,
+            ["planName"] = plan.Name,
+            ["backlogId"] = backlog.BacklogId,
+            ["code"] = code,
+            ["providerId"] = request.ProviderId,
+            ["modelId"] = request.ModelId,
+            ["agentId"] = request.AgentId,
+            ["conversationId"] = request.ConversationId,
+            ["conversationPlanId"] = request.ConversationPlanId,
+            ["taskId"] = request.TaskId
+        };
+
+        _db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = request.ConversationId,
+            Kind = "fiction.backlog.contract",
+            Payload = payload,
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task LogPersonaObligationEventAsync(
         Guid planId,
         FictionPersonaObligation obligation,
@@ -1053,8 +1161,17 @@ public sealed class FictionPlansController : ControllerBase
             ["source"] = string.IsNullOrWhiteSpace(request.Source) ? "api" : request.Source,
             ["status"] = obligation.Status.ToString(),
             ["branch"] = obligation.BranchSlug,
+            ["branchLineage"] = obligation.BranchSlug is not null && obligation.BranchSlug.Equals("main", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : ExtractBranchLineage(TryParseJson(obligation.MetadataJson)) is { } lineage && lineage.Count > 0
+                    ? new JArray(lineage)
+                    : null,
             ["sourceBacklogId"] = obligation.SourceBacklogId,
-            ["resolvedAtUtc"] = obligation.ResolvedAtUtc
+            ["resolvedAtUtc"] = obligation.ResolvedAtUtc,
+            ["resolvedBacklogId"] = string.IsNullOrWhiteSpace(request.BacklogId) ? obligation.SourceBacklogId : request.BacklogId,
+            ["resolvedTaskId"] = request.TaskId,
+            ["resolvedConversationId"] = request.ConversationId,
+            ["voiceDrift"] = request.VoiceDrift
         };
 
         var actorId = ResolveActorId(HttpContext);
@@ -1138,12 +1255,19 @@ public sealed class FictionPlansController : ControllerBase
             ["status"] = requirement.Status.ToString(),
             ["notes"] = request.Notes,
             ["worldBibleEntryId"] = requirement.WorldBibleEntryId ?? request.WorldBibleEntryId,
-            ["source"] = string.IsNullOrWhiteSpace(request.Source) ? "api" : request.Source
+            ["source"] = string.IsNullOrWhiteSpace(request.Source) ? "api" : request.Source,
+            ["fulfilledAtUtc"] = DateTime.UtcNow,
+            ["slaMinutes"] = (int)Math.Round(_automationOptions.Value.LoreAutoFulfillmentSla.TotalMinutes)
         };
 
         if (!string.IsNullOrWhiteSpace(request.BranchSlug))
         {
             payload["requestedBranch"] = request.BranchSlug;
+        }
+
+        if (branchContext.Lineage is { Count: > 0 })
+        {
+            payload["branchLineage"] = new JArray(branchContext.Lineage);
         }
 
         if (request.ConversationId.HasValue)
@@ -1193,6 +1317,45 @@ public sealed class FictionPlansController : ControllerBase
 
         var value = token.ToString();
         return Guid.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static DateTime? TryReadDateTime(JObject payload, string propertyName)
+    {
+        if (!payload.TryGetValue(propertyName, out var token) || token is null || token.Type == JTokenType.Null)
+        {
+            return null;
+        }
+
+        if (token.Type == JTokenType.Date)
+        {
+            return token.Value<DateTime>();
+        }
+
+        var raw = token.ToString();
+        return DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static IReadOnlyList<string>? TryReadStringArray(JObject payload, string propertyName)
+    {
+        if (!payload.TryGetValue(propertyName, out var token) || token is null || token.Type == JTokenType.Null)
+        {
+            return null;
+        }
+
+        if (token is not JArray array || array.Count == 0)
+        {
+            return null;
+        }
+
+        var values = array
+            .Select(item => item.Type == JTokenType.String ? item.Value<string>() : item.ToString())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .ToList();
+
+        return values.Count == 0 ? null : values;
     }
 
     private static Guid? TryGetGuidArg(IReadOnlyDictionary<string, object?> args, string key)
@@ -1366,6 +1529,7 @@ public sealed class FictionPlansController : ControllerBase
         string RequirementSlug,
         string Action,
         string Branch,
+        IReadOnlyList<string>? BranchLineage,
         string? Actor,
         string? ActorId,
         string Source,
@@ -1374,7 +1538,12 @@ public sealed class FictionPlansController : ControllerBase
         string? Status,
         string? ConversationId,
         string? PlanPassId,
-        DateTime TimestampUtc);
+        DateTime TimestampUtc,
+        DateTime? RequestedAtUtc,
+        DateTime? CompletedAtUtc,
+        Guid? AutomationConversationId,
+        Guid? AutomationAgentId,
+        int SlaMinutes);
 
     public sealed record PersonaObligationListResponse(
         IReadOnlyList<PersonaObligationResponse> Items,
@@ -1487,5 +1656,12 @@ public sealed class FictionPlansController : ControllerBase
         [property: Required] Guid TaskId,
         string? BranchSlug);
 
-    public sealed record ResolvePersonaObligationRequest(string? Notes, string? Source, string? Action);
+    public sealed record ResolvePersonaObligationRequest(
+        string? Notes,
+        string? Source,
+        string? Action,
+        string? BacklogId = null,
+        string? TaskId = null,
+        string? ConversationId = null,
+        bool? VoiceDrift = null);
 }

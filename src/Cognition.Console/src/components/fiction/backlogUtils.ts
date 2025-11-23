@@ -28,6 +28,7 @@ export type ResolutionNoteSummary = {
 export type ObligationMetadataSummary = {
   resolutionNotes: ResolutionNoteSummary[];
   otherEntries: string[];
+  voiceDrift?: boolean;
 };
 
 export function summarizeObligationMetadata(metadata: PersonaObligation['metadata']): ObligationMetadataSummary {
@@ -60,6 +61,10 @@ export function summarizeObligationMetadata(metadata: PersonaObligation['metadat
 
   Object.entries(record).forEach(([key, value]) => {
     if (key === 'resolutionNotes' || key === 'branchLineage') {
+      return;
+    }
+    if (key === 'voiceDrift') {
+      summary.voiceDrift = Boolean(value);
       return;
     }
     const formatted = formatMetadataEntry(key, value);

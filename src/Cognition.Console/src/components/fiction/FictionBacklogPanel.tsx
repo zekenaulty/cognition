@@ -334,12 +334,24 @@ export function FictionBacklogPanel({
       return status !== 'resolved' && status !== 'dismissed';
     });
     const displayedObligations = obligationList.slice(0, 6);
+    const driftedObligations = obligationList.filter(obligation => summarizeObligationMetadata(obligation.metadata).voiceDrift);
+    const agingObligations = obligationList.filter(obligation => isObligationAging(obligation.createdAtUtc));
 
     return (
       <>
         {openObligations.length > 0 && (
           <Alert severity="warning" sx={{ mt: 1 }}>
             {openObligations.length} persona obligation{openObligations.length === 1 ? '' : 's'} awaiting attention.
+          </Alert>
+        )}
+        {driftedObligations.length > 0 && (
+          <Alert severity="info" sx={{ mt: 1 }}>
+            {driftedObligations.length} obligation{driftedObligations.length === 1 ? '' : 's'} flagged for voice drift.
+          </Alert>
+        )}
+        {agingObligations.length > 0 && (
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            {agingObligations.length} obligation{agingObligations.length === 1 ? '' : 's'} aging without resolution (>{AGING_THRESHOLD_HOURS}h).
           </Alert>
         )}
         <List dense sx={{ mt: 1 }}>
@@ -387,6 +399,8 @@ export function FictionBacklogPanel({
                     Persona {obligation.personaName}
                     {obligation.branchSlug ? ` • Branch ${obligation.branchSlug}` : ''}
                     {obligation.sourcePhase ? ` • Source ${obligation.sourcePhase}` : ''}
+                    {isObligationAging(obligation.createdAtUtc) ? ' • Aging' : ''}
+                    {metadataSummary.voiceDrift ? ' • Voice drift flagged' : ''}
                   </Typography>
                   {obligation.branchLineage && obligation.branchLineage.length > 1 && (
                     <Typography variant="caption" color="text.secondary">
@@ -522,6 +536,22 @@ function formatRelative(value?: string | null) {
 
 function formatResolutionNote(note: ReturnType<typeof summarizeObligationMetadata>['resolutionNotes'][number]) {
   return formatResolutionNoteText(note, formatRelative);
+}
+
+function isObligationAging(createdAt?: string | null, thresholdHours = 48) {
+  if (!createdAt) return false;
+  const created = new Date(createdAt);
+  if (Number.isNaN(created.getTime())) return false;
+  const ageMs = Date.now() - created.getTime();
+  return ageMs > thresholdHours * 60 * 60 * 1000;
+}
+
+function isObligationAging(createdAt?: string | null, thresholdHours = AGING_THRESHOLD_HOURS) {
+  if (!createdAt) return false;
+  const created = new Date(createdAt);
+  if (Number.isNaN(created.getTime())) return false;
+  const ageMs = Date.now() - created.getTime();
+  return ageMs > thresholdHours * 60 * 60 * 1000;
 }
 
 function getResumeBlockedReason(

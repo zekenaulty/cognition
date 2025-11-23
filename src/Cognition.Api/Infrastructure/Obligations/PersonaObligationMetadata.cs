@@ -8,6 +8,10 @@ internal sealed class PersonaObligationMetadata
 {
     private const string ResolutionNotesKey = "resolutionNotes";
     private const string ResolvedSourceKey = "resolvedSource";
+    private const string ResolvedBacklogKey = "resolvedBacklogId";
+    private const string ResolvedTaskKey = "resolvedTaskId";
+    private const string ResolvedConversationKey = "resolvedConversationId";
+    private const string VoiceDriftKey = "voiceDrift";
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -70,6 +74,35 @@ internal sealed class PersonaObligationMetadata
         _root[ResolvedSourceKey] = source;
     }
 
+    public void SetResolutionContext(string? backlogId, string? taskId, string? conversationId)
+    {
+        WriteString(ResolvedBacklogKey, backlogId);
+        WriteString(ResolvedTaskKey, taskId);
+        WriteString(ResolvedConversationKey, conversationId);
+    }
+
+    public void SetVoiceDriftFlag(bool? drifted)
+    {
+        if (drifted is null)
+        {
+            _root.Remove(VoiceDriftKey);
+            return;
+        }
+
+        _root[VoiceDriftKey] = drifted.Value;
+    }
+
     public string Serialize()
         => _root.ToJsonString(SerializerOptions);
+
+    private void WriteString(string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _root.Remove(key);
+            return;
+        }
+
+        _root[key] = value;
+    }
 }

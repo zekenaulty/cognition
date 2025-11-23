@@ -276,13 +276,21 @@ export function FictionRosterPanel({
                 <List dense sx={{ mt: 1 }}>
                   {flattenedHistory.map(event => {
                     const badges = getFulfillmentBadges(event);
+                    const branchContext = resolveBranchContext(event.branch, event.branchLineage, roster.branchSlug);
+                    const requestedLabel = formatRelative(event.requestedAtUtc ?? event.timestampUtc);
+                    const completedLabel = formatRelative(event.completedAtUtc ?? event.timestampUtc);
+                    const durationLabel = formatDuration(event.requestedAtUtc, event.completedAtUtc ?? event.timestampUtc);
+                    const lineageLabel =
+                      event.branchLineage && event.branchLineage.length > 1
+                        ? event.branchLineage.join(' → ')
+                        : undefined;
                     return (
                       <ListItem key={`${event.requirementId}-${event.timestampUtc}-${event.action}`} sx={{ py: 0.5 }}>
                         <ListItemText
                           primary={
                             <Stack direction="row" spacing={1} alignItems="center">
                               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                {event.requirementSlug} &mdash; {event.action}
+                                {event.requirementSlug} &mdash; {event.action} ({branchContext.slug})
                               </Typography>
                               {badges.isAutomation && <Chip size="small" color="primary" label="Auto-Run" />}
                               {badges.slaBreach && <Chip size="small" color="error" label="SLA Breach" />}
@@ -291,16 +299,32 @@ export function FictionRosterPanel({
                           secondary={
                             <Stack spacing={0.25}>
                               <Typography variant="caption" color="text.secondary">
-                                {event.actor ?? 'Unknown actor'} via {event.source} on branch {event.branch} &middot; {formatRelative(event.timestampUtc)}
+                                {event.actor ?? 'Unknown actor'} via {event.source} on branch {branchContext.slug} &middot; {completedLabel}
                               </Typography>
                               {event.status && (
                                 <Typography variant="caption" color="text.secondary">
                                   Status: {event.status}
                                 </Typography>
                               )}
+                              <Typography variant="caption" color="text.secondary">
+                                Requested {requestedLabel} &middot; Completed {completedLabel}
+                                {durationLabel ? ` &middot; Duration ${durationLabel}` : ''}
+                                {event.slaMinutes ? ` (SLA ${event.slaMinutes}m)` : ''}
+                              </Typography>
+                              {lineageLabel && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Lineage: {lineageLabel}
+                                </Typography>
+                              )}
                               {event.notes && (
                                 <Typography variant="caption" color="text.secondary">
                                   {event.notes}
+                                </Typography>
+                              )}
+                              {(event.automationAgentId || event.automationConversationId) && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Auto ctx: {event.automationAgentId ? `agent ${event.automationAgentId}` : 'agent n/a'},{' '}
+                                  {event.automationConversationId ? `conversation ${event.automationConversationId}` : 'conversation n/a'}
                                 </Typography>
                               )}
                             </Stack>
@@ -399,11 +423,34 @@ function formatRelative(value?: string | null) {
   return `${days}d ${hours % 24}h ${future ? 'from now' : 'ago'}`;
 }
 
+function formatDuration(start?: string | null, end?: string | null) {
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return '<1m';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  if (hours < 24) return `${hours}h${remMinutes ? ` ${remMinutes}m` : ''}`;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return `${days}d${remHours ? ` ${remHours}h` : ''}${remMinutes ? ` ${remMinutes}m` : ''}`;
+}
+
 function getFulfillmentBadges(event: LoreFulfillmentLog) {
   const normalizedAction = (event.action ?? '').toLowerCase();
   const normalizedSource = (event.source ?? '').toLowerCase();
   const normalizedStatus = (event.status ?? '').toLowerCase();
   const isAutomation = normalizedSource.includes('auto') || normalizedAction.includes('auto');
-  const slaBreach = normalizedAction.includes('sla') || normalizedStatus.includes('sla');
+  const slaMinutes = event.slaMinutes ?? 45;
+  const requestedAt = event.requestedAtUtc ? new Date(event.requestedAtUtc).getTime() : null;
+  const completedAt = (event.completedAtUtc ?? event.timestampUtc) ? new Date(event.completedAtUtc ?? event.timestampUtc).getTime() : null;
+  const slaMs = slaMinutes > 0 ? slaMinutes * 60000 : null;
+  const slaBreach = normalizedAction.includes('sla') ||
+    normalizedStatus.includes('sla') ||
+    (requestedAt !== null && completedAt !== null && slaMs !== null && completedAt - requestedAt > slaMs);
   return { isAutomation, slaBreach };
 }

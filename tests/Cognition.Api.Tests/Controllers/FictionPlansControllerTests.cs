@@ -510,6 +510,9 @@ public class FictionPlansControllerTests
 
         var updatedTask = await db.ConversationTasks.SingleAsync(t => t.Id == task.Id);
         updatedTask.Status.Should().Be("Pending");
+        updatedTask.ProviderId.Should().Be(request.ProviderId);
+        updatedTask.AgentId.Should().Be(request.AgentId);
+        updatedTask.ModelId.Should().Be(request.ModelId);
         var argsDoc = JsonDocument.Parse(updatedTask.ArgsJson!);
         argsDoc.RootElement.GetProperty("providerId").GetGuid().Should().Be(request.ProviderId);
         argsDoc.RootElement.GetProperty("branchSlug").GetString().Should().Be("draft");
@@ -1020,7 +1023,7 @@ public class FictionPlansControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db);
-        var request = new FictionPlansController.ResolvePersonaObligationRequest("Debt cleared.", "console", null);
+        var request = new FictionPlansController.ResolvePersonaObligationRequest("Debt cleared.", "console", null, obligation.SourceBacklogId ?? "backlog-1", TaskId: "task-123", ConversationId: Guid.NewGuid().ToString());
         var response = await controller.ResolvePersonaObligation(plan.Id, obligation.Id, request, CancellationToken.None);
 
         var ok = response.Result as OkObjectResult;
@@ -1032,6 +1035,8 @@ public class FictionPlansControllerTests
         var metadata = JsonDocument.Parse(updated.MetadataJson!);
         metadata.RootElement.GetProperty("resolutionNotes").EnumerateArray().First().GetProperty("note").GetString().Should().Be("Debt cleared.");
         metadata.RootElement.GetProperty("resolvedSource").GetString().Should().Be("console");
+        metadata.RootElement.GetProperty("resolvedBacklogId").GetString().Should().Be(obligation.SourceBacklogId ?? "backlog-1");
+        metadata.RootElement.GetProperty("resolvedTaskId").GetString().Should().Be("task-123");
 
         var workflow = await db.WorkflowEvents.SingleAsync();
         workflow.Kind.Should().Be("fiction.persona.obligation");
@@ -1085,7 +1090,7 @@ public class FictionPlansControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db);
-        var request = new FictionPlansController.ResolvePersonaObligationRequest("Dismissed due to scope change.", "console", "dismiss");
+        var request = new FictionPlansController.ResolvePersonaObligationRequest("Dismissed due to scope change.", "console", "dismiss", obligation.SourceBacklogId ?? "backlog-2");
         var response = await controller.ResolvePersonaObligation(plan.Id, obligation.Id, request, CancellationToken.None);
 
         var ok = response.Result as OkObjectResult;
@@ -1101,18 +1106,108 @@ public class FictionPlansControllerTests
         workflow.Payload.Value<string>("sourceBacklogId").Should().Be("draft-scout-report");
     }
 
+    [Fact]
+    public async Task ResolvePersonaObligation_requires_notes()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Notes Plan" };
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Archivist" };
+        var obligation = new FictionPersonaObligation
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            ObligationSlug = "log-notes",
+            Title = "Log notes",
+            Status = FictionPersonaObligationStatus.Open,
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-1)
+        };
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.FictionPersonaObligations.Add(obligation);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var request = new FictionPlansController.ResolvePersonaObligationRequest(null, "console", "resolve");
+        var response = await controller.ResolvePersonaObligation(plan.Id, obligation.Id, request, CancellationToken.None);
+
+        response.Result.Should().BeOfType<BadRequestObjectResult>();
+    }
+
+    [Fact]
+    public async Task ResolvePersonaObligation_sets_voice_drift_and_context()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var plan = new FictionPlan { Id = Guid.NewGuid(), Name = "Drift Plan", PrimaryBranchSlug = "beta" };
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Navigator" };
+        var obligation = new FictionPersonaObligation
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            PersonaId = persona.Id,
+            Persona = persona,
+            ObligationSlug = "course-correct",
+            Title = "Course-correct voice",
+            Status = FictionPersonaObligationStatus.Open,
+            SourceBacklogId = "backlog-course",
+            BranchSlug = "beta",
+            CreatedAtUtc = DateTime.UtcNow.AddHours(-5)
+        };
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.FictionPersonaObligations.Add(obligation);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var request = new FictionPlansController.ResolvePersonaObligationRequest(
+            "Adjusted voice to match persona.",
+            "console",
+            "resolve",
+            BacklogId: "backlog-course",
+            ConversationId: Guid.NewGuid().ToString(),
+            VoiceDrift: true);
+
+        var result = await controller.ResolvePersonaObligation(plan.Id, obligation.Id, request, CancellationToken.None);
+        var ok = result.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+
+        var updated = await db.FictionPersonaObligations.SingleAsync(o => o.Id == obligation.Id);
+        updated.Status.Should().Be(FictionPersonaObligationStatus.Resolved);
+        var metadata = JsonDocument.Parse(updated.MetadataJson!);
+        metadata.RootElement.GetProperty("voiceDrift").GetBoolean().Should().BeTrue();
+        metadata.RootElement.GetProperty("resolvedBacklogId").GetString().Should().Be("backlog-course");
+
+        var workflow = await db.WorkflowEvents.SingleAsync();
+        workflow.Kind.Should().Be("fiction.persona.obligation");
+        workflow.Payload.Value<bool?>("voiceDrift").Should().BeTrue();
+        workflow.Payload.Value<string>("resolvedBacklogId").Should().Be("backlog-course");
+    }
+
     private static FictionPlansController CreateController(
         CognitionDbContext db,
         ICharacterLifecycleService? lifecycle = null,
         IAuthorPersonaRegistry? registry = null,
         IFictionBacklogScheduler? backlogScheduler = null,
-        IFictionPlanCreator? planCreator = null)
+        IFictionPlanCreator? planCreator = null,
+        Microsoft.Extensions.Options.IOptions<FictionAutomationOptions>? automationOptions = null)
         => new FictionPlansController(
             db,
             lifecycle ?? Substitute.For<ICharacterLifecycleService>(),
             registry ?? Substitute.For<IAuthorPersonaRegistry>(),
             backlogScheduler ?? Substitute.For<IFictionBacklogScheduler>(),
-            planCreator ?? Substitute.For<IFictionPlanCreator>());
+            planCreator ?? Substitute.For<IFictionPlanCreator>(),
+            automationOptions ?? Microsoft.Extensions.Options.Options.Create(new FictionAutomationOptions()));
 }
 
 internal sealed class FictionPlansTestDbContext : CognitionDbContext

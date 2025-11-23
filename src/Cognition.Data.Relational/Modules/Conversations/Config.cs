@@ -147,6 +147,9 @@ public class ConversationTaskConfiguration : IEntityTypeConfiguration<Conversati
         b.Property(x => x.FinalAnswer).HasColumnName("final_answer");
         b.Property(x => x.Status).HasColumnName("status");
         b.Property(x => x.CreatedAt).HasColumnName("created_at");
+        b.Property(x => x.ProviderId).HasColumnName("provider_id");
+        b.Property(x => x.ModelId).HasColumnName("model_id");
+        b.Property(x => x.AgentId).HasColumnName("agent_id");
         b.Property(x => x.BacklogItemId).HasColumnName("backlog_item_id").HasMaxLength(128);
         b.HasIndex(x => new { x.ConversationPlanId, x.BacklogItemId })
             .HasDatabaseName("ux_conversation_tasks_plan_backlog")
