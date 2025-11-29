@@ -23,11 +23,12 @@
 ## Latest Findings
 
 - Fiction backlog console review uncovered critical gaps: Resume ignores required agent/provider metadata and lets `complete`/numeric statuses re-run; persona obligation lists hide open items beyond the first six, omit descriptions/notes, and allow resolve/dismiss without audit logs; action log rows drop the description/context payload. Address these inside `FictionBacklogPanel` plus the backing API before calling the alpha loop “done.”
+- Recent progress: backlog panel now surfaces contract drift alerts/warnings, obligation list shows inline resolution history, and plan wizard/resume dialogs persist provider/model/branch defaults locally to reduce mis-resume risk.
 
 ## Priority Action Stack
 
 1. Ship the persona-obligation modal follow-ups: inline note history + resolve/dismiss CTA parity across Fiction Projects + Planner Telemetry pages (plans/fiction/phase-001/session_20251116_action_plan.md).
-2. Let authors actually kick off a plan from the console (new plan wizard, persona selection, initial backlog seed) so we test the loop with humans, not seed data (plans/fiction/phase-001/plan-first-draft.md).
+2. Let authors actually kick off a plan from the console (new plan wizard, persona selection, initial backlog seed) so we test the loop with humans, not seed data (plans/fiction/phase-001/plan-first-draft.md). _(Wizard now captures provider/model/branch defaults and feeds resume prefill; still need full end-to-end validation with live tokens.)_
 3. Expand backlog telemetry widgets to include end-user alerts (stale backlog card, blocked lore popover) rather than admin-only metrics (plans/_next_session_prompt.md).
 4. [Done] Normalize ScopePath usage post-review: audit for lingering `ScopePath.Parse`/direct constructors, add analyzer baselines, and document the factory-only contract (plans/alpha_security_observability_hardening.md, plans/scope_token_path_refactor.md:22-52).
 5. Replace the in-memory vector score with cosine similarity so offline tests mirror OpenSearch behavior (tests/Cognition.Data.Vectors.Tests/*, plans/alpha_security_observability_hardening.md).

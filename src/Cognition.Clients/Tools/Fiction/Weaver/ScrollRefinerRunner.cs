@@ -113,10 +113,19 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
             primaryAgentId: context.AgentId,
             conversationState: conversationState);
 
-        var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        PlannerResult plannerResult;
+        try
+        {
+            plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FictionResponseValidationException ex)
+        {
+            return BuildValidationBlockedResult(context, ex.Result);
+        }
+
         await ProcessLifecycleAsync(plan, context, resolvedScrollId, plannerResult, cancellationToken).ConfigureAwait(false);
         await AppendAuthorPersonaMemoryAsync(plan, context, blueprint, existingScroll, resolvedScrollId, authorContext, plannerResult, cancellationToken).ConfigureAwait(false);
-        return ToPhaseResult(plannerResult, context);
+        return ToPhaseResult(plan, plannerResult, context);
     }
 
     private async Task<IReadOnlyList<FictionLoreRequirement>> GetBlockingLoreRequirementsAsync(
@@ -284,14 +293,17 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
         return $"Refined scroll for branch \"{branch}\" on plan \"{plan.Name}\". Blueprint summary: {synopsis}. Prior sections tracked: {sectionCount}.";
     }
 
-    private static FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)
+    private static FictionPhaseResult ToPhaseResult(FictionPlan plan, PlannerResult result, FictionPhaseExecutionContext context)
     {
         var summary = result.Diagnostics.TryGetValue("validationSummary", out var validationSummary)
             ? validationSummary
             : $"Planner completed with outcome {result.Outcome}.";
 
+        var response = TryGetString(result.Steps.LastOrDefault()?.Output, "response") ?? string.Empty;
+        var validation = FictionResponseValidator.ValidateScrollPayload(response, plan, context);
+
         var data = result.ToDictionary();
-        var transcripts = BuildTranscripts(result, context);
+        var transcripts = BuildTranscripts(result, context, validation);
 
         var status = result.Outcome switch
         {
@@ -300,6 +312,12 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
             PlannerOutcome.Cancelled => FictionPhaseStatus.Cancelled,
             _ => FictionPhaseStatus.Failed
         };
+
+        if (validation.Status == FictionTranscriptValidationStatus.Failed)
+        {
+            status = FictionPhaseStatus.Blocked;
+            summary = validation.Details ?? summary;
+        }
 
         return new FictionPhaseResult(
             FictionPhase.ScrollRefiner,
@@ -310,7 +328,29 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
             Transcripts: transcripts);
     }
 
-    private static IReadOnlyList<FictionPhaseTranscript> BuildTranscripts(PlannerResult result, FictionPhaseExecutionContext context)
+    private static FictionPhaseResult BuildValidationBlockedResult(FictionPhaseExecutionContext context, FictionResponseValidationResult validation)
+    {
+        var data = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["validationStatus"] = validation.Status.ToString(),
+            ["validationDetails"] = validation.Details,
+            ["validationErrors"] = validation.Errors,
+            ["salientTerms"] = validation.SalientTerms
+        };
+
+        return new FictionPhaseResult(
+            FictionPhase.ScrollRefiner,
+            FictionPhaseStatus.Blocked,
+            validation.Details ?? "Scroll validation failed.",
+            data,
+            Exception: null,
+            Transcripts: Array.Empty<FictionPhaseTranscript>());
+    }
+
+    private static IReadOnlyList<FictionPhaseTranscript> BuildTranscripts(
+        PlannerResult result,
+        FictionPhaseExecutionContext context,
+        FictionResponseValidationResult validation)
     {
         var step = result.Steps.LastOrDefault();
         var prompt = TryGetString(step?.Output, "prompt");
@@ -324,6 +364,9 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
             ["chapterScrollId"] = context.ChapterScrollId,
             ["chapterBlueprintId"] = context.ChapterBlueprintId
         };
+
+        transcriptMetadata["validationStatus"] = validation.Status.ToString();
+        transcriptMetadata["validationSummary"] = validation.Details;
 
         if (assistantEntry?.Metadata is not null)
         {
@@ -339,10 +382,8 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
         }
 
         var latency = result.Metrics.TryGetValue("latencyMs", out var latencyMs) ? latencyMs : (double?)null;
-        var validationStatus = transcriptMetadata.TryGetValue("validationStatus", out var statusObj)
-            ? ParseValidationStatus(statusObj?.ToString())
-            : FictionTranscriptValidationStatus.Unknown;
-        var validationSummary = transcriptMetadata.TryGetValue("validationSummary", out var validationObj) ? validationObj?.ToString() : null;
+        var promptTokens = result.Metrics.TryGetValue("promptTokens", out var promptTokenValue) ? (int?)promptTokenValue : null;
+        var completionTokens = result.Metrics.TryGetValue("completionTokens", out var completionTokenValue) ? (int?)completionTokenValue : null;
 
         return new List<FictionPhaseTranscript>(1)
         {
@@ -357,11 +398,11 @@ public class ScrollRefinerRunner : FictionPhaseRunnerBase
                 IsRetry: false,
                 RequestPayload: prompt,
                 ResponsePayload: response,
-                PromptTokens: null,
-                CompletionTokens: null,
+                PromptTokens: promptTokens,
+                CompletionTokens: completionTokens,
                 LatencyMs: latency,
-                ValidationStatus: validationStatus,
-                ValidationDetails: validationSummary,
+                ValidationStatus: validation.Status,
+                ValidationDetails: validation.Details,
                 Metadata: transcriptMetadata)
         };
     }

@@ -350,6 +350,190 @@ public class FictionPlannerPipelineTests
         await authorRegistry.DidNotReceiveWithAnyArgs().AppendMemoryAsync(default, default!, default);
     }
 
+    [Fact]
+    public async Task ScrollRefinerRunner_blocks_on_validation_failure()
+    {
+        var agentService = new PipelineAgentService(new[]
+        {
+            Responses.Vision,
+            Responses.Iterative,
+            Responses.ChapterBlueprint,
+            "not valid json"
+        });
+
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new PipelineTestDbContext(options);
+        var graph = await SeedPlanGraphAsync(db);
+
+        var telemetry = new NullPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        var templateRepo = new InMemoryTemplateRepository(new Dictionary<string, string>
+        {
+            ["planner.fiction.vision"] = Templates.Vision,
+            ["planner.fiction.iterative"] = Templates.Iterative,
+            ["planner.fiction.chapterArchitect"] = Templates.ChapterArchitect,
+            ["planner.fiction.scrollRefiner"] = Templates.ScrollRefiner
+        });
+        var critiqueOptions = Options.Create(new PlannerCritiqueOptions());
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
+
+        var services = new ServiceCollection()
+            .AddSingleton<IAgentService>(agentService)
+            .BuildServiceProvider();
+
+        var lifecycle = Substitute.For<ICharacterLifecycleService>();
+        lifecycle.ProcessAsync(Arg.Any<CharacterLifecycleRequest>(), Arg.Any<CancellationToken>())
+            .Returns(CharacterLifecycleResult.Empty);
+        var authorRegistry = Substitute.For<IAuthorPersonaRegistry>();
+        authorRegistry.GetForPlanAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AuthorPersonaContext?>(null));
+
+        var runners = new IFictionPhaseRunner[]
+        {
+            new VisionPlannerRunner(db, agentService, services, lifecycle, new VisionPlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<VisionPlannerRunner>.Instance, scopePathBuilder),
+            new IterativePlannerRunner(db, agentService, services, new IterativePlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<IterativePlannerRunner>.Instance, scopePathBuilder),
+            new ChapterArchitectRunner(db, agentService, services, new ChapterArchitectPlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<ChapterArchitectRunner>.Instance, scopePathBuilder),
+            new ScrollRefinerRunner(db, agentService, services, lifecycle, authorRegistry, new ScrollRefinerPlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<ScrollRefinerRunner>.Instance, scopePathBuilder)
+        };
+
+        var jobs = new FictionWeaverJobs(
+            db,
+            runners,
+            Substitute.For<Rebus.Bus.IBus>(),
+            Substitute.For<IPlanProgressNotifier>(),
+            new WorkflowEventLogger(db, enabled: false),
+            Substitute.For<IFictionBacklogScheduler>(),
+            scopePathBuilder,
+            NullLogger<FictionWeaverJobs>.Instance);
+
+        var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
+        var conversationPlanId = Guid.NewGuid();
+        var baseMetadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["conversationPlanId"] = conversationPlanId.ToString()
+        };
+
+        await jobs.RunVisionPlannerAsync(graph.PlanId, graph.AgentId, graph.ConversationId, providerId, modelId, metadata: baseMetadata, cancellationToken: CancellationToken.None);
+        await jobs.RunIterativePlannerAsync(graph.PlanId, graph.AgentId, graph.ConversationId, iterationIndex: 1, providerId, modelId, metadata: baseMetadata, cancellationToken: CancellationToken.None);
+
+        var chapterMetadata = new Dictionary<string, string>(baseMetadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["backlogItemId"] = "outline-core-conflicts",
+            ["taskId"] = Guid.NewGuid().ToString()
+        };
+        await jobs.RunChapterArchitectAsync(graph.PlanId, graph.AgentId, graph.ConversationId, graph.BlueprintId, providerId, modelId, metadata: chapterMetadata, cancellationToken: CancellationToken.None);
+
+        var scrollMetadata = new Dictionary<string, string>(baseMetadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["backlogItemId"] = "refine-scroll",
+            ["taskId"] = Guid.NewGuid().ToString()
+        };
+
+        var result = await jobs.RunScrollRefinerAsync(graph.PlanId, graph.AgentId, graph.ConversationId, graph.ScrollId, providerId, modelId, metadata: scrollMetadata, cancellationToken: CancellationToken.None);
+        result.Status.Should().Be(FictionPhaseStatus.Blocked);
+    }
+
+    [Fact]
+    public async Task SceneWeaverRunner_blocks_on_validation_failure()
+    {
+        var agentService = new PipelineAgentService(new[]
+        {
+            Responses.Vision,
+            Responses.Iterative,
+            Responses.ChapterBlueprint,
+            Responses.Scroll,
+            "This response omits all salient scene details."
+        });
+
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new PipelineTestDbContext(options);
+        var graph = await SeedPlanGraphAsync(db);
+
+        var telemetry = new NullPlannerTelemetry();
+        var transcriptStore = new NullPlannerTranscriptStore();
+        var templateRepo = new InMemoryTemplateRepository(new Dictionary<string, string>
+        {
+            ["planner.fiction.vision"] = Templates.Vision,
+            ["planner.fiction.iterative"] = Templates.Iterative,
+            ["planner.fiction.chapterArchitect"] = Templates.ChapterArchitect,
+            ["planner.fiction.scrollRefiner"] = Templates.ScrollRefiner,
+            ["planner.fiction.sceneWeaver"] = Templates.Scene
+        });
+        var critiqueOptions = Options.Create(new PlannerCritiqueOptions());
+        var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
+
+        var services = new ServiceCollection()
+            .AddSingleton<IAgentService>(agentService)
+            .BuildServiceProvider();
+
+        var lifecycle = Substitute.For<ICharacterLifecycleService>();
+        lifecycle.ProcessAsync(Arg.Any<CharacterLifecycleRequest>(), Arg.Any<CancellationToken>())
+            .Returns(CharacterLifecycleResult.Empty);
+        var authorRegistry = Substitute.For<IAuthorPersonaRegistry>();
+        authorRegistry.GetForPlanAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<AuthorPersonaContext?>(null));
+
+        var runners = new IFictionPhaseRunner[]
+        {
+            new VisionPlannerRunner(db, agentService, services, lifecycle, new VisionPlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<VisionPlannerRunner>.Instance, scopePathBuilder),
+            new IterativePlannerRunner(db, agentService, services, new IterativePlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<IterativePlannerRunner>.Instance, scopePathBuilder),
+            new ChapterArchitectRunner(db, agentService, services, new ChapterArchitectPlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<ChapterArchitectRunner>.Instance, scopePathBuilder),
+            new ScrollRefinerRunner(db, agentService, services, lifecycle, authorRegistry, new ScrollRefinerPlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<ScrollRefinerRunner>.Instance, scopePathBuilder),
+            new SceneWeaverRunner(db, agentService, services, lifecycle, authorRegistry, new SceneWeaverPlannerTool(agentService, NullLoggerFactory.Instance, telemetry, transcriptStore, templateRepo, critiqueOptions, scopePathBuilder), NullLogger<SceneWeaverRunner>.Instance, scopePathBuilder)
+        };
+
+        var jobs = new FictionWeaverJobs(
+            db,
+            runners,
+            Substitute.For<Rebus.Bus.IBus>(),
+            Substitute.For<IPlanProgressNotifier>(),
+            new WorkflowEventLogger(db, enabled: false),
+            Substitute.For<IFictionBacklogScheduler>(),
+            scopePathBuilder,
+            NullLogger<FictionWeaverJobs>.Instance);
+
+        var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
+        var conversationPlanId = Guid.NewGuid();
+        var baseMetadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["conversationPlanId"] = conversationPlanId.ToString()
+        };
+
+        await jobs.RunVisionPlannerAsync(graph.PlanId, graph.AgentId, graph.ConversationId, providerId, modelId, metadata: baseMetadata, cancellationToken: CancellationToken.None);
+        await jobs.RunIterativePlannerAsync(graph.PlanId, graph.AgentId, graph.ConversationId, iterationIndex: 1, providerId, modelId, metadata: baseMetadata, cancellationToken: CancellationToken.None);
+
+        var chapterMetadata = new Dictionary<string, string>(baseMetadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["backlogItemId"] = "outline-core-conflicts",
+            ["taskId"] = Guid.NewGuid().ToString()
+        };
+        await jobs.RunChapterArchitectAsync(graph.PlanId, graph.AgentId, graph.ConversationId, graph.BlueprintId, providerId, modelId, metadata: chapterMetadata, cancellationToken: CancellationToken.None);
+
+        var scrollMetadata = new Dictionary<string, string>(baseMetadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["backlogItemId"] = "refine-scroll",
+            ["taskId"] = Guid.NewGuid().ToString()
+        };
+        await jobs.RunScrollRefinerAsync(graph.PlanId, graph.AgentId, graph.ConversationId, graph.ScrollId, providerId, modelId, metadata: scrollMetadata, cancellationToken: CancellationToken.None);
+
+        var sceneMetadata = new Dictionary<string, string>(baseMetadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["backlogItemId"] = "draft-scene",
+            ["taskId"] = Guid.NewGuid().ToString()
+        };
+
+        var result = await jobs.RunSceneWeaverAsync(graph.PlanId, graph.AgentId, graph.ConversationId, graph.SceneId, providerId, modelId, metadata: sceneMetadata, cancellationToken: CancellationToken.None);
+        result.Status.Should().Be(FictionPhaseStatus.Blocked);
+    }
+
     private static async Task<PlanGraph> SeedPlanGraphAsync(CognitionDbContext db)
     {
         var projectId = Guid.NewGuid();

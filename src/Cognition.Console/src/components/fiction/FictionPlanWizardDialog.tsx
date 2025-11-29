@@ -19,7 +19,7 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import { ApiError, api, fictionApi } from '../../api/client';
+import { ApiError, api, fictionApi, fetchModels, fetchProviders } from '../../api/client';
 import {
   AgentSummary,
   CreateFictionPlanPayload,
@@ -38,11 +38,12 @@ type Props = {
   accessToken?: string | null;
   onClose: () => void;
   onCreated: (plan: FictionPlanSummary) => void;
+  onPrefillResume?: (defaults: { providerId?: string; modelId?: string | null; branchSlug?: string }) => void;
 };
 
 const STALE_PLAN_NAME_SUFFIX = 'Plan';
 
-export function FictionPlanWizardDialog({ open, accessToken, onClose, onCreated }: Props) {
+export function FictionPlanWizardDialog({ open, accessToken, onClose, onCreated, onPrefillResume }: Props) {
   const [projects, setProjects] = React.useState<FictionProjectSummary[]>([]);
   const [projectsLoading, setProjectsLoading] = React.useState(false);
   const [projectsError, setProjectsError] = React.useState<string | null>(null);
@@ -53,6 +54,12 @@ export function FictionPlanWizardDialog({ open, accessToken, onClose, onCreated 
 
   const [agents, setAgents] = React.useState<AgentSummary[]>([]);
   const [agentsLoading, setAgentsLoading] = React.useState(false);
+  const [providers, setProviders] = React.useState<ProviderOption[]>([]);
+  const [providersLoading, setProvidersLoading] = React.useState(false);
+  const [providerLoadError, setProviderLoadError] = React.useState<string | null>(null);
+  const [models, setModels] = React.useState<ModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = React.useState(false);
+  const [modelLoadError, setModelLoadError] = React.useState<string | null>(null);
 
   const [createProject, setCreateProject] = React.useState(false);
   const [projectId, setProjectId] = React.useState('');
@@ -64,6 +71,8 @@ export function FictionPlanWizardDialog({ open, accessToken, onClose, onCreated 
   const [branchSlug, setBranchSlug] = React.useState('main');
   const [personaId, setPersonaId] = React.useState('');
   const [agentId, setAgentId] = React.useState('');
+  const [providerId, setProviderId] = React.useState('');
+  const [modelId, setModelId] = React.useState('');
 
   const [submitting, setSubmitting] = React.useState(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
@@ -79,6 +88,12 @@ export function FictionPlanWizardDialog({ open, accessToken, onClose, onCreated 
     setPersonaId('');
     setAgentId('');
     setSubmitError(null);
+    setProviders([]);
+    setModels([]);
+    setProviderId('');
+    setModelId('');
+    setProviderLoadError(null);
+    setModelLoadError(null);
   }, []);
 
   const loadProjects = React.useCallback(async () => {
@@ -148,6 +163,99 @@ export function FictionPlanWizardDialog({ open, accessToken, onClose, onCreated 
     }
   }, [accessToken]);
 
+  const loadProviders = React.useCallback(() => {
+    if (!open || !accessToken) {
+      setProviders([]);
+      return;
+    }
+
+    let cancelled = false;
+    setProvidersLoading(true);
+    setProviderLoadError(null);
+
+    fetchProviders(accessToken)
+      .then(list => {
+        if (cancelled) return;
+        const normalized = (list as any[])
+          .map(p => ({
+            id: p.id ?? p.Id ?? '',
+            name: p.name ?? p.Name ?? 'provider',
+            displayName: p.displayName ?? p.DisplayName ?? null
+          }))
+          .filter(p => p.id);
+        setProviders(normalized);
+        setProviderId(current => {
+          if (current && normalized.some(p => p.id === current)) {
+            return current;
+          }
+          return normalized[0]?.id ?? '';
+        });
+      })
+      .catch(err => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Unable to load providers.';
+        setProviderLoadError(message);
+        setProviders([]);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setProvidersLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, accessToken]);
+
+  const loadModels = React.useCallback(
+    (provider: string) => {
+      if (!open || !accessToken || !provider) {
+        setModels([]);
+        return;
+      }
+
+      let cancelled = false;
+      setModelsLoading(true);
+      setModelLoadError(null);
+
+      fetchModels(accessToken, provider)
+        .then(list => {
+          if (cancelled) return;
+          const normalized = (list as any[])
+            .map(m => ({
+              id: m.id ?? m.Id ?? '',
+              name: m.name ?? m.Name ?? 'model',
+              displayName: m.displayName ?? m.DisplayName ?? null
+            }))
+            .filter(m => m.id);
+          setModels(normalized);
+          setModelId(current => {
+            if (current && normalized.some(m => m.id === current)) {
+              return current;
+            }
+            return normalized[0]?.id ?? '';
+          });
+        })
+        .catch(err => {
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : 'Unable to load models.';
+          setModelLoadError(message);
+          setModels([]);
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setModelsLoading(false);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    },
+    [open, accessToken]
+  );
+
 React.useEffect(() => {
   if (!open) {
     resetState();
@@ -156,7 +264,8 @@ React.useEffect(() => {
   loadProjects();
   loadPersonas();
   loadAgents();
-}, [open, loadProjects, loadPersonas, loadAgents, resetState]);
+  loadProviders();
+}, [open, loadProjects, loadPersonas, loadAgents, loadProviders, resetState]);
 
 React.useEffect(() => {
   if (open && !createProject && projects.length === 0 && !projectsLoading) {
@@ -181,6 +290,17 @@ React.useEffect(() => {
   }
 }, [createProject, projectId, projectTitle, projects, planName, open]);
 
+React.useEffect(() => {
+  if (!open || !providerId) {
+    setModels([]);
+    return;
+  }
+  const dispose = loadModels(providerId);
+  return () => {
+    if (dispose) dispose();
+  };
+}, [open, providerId, loadModels]);
+
   const personaAgents = React.useMemo(
     () => agents.filter(agent => agent.personaId === personaId),
     [agents, personaId]
@@ -191,6 +311,7 @@ const canSubmit =
   !submitting &&
   Boolean(planName.trim()) &&
   Boolean(personaId) &&
+  Boolean(providerId) &&
   projectValid;
 
   const handleSubmit = async () => {
@@ -215,6 +336,11 @@ const canSubmit =
 
     try {
       const plan = await fictionApi.createPlan(payload, accessToken);
+      onPrefillResume?.({
+        providerId: providerId || undefined,
+        modelId: modelId || null,
+        branchSlug: branchSlug.trim() || undefined
+      });
       onCreated(plan);
       resetState();
     } catch (err) {
@@ -292,7 +418,7 @@ const canSubmit =
       <DialogContent sx={{ pt: 1 }}>
         <DialogContentText sx={{ mb: 2 }}>
           Pick or create a project, choose an author persona, and we’ll seed the backlog with the initial
-          planning jobs.
+          planning jobs. Provider/model/branch selections will prefill future resume dialogs for this user.
         </DialogContentText>
         <Stack spacing={2}>
           <FormControlLabel
@@ -328,6 +454,52 @@ const canSubmit =
             helperText="Defaults to main; adjust if this plan should run on a feature branch."
             fullWidth
           />
+          {providersLoading ? (
+            <LinearProgress />
+          ) : providerLoadError ? (
+            <Alert severity="warning">{providerLoadError}</Alert>
+          ) : (
+            <FormControl fullWidth size="small">
+              <InputLabel id="fiction-plan-provider">Provider</InputLabel>
+              <Select
+                labelId="fiction-plan-provider"
+                label="Provider"
+                value={providerId}
+                onChange={event => setProviderId(event.target.value)}
+                required
+              >
+                {providers.map(provider => (
+                  <MenuItem key={provider.id} value={provider.id}>
+                    {provider.displayName ?? provider.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+          {modelsLoading ? (
+            <LinearProgress />
+          ) : modelLoadError ? (
+            <Alert severity="warning">{modelLoadError}</Alert>
+          ) : (
+            <FormControl fullWidth size="small" disabled={!providerId || models.length === 0}>
+              <InputLabel id="fiction-plan-model">Model (optional)</InputLabel>
+              <Select
+                labelId="fiction-plan-model"
+                label="Model"
+                value={modelId}
+                onChange={event => setModelId(event.target.value)}
+              >
+                <MenuItem value="">
+                  {providerId ? (models.length === 0 ? 'No models found' : 'Auto-select default model') : 'Select provider first'}
+                </MenuItem>
+                {models.map(model => (
+                  <MenuItem key={model.id} value={model.id}>
+                    {model.displayName ?? model.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
           {personasLoading ? (
             <LinearProgress />
           ) : personasError ? (

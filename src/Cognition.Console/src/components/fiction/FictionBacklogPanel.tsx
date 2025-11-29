@@ -83,6 +83,11 @@ export function FictionBacklogPanel({
   }
 
   const backlogItems = items ?? [];
+  const contractItems = React.useMemo(
+    () => backlogItems.filter(item => (item.status ?? '').toString().toLowerCase() === 'contract'),
+    [backlogItems]
+  );
+
   const obligationsByBacklogId = React.useMemo(() => {
     if (!obligations || obligations.length === 0) {
       return new Map<string, PersonaObligation[]>();
@@ -113,17 +118,23 @@ export function FictionBacklogPanel({
     }
 
     return (
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>Backlog Item</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Task</TableCell>
-            <TableCell>Updated</TableCell>
-            {isAdmin && onResume ? <TableCell align="right">Actions</TableCell> : null}
-          </TableRow>
-        </TableHead>
-        <TableBody>
+      <Stack spacing={1.5}>
+        {contractItems.length > 0 && (
+          <Alert severity="error">
+            {contractItems.length} backlog item{contractItems.length === 1 ? '' : 's'} flagged for contract drift. Fix provider/model/agent/task metadata before resuming.
+          </Alert>
+        )}
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Backlog Item</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Task</TableCell>
+              <TableCell>Updated</TableCell>
+              {isAdmin && onResume ? <TableCell align="right">Actions</TableCell> : null}
+            </TableRow>
+          </TableHead>
+          <TableBody>
           {backlogItems.map(item => {
             const resumeBlockedReason = getResumeBlockedReason(item, {
               isAdmin,
@@ -134,6 +145,7 @@ export function FictionBacklogPanel({
             const backlogKey = (item.backlogId ?? '').toLowerCase();
             const linkedObligations = backlogKey ? obligationsByBacklogId.get(backlogKey) ?? [] : [];
             const openLinkedObligations = linkedObligations.filter(entry => isObligationOpen(entry.status));
+            const metadataChips = buildBacklogMetadataChips(item);
             const resumeButton = (
               <Tooltip
                 title={
@@ -167,6 +179,11 @@ export function FictionBacklogPanel({
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       {item.description || item.backlogId}
                     </Typography>
+                    {typeof item.status === 'string' && item.status.toLowerCase() === 'contract' && (
+                      <Alert severity="error" variant="outlined" icon={false} sx={{ py: 0.25, px: 1 }}>
+                        Contract drift detected; resume blocked until metadata is corrected.
+                      </Alert>
+                    )}
                     <Typography variant="caption" color="text.secondary">
                       {item.backlogId}
                     </Typography>
@@ -174,6 +191,13 @@ export function FictionBacklogPanel({
                       <Typography variant="caption" color="text.secondary">
                         Branch: {item.branchSlug}
                       </Typography>
+                    )}
+                    {metadataChips.length > 0 && (
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                        {metadataChips.map((chip, index) => (
+                          <Chip key={`${item.id}-meta-${index}`} size="small" variant="outlined" label={chip} />
+                        ))}
+                      </Stack>
                     )}
                     {linkedObligations.length > 0 && (
                       <Stack spacing={0.25}>
@@ -241,7 +265,8 @@ export function FictionBacklogPanel({
             );
           })}
         </TableBody>
-      </Table>
+        </Table>
+      </Stack>
     );
   };
 
@@ -426,11 +451,18 @@ export function FictionBacklogPanel({
                       {metadataSummary.otherEntries.join(' â€¢ ')}
                     </Typography>
                   )}
-                  {metadataSummary.resolutionNotes.map(note => (
-                    <Typography key={note.id} variant="caption" color="text.secondary">
-                      {formatResolutionNote(note)}
-                    </Typography>
-                  ))}
+                  {metadataSummary.resolutionNotes.length > 0 && (
+                    <Stack spacing={0.25}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                        Resolution history
+                      </Typography>
+                      {metadataSummary.resolutionNotes.map(note => (
+                        <Typography key={note.id} variant="caption" color="text.secondary">
+                          {formatResolutionNote(note)}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  )}
                   {personaHighlight && (memoryHighlights.length > 0 || worldNoteHighlights.length > 0) && (
                     <Stack spacing={0.25}>
                       {memoryHighlights.map((entry, index) => (
@@ -591,6 +623,26 @@ function getResumeBlockedReason(
   return null;
 }
 
+function buildBacklogMetadataChips(item: FictionBacklogItem) {
+  const chips: string[] = [];
+  if (item.providerId) {
+    chips.push(`Provider ${formatIdFragment(item.providerId)}`);
+  }
+  if (item.modelId) {
+    chips.push(`Model ${formatIdFragment(item.modelId)}`);
+  }
+  if (item.agentId) {
+    chips.push(`Agent ${formatIdFragment(item.agentId)}`);
+  }
+  if (item.conversationPlanId) {
+    chips.push(`Plan ${formatIdFragment(item.conversationPlanId)}`);
+  }
+  if (item.taskId) {
+    chips.push(`Task ${formatIdFragment(item.taskId)}`);
+  }
+  return chips;
+}
+
 function isBacklogCompleteStatus(status?: string | number | null) {
   if (status === null || status === undefined) {
     return false;
@@ -598,5 +650,13 @@ function isBacklogCompleteStatus(status?: string | number | null) {
 
   const normalized = status.toString().trim().toLowerCase();
   return normalized === 'complete' || normalized === 'completed' || normalized === 'done' || normalized === '2';
+}
+
+function formatIdFragment(value?: string | null) {
+  if (!value) {
+    return '';
+  }
+  const trimmed = value.replace(/-/g, '');
+  return trimmed.length <= 8 ? trimmed : trimmed.slice(0, 8);
 }
 

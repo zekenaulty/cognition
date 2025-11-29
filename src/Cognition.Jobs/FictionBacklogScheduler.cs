@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Clients.Tools.Fiction.Weaver;
@@ -20,6 +21,10 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
     private const string DefaultBranch = "main";
     private const string DefaultWorldBibleDomain = "core";
     private static readonly TimeSpan BacklogResumeThreshold = TimeSpan.FromMinutes(60);
+    private static readonly JsonSerializerOptions MetadataSerializerOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = false
+    };
 
     private readonly CognitionDbContext _db;
     private readonly IFictionWeaverJobClient _jobs;
@@ -63,7 +68,7 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         var modelId = TryResolveModel(context.Metadata);
         var branch = ResolveBranchSlug(plan, context);
 
-        await AutoResumeStaleBacklogItemsAsync(plan, branch, backlogItems, context, cancellationToken).ConfigureAwait(false);
+        await AutoResumeStaleBacklogItemsAsync(plan, branch, backlogItems, context, providerId, modelId, cancellationToken).ConfigureAwait(false);
         await AutoQueueLoreFulfillmentAsync(plan, branch, context, providerId, modelId, cancellationToken).ConfigureAwait(false);
 
         if (backlogItems.Count == 0)
@@ -86,17 +91,45 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
 
         await EnsureTargetsAsync(plan.Id, readyItem, backlogItems, branch, cancellationToken).ConfigureAwait(false);
 
+        Guid? conversationPlanId = plan.CurrentConversationPlanId;
+        if (!conversationPlanId.HasValue && context.Metadata is not null &&
+            context.Metadata.TryGetValue("conversationPlanId", out var conversationPlanRaw) &&
+            Guid.TryParse(conversationPlanRaw, out var parsedConversationPlanId))
+        {
+            conversationPlanId = parsedConversationPlanId;
+        }
+
+        var conversationTask = await FindConversationTaskAsync(conversationPlanId, readyItem.BacklogId, cancellationToken).ConfigureAwait(false);
+        UpdateConversationTaskMetadata(conversationTask, plan, readyItem, branch, providerId, modelId, context, conversationPlanId);
         MarkBacklogInProgress(readyItem);
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         var metadata = BuildMetadata(context.Metadata, readyItem);
-        var taskId = await ResolveConversationTaskIdAsync(plan, readyItem, cancellationToken).ConfigureAwait(false);
-        if (taskId.HasValue)
+        metadata["providerId"] = providerId.ToString();
+        if (modelId.HasValue)
         {
-            metadata["taskId"] = taskId.Value.ToString();
+            metadata["modelId"] = modelId.Value.ToString();
+        }
+        if (context.AgentId != Guid.Empty)
+        {
+            metadata["agentId"] = context.AgentId.ToString();
+        }
+        if (context.ConversationId != Guid.Empty)
+        {
+            metadata["conversationId"] = context.ConversationId.ToString();
+        }
+        metadata["branchSlug"] = branch;
+
+        if (conversationTask is not null)
+        {
+            metadata["taskId"] = conversationTask.Id.ToString();
         }
 
-        if (plan.CurrentConversationPlanId.HasValue)
+        if (conversationPlanId.HasValue)
+        {
+            metadata["conversationPlanId"] = conversationPlanId.Value.ToString();
+        }
+        else if (plan.CurrentConversationPlanId.HasValue)
         {
             metadata["conversationPlanId"] = plan.CurrentConversationPlanId.Value.ToString();
         }
@@ -196,6 +229,8 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         string branch,
         IReadOnlyList<FictionPlanBacklogItem> backlogItems,
         FictionPhaseExecutionContext context,
+        Guid providerId,
+        Guid? modelId,
         CancellationToken cancellationToken)
     {
         if (backlogItems.Count == 0)
@@ -249,10 +284,11 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             var previousTimestamp = item.UpdatedAtUtc ?? item.InProgressAtUtc ?? item.CreatedAtUtc;
             var age = now - previousTimestamp;
 
-            item.Status = FictionPlanBacklogStatus.Pending;
-            item.InProgressAtUtc = null;
-            item.CompletedAtUtc = null;
-            item.UpdatedAtUtc = now;
+            var resolvedProviderId = providerId;
+            var resolvedModelId = modelId;
+            var resolvedAgentId = context.AgentId == Guid.Empty ? (Guid?)null : context.AgentId;
+            Guid? resolvedConversationPlanId = plan.CurrentConversationPlanId;
+            Guid? resolvedTaskId = null;
 
             if (taskLookup is not null &&
                 !string.IsNullOrWhiteSpace(item.BacklogId) &&
@@ -260,14 +296,49 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             {
                 foreach (var task in tasks)
                 {
+                    resolvedConversationPlanId ??= task.ConversationPlanId;
+                    resolvedTaskId ??= task.Id;
+                    if (task.ProviderId.HasValue)
+                    {
+                        resolvedProviderId = task.ProviderId.Value;
+                    }
+                    if (task.ModelId.HasValue)
+                    {
+                        resolvedModelId ??= task.ModelId;
+                    }
+                    if (task.AgentId.HasValue)
+                    {
+                        resolvedAgentId ??= task.AgentId;
+                    }
+
                     task.Status = "Pending";
                     task.Error = null;
                     task.Observation = null;
                     task.UpdatedAtUtc = now;
+                    task.ProviderId ??= resolvedProviderId;
+                    task.ModelId ??= resolvedModelId;
+                    task.AgentId ??= context.AgentId == Guid.Empty ? task.AgentId : context.AgentId;
                 }
             }
 
-            LogAutoResumeBacklogAction(plan, item, branch, context, age);
+            item.Status = FictionPlanBacklogStatus.Pending;
+            item.InProgressAtUtc = null;
+            item.CompletedAtUtc = null;
+            item.UpdatedAtUtc = now;
+
+            plan.CurrentConversationPlanId ??= resolvedConversationPlanId;
+
+            LogAutoResumeBacklogAction(
+                plan,
+                item,
+                branch,
+                context,
+                age,
+                resolvedConversationPlanId,
+                resolvedProviderId,
+                resolvedModelId,
+                resolvedAgentId,
+                resolvedTaskId);
             _logger.LogWarning(
                 "Backlog item {BacklogId} for plan {PlanId} was in progress for {Age:g}. Automatically reset to pending.",
                 item.BacklogId,
@@ -640,18 +711,114 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         return metadata;
     }
 
-    private async Task<Guid?> ResolveConversationTaskIdAsync(FictionPlan plan, FictionPlanBacklogItem item, CancellationToken cancellationToken)
+    private async Task<ConversationTask?> FindConversationTaskAsync(Guid? conversationPlanId, string? backlogItemId, CancellationToken cancellationToken)
     {
-        if (!plan.CurrentConversationPlanId.HasValue || string.IsNullOrWhiteSpace(item.BacklogId))
+        if (!conversationPlanId.HasValue || string.IsNullOrWhiteSpace(backlogItemId))
         {
             return null;
         }
 
         return await _db.ConversationTasks
-            .Where(t => t.ConversationPlanId == plan.CurrentConversationPlanId.Value && t.BacklogItemId == item.BacklogId)
-            .Select(t => (Guid?)t.Id)
-            .FirstOrDefaultAsync(cancellationToken)
+            .FirstOrDefaultAsync(t => t.ConversationPlanId == conversationPlanId.Value && t.BacklogItemId == backlogItemId, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private void UpdateConversationTaskMetadata(
+        ConversationTask? task,
+        FictionPlan plan,
+        FictionPlanBacklogItem backlog,
+        string branch,
+        Guid providerId,
+        Guid? modelId,
+        FictionPhaseExecutionContext context,
+        Guid? conversationPlanId)
+    {
+        if (task is null)
+        {
+            return;
+        }
+
+        var args = DeserializeArgs(task.ArgsJson);
+        args["planId"] = plan.Id;
+        args["backlogItemId"] = backlog.BacklogId;
+        args["conversationId"] = context.ConversationId;
+        args["providerId"] = providerId;
+        if (context.AgentId != Guid.Empty)
+        {
+            args["agentId"] = context.AgentId;
+        }
+        else
+        {
+            args.Remove("agentId");
+        }
+        args["branchSlug"] = branch;
+
+        conversationPlanId ??= plan.CurrentConversationPlanId;
+        if (!conversationPlanId.HasValue && context.Metadata is not null &&
+            context.Metadata.TryGetValue("conversationPlanId", out var conversationPlanRaw) &&
+            Guid.TryParse(conversationPlanRaw, out var parsedConversationPlanId))
+        {
+            conversationPlanId = parsedConversationPlanId;
+        }
+
+        if (conversationPlanId.HasValue)
+        {
+            args["conversationPlanId"] = conversationPlanId.Value;
+            plan.CurrentConversationPlanId ??= conversationPlanId.Value;
+            task.ConversationPlanId = conversationPlanId.Value;
+        }
+        else
+        {
+            args.Remove("conversationPlanId");
+        }
+
+        if (modelId.HasValue)
+        {
+            args["modelId"] = modelId.Value;
+        }
+        else
+        {
+            args.Remove("modelId");
+        }
+
+        var serialized = JsonSerializer.Serialize(args, MetadataSerializerOptions);
+        if (!string.Equals(task.ArgsJson, serialized, StringComparison.Ordinal))
+        {
+            task.ArgsJson = serialized;
+        }
+
+        task.ProviderId ??= providerId;
+        task.ModelId ??= modelId;
+        if (context.AgentId != Guid.Empty)
+        {
+            task.AgentId ??= context.AgentId;
+        }
+        if (!string.IsNullOrWhiteSpace(backlog.BacklogId))
+        {
+            task.BacklogItemId ??= backlog.BacklogId;
+        }
+        task.Status = string.IsNullOrWhiteSpace(task.Status) ? "Pending" : task.Status;
+        task.UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    private static Dictionary<string, object?> DeserializeArgs(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, MetadataSerializerOptions);
+            return parsed is null
+                ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, object?>(parsed, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private void EnqueuePhase(
@@ -811,7 +978,12 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         FictionPlanBacklogItem backlog,
         string branch,
         FictionPhaseExecutionContext context,
-        TimeSpan age)
+        TimeSpan age,
+        Guid? conversationPlanId,
+        Guid? providerId,
+        Guid? modelId,
+        Guid? agentId,
+        Guid? taskId)
     {
         if (context.ConversationId == Guid.Empty)
         {
@@ -830,13 +1002,28 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             ["status"] = backlog.Status.ToString(),
             ["source"] = "automation",
             ["conversationId"] = context.ConversationId,
-            ["agentId"] = context.AgentId,
+            ["agentId"] = agentId ?? context.AgentId,
             ["age"] = age.TotalSeconds
         };
 
-        if (plan.CurrentConversationPlanId.HasValue)
+        if (conversationPlanId.HasValue)
         {
-            payload["conversationPlanId"] = plan.CurrentConversationPlanId.Value;
+            payload["conversationPlanId"] = conversationPlanId.Value;
+        }
+
+        if (providerId.HasValue)
+        {
+            payload["providerId"] = providerId.Value;
+        }
+
+        if (modelId.HasValue)
+        {
+            payload["modelId"] = modelId.Value;
+        }
+
+        if (taskId.HasValue)
+        {
+            payload["taskId"] = taskId.Value;
         }
 
         _db.WorkflowEvents.Add(new WorkflowEvent

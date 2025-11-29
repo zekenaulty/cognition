@@ -187,6 +187,12 @@ public class PlannerHealthServiceTests
         });
 
         var planId = Guid.NewGuid();
+        var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var conversationPlanId = Guid.NewGuid();
+        var taskId = Guid.NewGuid();
         db.FictionPlans.Add(new FictionPlan
         {
             Id = planId,
@@ -197,14 +203,20 @@ public class PlannerHealthServiceTests
 
         db.WorkflowEvents.Add(new WorkflowEvent
         {
-            ConversationId = Guid.NewGuid(),
+            ConversationId = conversationId,
             Kind = "fiction.backlog.action",
             Payload = JObject.FromObject(new
             {
                 planId,
                 backlogId = "outline-core",
                 action = "resume",
-                branch = "main"
+                branch = "main",
+                providerId,
+                modelId,
+                agentId,
+                conversationId,
+                conversationPlanId,
+                taskId
             })
         });
 
@@ -221,7 +233,246 @@ public class PlannerHealthServiceTests
         var health = new PlannerHealthService(db, registry, scope.ServiceProvider, alertPublisher, NullLogger<PlannerHealthService>.Instance);
 
         var report = await health.GetReportAsync(CancellationToken.None);
-        report.Backlog.ActionLogs.Should().ContainSingle(log => log.BacklogId == "outline-core");
+        report.Backlog.ActionLogs.Should().ContainSingle(log =>
+            log.BacklogId == "outline-core" &&
+            log.ProviderId == providerId &&
+            log.ModelId == modelId &&
+            log.AgentId == agentId &&
+            log.ConversationId == conversationId &&
+            log.ConversationPlanId == conversationPlanId &&
+            log.TaskId == taskId);
+    }
+
+    [Fact]
+    public async Task GetReportAsync_includes_backlog_contract_events_in_telemetry()
+    {
+        await using var db = CreateDbContext();
+
+        db.PromptTemplates.Add(new PromptTemplate
+        {
+            Id = Guid.NewGuid(),
+            Name = TestPlannerTool.TemplateId,
+            PromptType = PromptType.SystemInstruction,
+            Template = "Planner template",
+            IsActive = true
+        });
+
+        var planId = Guid.NewGuid();
+        db.FictionPlans.Add(new FictionPlan
+        {
+            Id = planId,
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Contract Plan",
+            PrimaryBranchSlug = "main",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.contract",
+            Payload = JObject.FromObject(new
+            {
+                planId,
+                planName = "Contract Plan",
+                backlogId = "outline-core",
+                branch = "draft",
+                backlogStatus = "Pending",
+                code = "provider-mismatch",
+                providerId = Guid.NewGuid(),
+                modelId = Guid.NewGuid(),
+                agentId = Guid.NewGuid(),
+                conversationPlanId = Guid.NewGuid(),
+                taskId = Guid.NewGuid()
+            }),
+            Timestamp = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped<TestPlannerTool>();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var registry = new StubToolRegistry(typeof(TestPlannerTool));
+        var alertPublisher = new TestAlertPublisher();
+        var health = new PlannerHealthService(db, registry, scope.ServiceProvider, alertPublisher, NullLogger<PlannerHealthService>.Instance);
+
+        var report = await health.GetReportAsync(CancellationToken.None);
+        report.Backlog.TelemetryEvents.Should().ContainSingle(evt =>
+            evt.PlanId == planId &&
+            evt.Status == "contract" &&
+            evt.Reason == "provider-mismatch" &&
+            evt.Branch == "draft");
+
+        var telemetry = report.Backlog.TelemetryEvents.Single();
+        telemetry.Metadata.Should().NotBeNull();
+        telemetry.Metadata!.Should().ContainKey("providerId");
+        telemetry.Metadata!.Should().ContainKey("conversationPlanId");
+        telemetry.Metadata!.Should().ContainKey("taskId");
+        telemetry.PreviousStatus.Should().Be("Pending");
+    }
+
+    [Fact]
+    public async Task GetReportAsync_surfaces_contract_drift_alerts_and_status()
+    {
+        await using var db = CreateDbContext();
+
+        db.PromptTemplates.Add(new PromptTemplate
+        {
+            Id = Guid.NewGuid(),
+            Name = TestPlannerTool.TemplateId,
+            PromptType = PromptType.SystemInstruction,
+            Template = "Planner template",
+            IsActive = true
+        });
+
+        var planId = Guid.NewGuid();
+        db.FictionPlans.Add(new FictionPlan
+        {
+            Id = planId,
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Contract Alert Plan",
+            PrimaryBranchSlug = "main",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.contract",
+            Payload = JObject.FromObject(new
+            {
+                planId,
+                planName = "Contract Alert Plan",
+                backlogId = "outline-core",
+                branch = "main",
+                backlogStatus = "Pending",
+                code = "provider-mismatch",
+                providerId = Guid.NewGuid(),
+                modelId = Guid.NewGuid(),
+                agentId = Guid.NewGuid(),
+                conversationPlanId = Guid.NewGuid(),
+                taskId = Guid.NewGuid()
+            }),
+            Timestamp = DateTime.UtcNow
+        });
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.contract",
+            Payload = JObject.FromObject(new
+            {
+                planId,
+                planName = "Contract Alert Plan",
+                backlogId = "refine-scroll",
+                branch = "draft",
+                backlogStatus = "Pending",
+                code = "missing-model",
+                providerId = Guid.NewGuid(),
+                modelId = Guid.NewGuid(),
+                agentId = Guid.NewGuid(),
+                conversationPlanId = Guid.NewGuid(),
+                taskId = Guid.NewGuid()
+            }),
+            Timestamp = DateTime.UtcNow.AddMinutes(-5)
+        });
+
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped<TestPlannerTool>();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var registry = new StubToolRegistry(typeof(TestPlannerTool));
+        var alertPublisher = new TestAlertPublisher();
+        var health = new PlannerHealthService(db, registry, scope.ServiceProvider, alertPublisher, NullLogger<PlannerHealthService>.Instance);
+
+        var report = await health.GetReportAsync(CancellationToken.None);
+        report.Status.Should().Be(PlannerHealthStatus.Critical);
+        report.Alerts.Should().Contain(alert => alert.Id == "backlog:contract-drift" && alert.Severity == PlannerHealthAlertSeverity.Error);
+    }
+
+    [Fact]
+    public async Task GetReportAsync_scales_contract_drift_alert_severity()
+    {
+        await using var db = CreateDbContext();
+
+        db.PromptTemplates.Add(new PromptTemplate
+        {
+            Id = Guid.NewGuid(),
+            Name = TestPlannerTool.TemplateId,
+            PromptType = PromptType.SystemInstruction,
+            Template = "Planner template",
+            IsActive = true
+        });
+
+        var planId = Guid.NewGuid();
+        db.FictionPlans.Add(new FictionPlan
+        {
+            Id = planId,
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Severity Plan",
+            PrimaryBranchSlug = "main",
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.contract",
+            Payload = JObject.FromObject(new
+            {
+                planId,
+                planName = "Severity Plan",
+                backlogId = "outline-core",
+                branch = "main",
+                backlogStatus = "Pending",
+                code = "provider-mismatch"
+            }),
+            Timestamp = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped<TestPlannerTool>();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var registry = new StubToolRegistry(typeof(TestPlannerTool));
+        var alertPublisher = new TestAlertPublisher();
+        var health = new PlannerHealthService(db, registry, scope.ServiceProvider, alertPublisher, NullLogger<PlannerHealthService>.Instance);
+
+        var report = await health.GetReportAsync(CancellationToken.None);
+        report.Alerts.Should().ContainSingle(alert => alert.Id == "backlog:contract-drift" && alert.Severity == PlannerHealthAlertSeverity.Warning);
+
+        db.WorkflowEvents.Add(new WorkflowEvent
+        {
+            ConversationId = Guid.NewGuid(),
+            Kind = "fiction.backlog.contract",
+            Payload = JObject.FromObject(new
+            {
+                planId,
+                planName = "Severity Plan",
+                backlogId = "refine-scroll",
+                branch = "main",
+                backlogStatus = "Pending",
+                code = "missing-model"
+            }),
+            Timestamp = DateTime.UtcNow.AddMinutes(-1)
+        });
+
+        await db.SaveChangesAsync();
+
+        report = await health.GetReportAsync(CancellationToken.None);
+        report.Alerts.Should().Contain(alert => alert.Id == "backlog:contract-drift" && alert.Severity == PlannerHealthAlertSeverity.Error);
     }
 
     [Fact]

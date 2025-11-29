@@ -20,6 +20,7 @@ Current Status (2025-10-26)
 - The console backlog telemetry view consumes the richer alert payloads, and Ops configuration (`OpsAlerting`) now exposes routing + debounce knobs for internal alpha validation; configuration validation guards common misconfigurations (missing webhook, non-positive SLO thresholds).
 - We remain in alpha with only seed data; no production rollout or lower-environment choreography is required. Remaining effort concentrates on future planner migrations, non-fiction coverage, and tightening developer guidance rather than environment cutovers.
 - Third-party review items (template guard rails, planner health endpoint, backlog instrumentation) are closed; focus shifts to completing migrations and codifying rollout recipes.
+- Contract/backlog drift visibility is live end-to-end: planner health ingests `fiction.backlog.contract` events, contract drift alerts are emitted with severity scaling, and console backlog telemetry/backlog panel surfaces drift warnings.
 - External security/observability review (2025-10-27) scored overall alpha readiness at 7.7/10 and introduced P0 blockers (rate limiting, ScopePath factory lock, authorization policies, planner budgets/quotas, correlation IDs); see `plans/alpha_security_observability_hardening.md` for remediation sequencing.
 
 Scope
@@ -205,10 +206,10 @@ Open Questions
 
 Next Steps
 
-1. Catalogue non-fiction planners (and adjacent orchestrators) that should adopt `PlannerBase`, outlining migration prerequisites and expected template inputs.
-2. Deprecate legacy runner scaffolding now that fiction planners have migrated; tighten CI/lint gates around planner template configuration and scripted pipeline coverage.
-3. Explore multi-channel Ops publishing (e.g., Slack + PagerDuty) and acknowledgement workflows once webhook payloads stabilise under alpha usage.
-4. Extend planner health dashboards with additional alert drill-downs/SLA visualisations to support upcoming planner additions.
+1. Remove legacy runner scaffolding now that fiction planners have migrated; add CI/lint gates that block legacy paths and enforce PlannerBase/template coverage (ACTIVE).
+2. Catalogue non-fiction planners (and adjacent orchestrators) that should adopt `PlannerBase`, outlining migration prerequisites and expected template inputs (DEFER until post-alpha; current scope is single-user fiction loop).
+3. Ops routing beyond the current webhook publisher (multi-channel/PagerDuty/ACK workflows) is DEFERRED for this pre-alpha; one-user footprint does not justify paging/war-room flow yet.
+4. DONE Extend planner health dashboards: backlog coverage by plan, stale/backlog SLO warnings, and recent failure transcript snippets/links now render in console telemetry (per-phase drill-down optional follow-up).
 - ✅ World-bible telemetry gaps addressed: PlannerHealth now raises alerts/Ops routing for missing or stale lore snapshots; console surfaces warnings (see step note `planning_the_planner_step_20251102_1500_world_bible_alerts_impl`).
 
 Alpha Hardening Requirements (2025-10-27)
@@ -238,5 +239,6 @@ Telemetry Updates (Backlog Signals)
 - DONE Confirm ingestion: `FictionPhaseProgressed` events, plan notifier payloads, and stored transcripts now surface `backlogItemId`, enabling backlog-centric analytics.
 - DONE Add counters: backlog transitions are logged per phase and exposed through planner health `RecentTransitions` for dashboard aggregation.
 - DONE Planner health report now exposes per-plan backlog coverage plus transcript snippets/message ids for recent planner failures, giving dashboards/linkouts without digging through storage.
+- DONE Contract drift telemetry/alerts: `fiction.backlog.contract` events ingested, severity thresholds tested, console surfaces drift warnings.
 - Surface dashboards: update the planner health view to display backlog coverage per phase, highlight stuck items (no completion within SLO), and expose most-recent transcript links for failed backlog executions.
-- Alerting outline: wire a lightweight monitor that pages when a backlog item flips back to pending more than N times within 24h, signalling persistent execution failure.
+- (DEFERRED INDEFINATLY) Alerting outline: wire a lightweight monitor that pages when a backlog item flips back to pending more than N times within 24h, signalling persistent execution failure.

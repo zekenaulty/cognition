@@ -59,7 +59,7 @@ import { FictionRosterPanel } from '../components/fiction/FictionRosterPanel';
 import { FictionBacklogPanel } from '../components/fiction/FictionBacklogPanel';
 import { FictionResumeBacklogDialog } from '../components/fiction/FictionResumeBacklogDialog';
 import { PersonaObligationActionDialog } from '../components/fiction/PersonaObligationActionDialog';
-import { isObligationOpen, normalizeObligationStatus } from '../components/fiction/backlogUtils';
+import { buildActionContextLine, buildActionMetadataLine, isObligationOpen, normalizeObligationStatus } from '../components/fiction/backlogUtils';
 
 type AlertDescriptor = {
   id: string;
@@ -518,6 +518,15 @@ export default function PlannerTelemetryPage() {
     return [...serverAlerts, ...buildOpenSearchAlerts(openSearchReport)];
   }, [serverAlerts, openSearchReport]);
 
+  const contractTelemetryEvents = React.useMemo(() => {
+    if (!plannerReport) {
+      return [];
+    }
+    return (plannerReport.backlog.telemetryEvents ?? []).filter(
+      evt => (evt.status ?? '').toString().toLowerCase() === 'contract'
+    );
+  }, [plannerReport]);
+
   const planStaleBacklogItems = React.useMemo(() => {
     if (!planBacklogItems || planBacklogItems.length === 0) {
       return [];
@@ -576,12 +585,20 @@ export default function PlannerTelemetryPage() {
     [planObligations]
   );
 
+  const planContractEvents = React.useMemo(() => {
+    if (!rosterPlanId) {
+      return [];
+    }
+    return contractTelemetryEvents.filter(evt => evt.planId === rosterPlanId);
+  }, [rosterPlanId, contractTelemetryEvents]);
+
   const planAlertCount =
     planStaleBacklogItems.length +
     planMissingLoreRequirements.length +
     planOpenObligations.length +
     planDriftObligations.length +
-    planAgingObligations.length;
+    planAgingObligations.length +
+    planContractEvents.length;
 
   const scrollToRoster = React.useCallback(() => {
     rosterCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -716,6 +733,12 @@ export default function PlannerTelemetryPage() {
             </Alert>
           ) : (
             <Stack spacing={1}>
+              {planContractEvents.length > 0 && (
+                <Alert severity="error">
+                  {planContractEvents.length} contract drift event{planContractEvents.length === 1 ? '' : 's'} detected for this plan.
+                  Inspect backlog telemetry below to resolve provider/model/agent mismatches before resuming.
+                </Alert>
+              )}
               {planStaleBacklogItems.length > 0 && (
                 <Alert
                   severity="warning"
@@ -809,6 +832,50 @@ export default function PlannerTelemetryPage() {
                   </Typography>
                 </Stack>
               </Stack>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                Backlog Coverage by Plan
+              </Typography>
+              {plannerReport.backlog.plans.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No backlog coverage data available.
+                </Typography>
+              ) : (
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Plan</TableCell>
+                      <TableCell>Pending</TableCell>
+                      <TableCell>In Progress</TableCell>
+                      <TableCell>Complete</TableCell>
+                      <TableCell>Last Updated</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {plannerReport.backlog.plans.map(plan => (
+                      <TableRow key={plan.planId}>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {plan.planName}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>{formatNumber(plan.pending)}</TableCell>
+                        <TableCell>{formatNumber(plan.inProgress)}</TableCell>
+                        <TableCell>{formatNumber(plan.complete)}</TableCell>
+                        <TableCell>
+                          {plan.lastUpdatedUtc ? formatRelativeTime(plan.lastUpdatedUtc) : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {plannerReport.backlog.staleItems.length > 0 && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  {plannerReport.backlog.staleItems.length} backlog item
+                  {plannerReport.backlog.staleItems.length === 1 ? '' : 's'} exceeded freshness SLO and remain stuck.
+                </Alert>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -849,6 +916,54 @@ export default function PlannerTelemetryPage() {
           </Card>
         </Grid>
         <Grid item xs={12}>
+          {plannerReport.telemetry.recentFailures.length > 0 && (
+            <Card sx={{ mb: 3 }}>
+              <CardHeader title="Recent Planner Failures" subheader="Last 24h" />
+              <CardContent>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Planner</TableCell>
+                      <TableCell>Outcome</TableCell>
+                      <TableCell>Snippet</TableCell>
+                      <TableCell>Conversation</TableCell>
+                      <TableCell>When</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {plannerReport.telemetry.recentFailures.map(failure => (
+                      <TableRow key={failure.executionId}>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {failure.plannerName}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip size="small" color="error" label={failure.outcome} />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption" color="text.secondary">
+                            {failure.transcriptSnippet || 'No snippet'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption" color="text.secondary">
+                            {failure.conversationId ? `Conv ${formatIdFragment(failure.conversationId)}` : '—'}
+                            {failure.conversationMessageId
+                              ? ` • Msg ${formatIdFragment(failure.conversationMessageId)}`
+                              : ''}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{formatRelativeTime(failure.createdAtUtc)}</Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader
               title="World Bible Snapshots"
@@ -1437,53 +1552,81 @@ export default function PlannerTelemetryPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {plannerReport.backlog.telemetryEvents.map(event => (
-                  <TableRow key={`${event.planId}-${event.backlogId}-${event.timestampUtc}`}>
-                    <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {event.planName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {event.backlogId} on branch {event.branch}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
-                        <Chip size="small" label={event.phase} />
-                        <Chip size="small" label={event.status} color={event.status.toLowerCase() === 'complete' ? 'success' : event.status.toLowerCase() === 'pending' ? 'warning' : 'default'} />
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary">
-                        {event.reason}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      {event.characterMetrics ? (
-                        <Typography variant="body2">
-                          {event.characterMetrics.personaLinked}/{event.characterMetrics.total} persona-linked
+                {plannerReport.backlog.telemetryEvents.map(event => {
+                  const metadataLine = formatTelemetryMetadata(event.metadata);
+                  const contextLine = formatTelemetryContext(event.metadata);
+                  return (
+                    <TableRow key={`${event.planId}-${event.backlogId}-${event.timestampUtc}`}>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {event.planName}
                         </Typography>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">—</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {event.loreMetrics ? (
-                        <Typography variant="body2">
-                          {event.loreMetrics.ready}/{event.loreMetrics.total} ready
-                        </Typography>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">—</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{formatRelativeTime(event.timestampUtc)}</Typography>
-                      {event.iteration && (
                         <Typography variant="caption" color="text.secondary">
-                          Iteration {event.iteration}
+                          {event.backlogId} on branch {event.branch}
                         </Typography>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+                          <Chip size="small" label={event.phase} />
+                          <Chip
+                            size="small"
+                            label={event.status}
+                            color={
+                              event.status.toLowerCase() === 'complete'
+                                ? 'success'
+                                : event.status.toLowerCase() === 'pending'
+                                  ? 'warning'
+                                  : event.status.toLowerCase() === 'contract' || event.status.toLowerCase().includes('mismatch')
+                                    ? 'error'
+                                    : 'default'
+                            }
+                          />
+                        </Stack>
+                        {event.reason && (
+                          <Typography variant="caption" color={event.status.toLowerCase() === 'contract' ? 'error' : 'text.secondary'}>
+                            {event.reason}
+                          </Typography>
+                        )}
+                        {metadataLine && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {metadataLine}
+                          </Typography>
+                        )}
+                        {contextLine && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {contextLine}
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {event.characterMetrics ? (
+                          <Typography variant="body2">
+                            {event.characterMetrics.personaLinked}/{event.characterMetrics.total} persona-linked
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">—</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {event.loreMetrics ? (
+                          <Typography variant="body2">
+                            {event.loreMetrics.ready}/{event.loreMetrics.total} ready
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">—</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{formatRelativeTime(event.timestampUtc)}</Typography>
+                        {event.iteration && (
+                          <Typography variant="caption" color="text.secondary">
+                            Iteration {event.iteration}
+                          </Typography>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -1512,39 +1655,53 @@ export default function PlannerTelemetryPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {plannerReport.backlog.actionLogs.map(log => (
-                  <TableRow key={`${log.planId}-${log.backlogId}-${log.timestampUtc}`}>
-                    <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {log.planName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {log.backlogId} on branch {log.branch}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
-                        <Chip size="small" label={log.action} />
-                        {log.status && <Chip size="small" variant="outlined" label={log.status} />}
-                      </Stack>
-                      <Typography variant="caption" color="text.secondary">
-                        {log.description || 'No description'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{log.actor ?? 'Unknown'}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Source: {log.source}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{formatRelativeTime(log.timestampUtc)}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatTimestamp(log.timestampUtc)}
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {plannerReport.backlog.actionLogs.map(log => {
+                  const metadataLine = buildActionMetadataLine(log as any);
+                  const contextLine = buildActionContextLine(log as any);
+                  return (
+                    <TableRow key={`${log.planId}-${log.backlogId}-${log.timestampUtc}`}>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {log.planName}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {log.backlogId} on branch {log.branch}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
+                          <Chip size="small" label={log.action} />
+                          {log.status && <Chip size="small" variant="outlined" label={log.status} />}
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary">
+                          {log.description || 'No description'}
+                        </Typography>
+                        {metadataLine && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {metadataLine}
+                          </Typography>
+                        )}
+                        {contextLine && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {contextLine}
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{log.actor ?? 'Unknown'}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Source: {log.source}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{formatRelativeTime(log.timestampUtc)}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {formatTimestamp(log.timestampUtc)}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -1725,6 +1882,28 @@ function describeBacklogStatus(status: string | number | undefined) {
   }
 }
 
+function formatTelemetryMetadata(metadata?: Record<string, string | null> | null) {
+  if (!metadata) {
+    return null;
+  }
+  const segments: string[] = [];
+  if (metadata.providerId) segments.push(`Provider ${formatIdFragment(metadata.providerId)}`);
+  if (metadata.modelId) segments.push(`Model ${formatIdFragment(metadata.modelId)}`);
+  if (metadata.agentId) segments.push(`Agent ${formatIdFragment(metadata.agentId)}`);
+  return segments.length > 0 ? segments.join(' • ') : null;
+}
+
+function formatTelemetryContext(metadata?: Record<string, string | null> | null) {
+  if (!metadata) {
+    return null;
+  }
+  const segments: string[] = [];
+  if (metadata.conversationPlanId) segments.push(`Plan ${formatIdFragment(metadata.conversationPlanId)}`);
+  if (metadata.conversationId) segments.push(`Conversation ${formatIdFragment(metadata.conversationId)}`);
+  if (metadata.taskId) segments.push(`Task ${formatIdFragment(metadata.taskId)}`);
+  return segments.length > 0 ? segments.join(' • ') : null;
+}
+
 function formatTimestamp(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
@@ -1788,4 +1967,9 @@ function formatDuration(value?: string | number | null) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat().format(value);
+}
+
+function formatIdFragment(value: string) {
+  const trimmed = value.replace(/-/g, '');
+  return trimmed.length <= 8 ? trimmed : trimmed.slice(0, 8);
 }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Api.Controllers;
+using System.Text.Json;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Planning;
@@ -78,10 +79,10 @@ public class BacklogHangfireLoopTests
             BacklogItemId = backlog.BacklogId,
             StepNumber = 1,
             Status = "Pending",
-            ArgsJson = "{}",
-            ProviderId = providerId,
-            ModelId = modelId,
-            AgentId = agentId,
+            ArgsJson = null,
+            ProviderId = null,
+            ModelId = null,
+            AgentId = null,
             CreatedAt = DateTime.UtcNow.AddHours(-2)
         };
         conversationPlan.Tasks.Add(task);
@@ -116,6 +117,31 @@ public class BacklogHangfireLoopTests
         var response = await controller.ResumeBacklog(plan.Id, backlog.BacklogId, resumeRequest, CancellationToken.None);
         response.Result.Should().BeOfType<OkObjectResult>();
 
+        var updatedTask = await db.ConversationTasks.SingleAsync(t => t.Id == task.Id);
+        updatedTask.ProviderId.Should().Be(providerId);
+        updatedTask.ModelId.Should().Be(modelId);
+        updatedTask.AgentId.Should().Be(agentId);
+        updatedTask.ArgsJson.Should().NotBeNullOrWhiteSpace();
+        var taskArgs = JsonSerializer.Deserialize<Dictionary<string, object?>>(updatedTask.ArgsJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        taskArgs.Should().NotBeNull();
+        var nonNullTaskArgs = taskArgs ?? new Dictionary<string, object?>();
+        nonNullTaskArgs.Should().ContainKey("providerId");
+        nonNullTaskArgs.Should().ContainKey("modelId");
+        nonNullTaskArgs.Should().ContainKey("agentId");
+        nonNullTaskArgs.Should().ContainKey("backlogItemId");
+        nonNullTaskArgs.Should().ContainKey("conversationPlanId");
+        nonNullTaskArgs.TryGetValue("backlogItemId", out var backlogArg).Should().BeTrue();
+        backlogArg!.ToString().Should().Be(backlog.BacklogId);
+        nonNullTaskArgs.TryGetValue("conversationPlanId", out var conversationPlanArg).Should().BeTrue();
+        conversationPlanArg!.ToString().Should().Be(conversationPlan.Id.ToString());
+
+        var actionEvent = await db.WorkflowEvents.SingleAsync(e => e.Kind == "fiction.backlog.action");
+        actionEvent.Payload.Value<Guid?>("providerId").Should().Be(providerId);
+        actionEvent.Payload.Value<Guid?>("modelId").Should().Be(modelId);
+        actionEvent.Payload.Value<Guid?>("agentId").Should().Be(agentId);
+        actionEvent.Payload.Value<Guid?>("conversationPlanId").Should().Be(conversationPlan.Id);
+        actionEvent.Payload.Value<Guid?>("taskId").Should().Be(task.Id);
+
         // Scheduler should have queued lore fulfillment
         jobClient.Received(1).EnqueueLoreFulfillment(
             plan.Id,
@@ -126,6 +152,13 @@ public class BacklogHangfireLoopTests
             modelId,
             "main",
             Arg.Any<IReadOnlyDictionary<string, string>>());
+
+        var enqueueCall = jobClient.ReceivedCalls().Single(call => call.GetMethodInfo().Name == nameof(IFictionWeaverJobClient.EnqueueLoreFulfillment));
+        var queuedMetadata = enqueueCall.GetArguments()[7] as IReadOnlyDictionary<string, string>;
+        queuedMetadata.Should().NotBeNull();
+        queuedMetadata!.Should().ContainKey("autoFulfillment");
+        queuedMetadata.Should().ContainKey("branchSlug");
+        queuedMetadata.Should().ContainKey("requirementId");
 
         // Now execute the queued job manually using FictionWeaverJobs
         var bus = Substitute.For<IBus>();

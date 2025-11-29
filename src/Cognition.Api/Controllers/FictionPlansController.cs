@@ -368,16 +368,19 @@ public sealed class FictionPlansController : ControllerBase
 
         if (request.AgentId == Guid.Empty || request.ProviderId == Guid.Empty)
         {
+            await LogBacklogContractEventAsync(plan, backlog, request, "missing-agent-or-provider", cancellationToken).ConfigureAwait(false);
             return BadRequest("AgentId and ProviderId are required to resume a backlog item.");
         }
 
         if (!request.ModelId.HasValue || request.ModelId == Guid.Empty)
         {
+            await LogBacklogContractEventAsync(plan, backlog, request, "missing-model", cancellationToken).ConfigureAwait(false);
             return BadRequest("ModelId is required to resume a backlog item.");
         }
 
         if (request.TaskId == Guid.Empty)
         {
+            await LogBacklogContractEventAsync(plan, backlog, request, "missing-task", cancellationToken).ConfigureAwait(false);
             return BadRequest("TaskId is required to resume a backlog item.");
         }
 
@@ -393,11 +396,13 @@ public sealed class FictionPlansController : ControllerBase
 
         if (conversationPlan is null || conversationPlan.ConversationId != request.ConversationId)
         {
+            await LogBacklogContractEventAsync(plan, backlog, request, "conversation-plan-mismatch", cancellationToken).ConfigureAwait(false);
             return BadRequest("Conversation context mismatch for the supplied conversation plan.");
         }
 
         if (plan.CurrentConversationPlanId.HasValue && plan.CurrentConversationPlanId.Value != conversationPlan.Id)
         {
+            await LogBacklogContractEventAsync(plan, backlog, request, "plan-conversation-mismatch", cancellationToken).ConfigureAwait(false);
             return BadRequest("ConversationPlan does not match the plan's current conversation context.");
         }
         else if (!plan.CurrentConversationPlanId.HasValue)
@@ -408,11 +413,13 @@ public sealed class FictionPlansController : ControllerBase
         var conversationTask = conversationPlan.Tasks.FirstOrDefault(t => t.Id == request.TaskId);
         if (conversationTask is null)
         {
+            await LogBacklogContractEventAsync(plan, backlog, request, "task-not-found", cancellationToken).ConfigureAwait(false);
             return NotFound("Conversation task not found for the supplied backlog resume request.");
         }
 
         if (!string.Equals(conversationTask.BacklogItemId, backlog.BacklogId, StringComparison.OrdinalIgnoreCase))
         {
+            await LogBacklogContractEventAsync(plan, backlog, request, "task-backlog-mismatch", cancellationToken).ConfigureAwait(false);
             return BadRequest("Conversation task does not map to the supplied backlog item.");
         }
 
@@ -448,6 +455,7 @@ public sealed class FictionPlansController : ControllerBase
         SetArg(args, "conversationId", request.ConversationId);
         SetArg(args, "providerId", request.ProviderId);
         SetArg(args, "modelId", request.ModelId);
+        SetArg(args, "conversationPlanId", conversationPlan.Id);
         SetArg(args, "branchSlug", branchSlug);
         SetArg(args, "backlogItemId", backlog.BacklogId);
 
@@ -469,10 +477,13 @@ public sealed class FictionPlansController : ControllerBase
 
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
+            ["conversationId"] = request.ConversationId.ToString(),
             ["conversationPlanId"] = conversationPlan.Id.ToString(),
             ["providerId"] = request.ProviderId.ToString(),
+            ["agentId"] = request.AgentId.ToString(),
             ["taskId"] = conversationTask.Id.ToString(),
-            ["backlogItemId"] = backlog.BacklogId
+            ["backlogItemId"] = backlog.BacklogId,
+            ["branchSlug"] = branchSlug
         };
         if (request.ModelId.HasValue)
         {
@@ -846,6 +857,9 @@ public sealed class FictionPlansController : ControllerBase
     {
         var task = FindTaskForBacklog(tasks, entity);
         var args = task is null ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) : DeserializeArgs(task.ArgsJson);
+        var agentId = task?.AgentId ?? TryGetGuidArg(args, "agentId");
+        var providerId = task?.ProviderId ?? TryGetGuidArg(args, "providerId");
+        var modelId = task?.ModelId ?? TryGetGuidArg(args, "modelId");
 
         return new BacklogItemResponse(
             entity.Id,
@@ -858,9 +872,9 @@ public sealed class FictionPlansController : ControllerBase
             entity.UpdatedAtUtc,
             task?.ConversationPlanId,
             TryGetGuidArg(args, "conversationId"),
-            TryGetGuidArg(args, "agentId"),
-            TryGetGuidArg(args, "providerId"),
-            TryGetGuidArg(args, "modelId"),
+            agentId,
+            providerId,
+            modelId,
             TryGetStringArg(args, "branchSlug"),
             task?.Id,
             task?.StepNumber,
@@ -1121,6 +1135,8 @@ public sealed class FictionPlansController : ControllerBase
             ["planName"] = plan.Name,
             ["backlogId"] = backlog.BacklogId,
             ["code"] = code,
+            ["branch"] = string.IsNullOrWhiteSpace(request.BranchSlug) ? plan.PrimaryBranchSlug ?? "main" : request.BranchSlug,
+            ["backlogStatus"] = backlog.Status.ToString(),
             ["providerId"] = request.ProviderId,
             ["modelId"] = request.ModelId,
             ["agentId"] = request.AgentId,

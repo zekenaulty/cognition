@@ -104,10 +104,19 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             primaryAgentId: context.AgentId,
             conversationState: conversationState);
 
-        var plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        PlannerResult plannerResult;
+        try
+        {
+            plannerResult = await _planner.PlanAsync(plannerContext, parameters, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FictionResponseValidationException ex)
+        {
+            return BuildValidationBlockedResult(context, ex.Result);
+        }
+
         await ProcessLifecycleAsync(plan, context, resolvedScrollId, plannerResult, cancellationToken).ConfigureAwait(false);
         await AppendAuthorPersonaMemoryAsync(plan, scene, context, resolvedScrollId, authorContext, plannerResult, cancellationToken).ConfigureAwait(false);
-        return ToPhaseResult(plannerResult, context);
+        return ToPhaseResult(plan, scene, plannerResult, context);
     }
 
     private async Task<IReadOnlyList<FictionLoreRequirement>> GetBlockingLoreRequirementsAsync(
@@ -267,7 +276,7 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
         await _authorRegistry.AppendMemoryAsync(authorContext.PersonaId, entry, cancellationToken).ConfigureAwait(false);
     }
 
-    private static FictionPhaseResult ToPhaseResult(PlannerResult result, FictionPhaseExecutionContext context)
+    private static FictionPhaseResult ToPhaseResult(FictionPlan plan, FictionChapterScene scene, PlannerResult result, FictionPhaseExecutionContext context)
     {
         var summary = result.Diagnostics.TryGetValue("summary", out var summaryValue)
             ? summaryValue
@@ -282,7 +291,15 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
         };
 
         var data = result.ToDictionary();
-        var transcripts = BuildTranscripts(result, context);
+        var response = TryGetString(result.Steps.LastOrDefault()?.Output, "response") ?? string.Empty;
+        var validation = FictionResponseValidator.ValidateScenePayload(response, plan, context, scene);
+        if (validation.Status == FictionTranscriptValidationStatus.Failed)
+        {
+            status = FictionPhaseStatus.Blocked;
+            summary = validation.Details ?? summary;
+        }
+
+        var transcripts = BuildTranscripts(result, context, validation);
 
         return new FictionPhaseResult(
             FictionPhase.SceneWeaver,
@@ -293,7 +310,29 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             Transcripts: transcripts);
     }
 
-    private static IReadOnlyList<FictionPhaseTranscript> BuildTranscripts(PlannerResult result, FictionPhaseExecutionContext context)
+    private static FictionPhaseResult BuildValidationBlockedResult(FictionPhaseExecutionContext context, FictionResponseValidationResult validation)
+    {
+        var data = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["validationStatus"] = validation.Status.ToString(),
+            ["validationDetails"] = validation.Details,
+            ["validationErrors"] = validation.Errors,
+            ["salientTerms"] = validation.SalientTerms
+        };
+
+        return new FictionPhaseResult(
+            FictionPhase.SceneWeaver,
+            FictionPhaseStatus.Blocked,
+            validation.Details ?? "Scene validation failed.",
+            data,
+            Exception: null,
+            Transcripts: Array.Empty<FictionPhaseTranscript>());
+    }
+
+    private static IReadOnlyList<FictionPhaseTranscript> BuildTranscripts(
+        PlannerResult result,
+        FictionPhaseExecutionContext context,
+        FictionResponseValidationResult validation)
     {
         var step = result.Steps.LastOrDefault();
         var prompt = TryGetString(step?.Output, "prompt");
@@ -309,6 +348,9 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
             ["chapterSceneId"] = context.ChapterSceneId
         };
 
+        transcriptMetadata["validationStatus"] = validation.Status.ToString();
+        transcriptMetadata["validationSummary"] = validation.Details;
+
         if (assistantEntry?.Metadata is not null)
         {
             foreach (var kv in assistantEntry.Metadata)
@@ -323,10 +365,8 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
         }
 
         var latency = result.Metrics.TryGetValue("latencyMs", out var latencyMs) ? latencyMs : (double?)null;
-        var validationStatus = transcriptMetadata.TryGetValue("validationStatus", out var statusObj)
-            ? ParseValidationStatus(statusObj?.ToString())
-            : FictionTranscriptValidationStatus.Unknown;
-        var validationSummary = transcriptMetadata.TryGetValue("validationSummary", out var validationObj) ? validationObj?.ToString() : null;
+        var promptTokens = result.Metrics.TryGetValue("promptTokens", out var promptTokenValue) ? (int?)promptTokenValue : null;
+        var completionTokens = result.Metrics.TryGetValue("completionTokens", out var completionTokenValue) ? (int?)completionTokenValue : null;
 
         return new List<FictionPhaseTranscript>(1)
         {
@@ -341,11 +381,11 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
                 IsRetry: false,
                 RequestPayload: prompt,
                 ResponsePayload: response,
-                PromptTokens: null,
-                CompletionTokens: null,
+                PromptTokens: promptTokens,
+                CompletionTokens: completionTokens,
                 LatencyMs: latency,
-                ValidationStatus: validationStatus,
-                ValidationDetails: validationSummary,
+                ValidationStatus: validation.Status,
+                ValidationDetails: validation.Details,
                 Metadata: transcriptMetadata)
         };
     }

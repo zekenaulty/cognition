@@ -8,10 +8,13 @@ import {
   DialogTitle,
   Stack,
   TextField,
-  Typography
+  Typography,
+  Checkbox,
+  FormControlLabel,
+  Divider
 } from '@mui/material';
 import { PersonaObligation } from '../../types/fiction';
-import { formatObligationStatus, summarizeObligationMetadata } from './backlogUtils';
+import { formatObligationStatus, summarizeObligationMetadata, formatResolutionNoteText } from './backlogUtils';
 
 type Props = {
   open: boolean;
@@ -69,6 +72,7 @@ export function PersonaObligationActionDialog({
               <Typography variant="caption" color="text.secondary">
                 {formatObligationStatus(obligation.status)} • Persona {obligation.personaName}
                 {obligation.branchSlug ? ` • Branch ${obligation.branchSlug}` : ''}
+                {obligation.sourcePhase ? ` • Source ${obligation.sourcePhase}` : ''}
               </Typography>
               {obligation.description && (
                 <Typography variant="body2" color="text.secondary">
@@ -86,17 +90,18 @@ export function PersonaObligationActionDialog({
               </Stack>
             )}
             {metadata.resolutionNotes.length > 0 && (
-              <Stack spacing={0.25}>
+              <Stack spacing={0.5}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                   Resolution history
                 </Typography>
-                {metadata.resolutionNotes.map(note => (
-                  <Typography key={note.id} variant="caption" color="text.secondary">
-                    {note.actor ? `${note.actor}: ` : ''}
-                    {note.note}
-                    {note.timestamp ? ` (${note.timestamp})` : ''}
-                  </Typography>
-                ))}
+                <Stack spacing={0.25}>
+                  {metadata.resolutionNotes.map(note => (
+                    <Typography key={note.id} variant="caption" color="text.secondary">
+                      {formatResolutionNoteText(note)}
+                    </Typography>
+                  ))}
+                </Stack>
+                <Divider flexItem />
               </Stack>
             )}
             <TextField
@@ -110,21 +115,22 @@ export function PersonaObligationActionDialog({
               helperText="Explain what changed or why this obligation is being closed."
               autoFocus
             />
-            <Stack direction="row" spacing={1} alignItems="center">
-              <input
-                type="checkbox"
-                id="voiceDrift"
-                checked={voiceDrift}
-                onChange={evt => setVoiceDrift(evt.target.checked)}
-                disabled={submitting}
-                style={{ width: 16, height: 16 }}
-              />
-              <label htmlFor="voiceDrift">
+            <FormControlLabel
+              control={
+                <Checkbox
+                  id="voiceDrift"
+                  checked={voiceDrift}
+                  onChange={evt => setVoiceDrift(evt.target.checked)}
+                  disabled={submitting}
+                  size="small"
+                />
+              }
+              label={
                 <Typography variant="caption" color="text.secondary">
                   Flag voice drift noted in this resolution
                 </Typography>
-              </label>
-            </Stack>
+              }
+            />
             {error && <Alert severity="error">{error}</Alert>}
           </Stack>
         </DialogContent>

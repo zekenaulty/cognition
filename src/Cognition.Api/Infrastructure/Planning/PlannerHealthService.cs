@@ -164,6 +164,9 @@ public sealed record PlannerBacklogActionLog(
     Guid? ModelId,
     Guid? AgentId,
     string? Status,
+    Guid? ConversationId,
+    Guid? ConversationPlanId,
+    Guid? TaskId,
     DateTime TimestampUtc);
 
 public sealed record PlannerBacklogTelemetryCharacterMetrics(int Total, int PersonaLinked, int WorldBibleLinked);
@@ -626,9 +629,9 @@ public sealed class PlannerHealthService : IPlannerHealthService
     {
         var events = await _db.WorkflowEvents
             .AsNoTracking()
-            .Where(e => e.Kind == "fiction.backlog.telemetry")
+            .Where(e => e.Kind == "fiction.backlog.telemetry" || e.Kind == "fiction.backlog.contract")
             .OrderByDescending(e => e.Timestamp)
-            .Take(25)
+            .Take(50)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -669,6 +672,38 @@ public sealed class PlannerHealthService : IPlannerHealthService
             var planName = planLookup.TryGetValue(planId.Value, out var resolvedName)
                 ? resolvedName
                 : $"Plan {planId.Value:N}";
+
+            if (string.Equals(evt.Kind, "fiction.backlog.contract", StringComparison.OrdinalIgnoreCase))
+            {
+                var metadata = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["code"] = payload.Value<string>("code"),
+                    ["providerId"] = payload.Value<string>("providerId"),
+                    ["modelId"] = payload.Value<string>("modelId"),
+                    ["agentId"] = payload.Value<string>("agentId"),
+                    ["conversationId"] = payload.Value<string>("conversationId"),
+                    ["conversationPlanId"] = payload.Value<string>("conversationPlanId"),
+                    ["taskId"] = payload.Value<string>("taskId")
+                };
+
+                list.Add(new PlannerBacklogTelemetry(
+                    PlanId: planId.Value,
+                    PlanName: planName,
+                    BacklogId: payload.Value<string>("backlogId") ?? "(unknown)",
+                    Phase: "resume",
+                    Status: "contract",
+                    PreviousStatus: payload.Value<string>("backlogStatus") ?? payload.Value<string>("status"),
+                    Reason: payload.Value<string>("code") ?? "contract-mismatch",
+                    Branch: payload.Value<string>("branch") ?? "main",
+                    Iteration: null,
+                    TimestampUtc: evt.Timestamp,
+                    Metadata: metadata,
+                    CharacterMetrics: null,
+                    LoreMetrics: null,
+                    RecentCharacters: Array.Empty<PlannerBacklogTelemetryCharacter>(),
+                    PendingLore: Array.Empty<PlannerBacklogTelemetryLore>()));
+                continue;
+            }
 
             var characterMetrics = payload["characterMetrics"] is JObject charMetrics
                 ? new PlannerBacklogTelemetryCharacterMetrics(
@@ -777,6 +812,9 @@ public sealed class PlannerHealthService : IPlannerHealthService
                 ModelId: ReadGuid(payload, "modelId"),
                 AgentId: ReadGuid(payload, "agentId"),
                 Status: status?.ToString(),
+                ConversationId: ReadGuid(payload, "conversationId"),
+                ConversationPlanId: ReadGuid(payload, "conversationPlanId"),
+                TaskId: ReadGuid(payload, "taskId"),
                 TimestampUtc: evt.Timestamp));
         }
 
@@ -1013,8 +1051,17 @@ public sealed class PlannerHealthService : IPlannerHealthService
             string.Equals(k, "token-exhausted", StringComparison.OrdinalIgnoreCase));
         var hasWorldBibleIssues = worldBibleIssues.Count > 0;
         var hasWorldBibleAlerts = alerts.Any(a => a.Id.StartsWith("worldbible:", StringComparison.OrdinalIgnoreCase));
+        var hasContractAlerts = alerts.Any(a => a.Id.StartsWith("backlog:contract", StringComparison.OrdinalIgnoreCase));
+        var hasCriticalContractAlerts = alerts.Any(a =>
+            a.Id.StartsWith("backlog:contract", StringComparison.OrdinalIgnoreCase) &&
+            a.Severity == PlannerHealthAlertSeverity.Error);
 
-        if (hasDegradedBacklog || hasRecentFailures || hasNoExecutions || hasCritiqueAlerts || hasWorldBibleIssues || hasWorldBibleAlerts)
+        if (hasCriticalContractAlerts)
+        {
+            return PlannerHealthStatus.Critical;
+        }
+
+        if (hasDegradedBacklog || hasRecentFailures || hasNoExecutions || hasCritiqueAlerts || hasWorldBibleIssues || hasWorldBibleAlerts || hasContractAlerts)
         {
             return PlannerHealthStatus.Degraded;
         }
@@ -1061,6 +1108,25 @@ public sealed class PlannerHealthService : IPlannerHealthService
         if (backlog.OrphanedItems.Count > 0)
         {
             AddAlert("backlog:orphaned", PlannerHealthAlertSeverity.Warning, "Orphaned backlog items detected", $"{backlog.OrphanedItems.Count} backlog item(s) are no longer attached to a plan.");
+        }
+
+        var contractEvents = backlog.TelemetryEvents
+            .Where(evt => string.Equals(evt.Status, "contract", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (contractEvents.Count > 0)
+        {
+            var plans = contractEvents
+                .GroupBy(evt => evt.PlanId)
+                .Select(group => $"{group.First().PlanName} ({group.Count()})")
+                .ToArray();
+
+            var severity = contractEvents.Count >= 2
+                ? PlannerHealthAlertSeverity.Error
+                : PlannerHealthAlertSeverity.Warning;
+
+            var description = $"{contractEvents.Count} backlog contract drift event(s) detected across {plans.Length} plan(s): {string.Join(", ", plans)}.";
+            AddAlert("backlog:contract-drift", severity, "Backlog contract drift", description);
         }
 
         if (telemetry.RecentFailures.Count > 0)

@@ -109,7 +109,9 @@ export function FictionRosterPanel({
               </TableRow>
             </TableHead>
             <TableBody>
-              {roster.characters.map(character => (
+              {roster.characters.map(character => {
+                const provenanceChips = buildProvenanceChips(character.provenance, character.branchLineage, character.createdByPlanPassId);
+                return (
                 <TableRow key={character.id} hover>
                   <TableCell>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
@@ -118,6 +120,13 @@ export function FictionRosterPanel({
                     <Typography variant="caption" color="text.secondary">
                       {[character.role, character.importance].filter(Boolean).join(' • ') || EM_DASH}
                     </Typography>
+                    {provenanceChips.length > 0 && (
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                        {provenanceChips.map((chip, index) => (
+                          <Chip key={`${character.id}-prov-${index}`} size="small" variant="outlined" label={chip} />
+                        ))}
+                      </Stack>
+                    )}
                   </TableCell>
                   <TableCell>
                     {character.persona ? (
@@ -140,6 +149,14 @@ export function FictionRosterPanel({
                         <Typography variant="caption" color="text.secondary">
                           {character.worldBible.category}
                         </Typography>
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            label={`${character.worldBible.domain}:${character.worldBible.entrySlug}`}
+                          />
+                          <Chip size="small" label={character.worldBible.status} />
+                        </Stack>
                       </Stack>
                     ) : (
                       <Typography variant="body2" color="text.secondary">
@@ -152,7 +169,8 @@ export function FictionRosterPanel({
                   </TableCell>
                   <TableCell>{formatRelative(character.updatedAtUtc ?? character.createdAtUtc)}</TableCell>
                 </TableRow>
-              ))}
+              );
+            })}
             </TableBody>
           </Table>
         )}
@@ -179,16 +197,25 @@ export function FictionRosterPanel({
               </TableRow>
             </TableHead>
               <TableBody>
-                {roster.loreRequirements.map(lore => (
+                {roster.loreRequirements.map(lore => {
+                  const loreProvenanceChips = buildProvenanceChips(lore.metadata, lore.branchLineage, lore.createdByPlanPassId, lore.requirementSlug);
+                  return (
                   <TableRow key={lore.id}>
                     <TableCell>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {lore.title}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {lore.description || lore.notes || lore.requirementSlug}
-                      </Typography>
-                    </TableCell>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {lore.title}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {lore.description || lore.notes || lore.requirementSlug}
+                    </Typography>
+                    {loreProvenanceChips.length > 0 && (
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                        {loreProvenanceChips.map((chip, index) => (
+                          <Chip key={`${lore.id}-prov-${index}`} size="small" variant="outlined" label={chip} />
+                        ))}
+                      </Stack>
+                    )}
+                  </TableCell>
                     <TableCell>
                       <Chip
                         size="small"
@@ -196,7 +223,28 @@ export function FictionRosterPanel({
                         color={lore.status === 'Ready' ? 'success' : lore.status === 'Blocked' ? 'error' : 'default'}
                       />
                     </TableCell>
-                    <TableCell>{lore.worldBible ? lore.worldBible.entryName : EM_DASH}</TableCell>
+                    <TableCell>
+                      {lore.worldBible ? (
+                        <Stack spacing={0.5}>
+                          <Typography variant="body2">{lore.worldBible.entryName}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {lore.worldBible.category}
+                          </Typography>
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={`${lore.worldBible.domain}:${lore.worldBible.entrySlug}`}
+                            />
+                            <Chip size="small" label={lore.worldBible.status} />
+                          </Stack>
+                        </Stack>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          {EM_DASH}
+                        </Typography>
+                      )}
+                    </TableCell>
                     <TableCell>
                       {renderBranchDetails(lore.branchSlug, lore.branchLineage, roster.branchSlug)}
                     </TableCell>
@@ -219,8 +267,9 @@ export function FictionRosterPanel({
                       )}
                     </TableCell>
                   )}
-                </TableRow>
-              ))}
+                  </TableRow>
+                );
+              })}
             </TableBody>
             </Table>
             {blockedByBranch.length > 0 && (
@@ -373,6 +422,38 @@ function groupBlockedLore(roster: FictionPlanRoster): BranchGroup[] {
   return Array.from(groups.values()).sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
+function buildProvenanceChips(
+  provenance: any,
+  branchLineage?: string[] | null,
+  planPassId?: string | null,
+  fallbackBacklogId?: string | null
+) {
+  const record = provenance && typeof provenance === 'object' ? (provenance as Record<string, any>) : null;
+  const chips: string[] = [];
+  const source = typeof record?.source === 'string' ? record.source : typeof record?.origin === 'string' ? record.origin : null;
+  const backlog = typeof record?.backlogItemId === 'string'
+    ? record.backlogItemId
+    : typeof record?.backlogId === 'string'
+      ? record.backlogId
+      : fallbackBacklogId;
+  const pass = typeof record?.planPassId === 'string' ? record.planPassId : planPassId;
+
+  if (source && source.trim()) {
+    chips.push(`Source ${source.trim()}`);
+  }
+  if (backlog && backlog.trim()) {
+    chips.push(`Backlog ${backlog.trim()}`);
+  }
+  if (pass && pass.trim()) {
+    chips.push(`Pass ${formatIdSegment(pass)}`);
+  }
+  if (branchLineage && branchLineage.length > 1) {
+    chips.push(`Lineage ${branchLineage.join(' -> ')}`);
+  }
+
+  return chips;
+}
+
 function resolveBranchContext(
   slug?: string | null,
   lineage?: string[] | null,
@@ -453,4 +534,9 @@ function getFulfillmentBadges(event: LoreFulfillmentLog) {
     normalizedStatus.includes('sla') ||
     (requestedAt !== null && completedAt !== null && slaMs !== null && completedAt - requestedAt > slaMs);
   return { isAutomation, slaBreach };
+}
+
+function formatIdSegment(value: string) {
+  const trimmed = value.replace(/-/g, '');
+  return trimmed.length <= 8 ? trimmed : trimmed.slice(0, 8);
 }

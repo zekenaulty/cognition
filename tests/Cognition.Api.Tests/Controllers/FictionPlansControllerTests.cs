@@ -359,6 +359,126 @@ public class FictionPlansControllerTests
     }
 
     [Fact]
+    public async Task GetRoster_IncludesProvenanceMetadata()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new FictionPlansTestDbContext(options);
+        var project = new FictionProject { Id = Guid.NewGuid(), Title = "Origin", Status = FictionProjectStatus.Active };
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = project.Id,
+            FictionProject = project,
+            Name = "Origin Plan",
+            PrimaryBranchSlug = "main"
+        };
+
+        var persona = new Persona { Id = Guid.NewGuid(), Name = "Scout", Role = "explorer", Voice = "curious" };
+        var agent = new Agent { Id = Guid.NewGuid(), PersonaId = persona.Id, Persona = persona, RolePlay = false };
+        var worldBible = new FictionWorldBible { Id = Guid.NewGuid(), FictionPlanId = plan.Id, FictionPlan = plan, Domain = "core", BranchSlug = "main" };
+        var entry = new FictionWorldBibleEntry
+        {
+            Id = Guid.NewGuid(),
+            FictionWorldBibleId = worldBible.Id,
+            FictionWorldBible = worldBible,
+            EntrySlug = "lore:origin",
+            EntryName = "Origin",
+            Content = new FictionWorldBibleEntryContent { Category = "lore", Summary = "Origin lore", Status = "active" },
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+
+        var provenance = new JObject
+        {
+            ["source"] = "vision",
+            ["backlogId"] = "outline-core",
+            ["planPassId"] = Guid.NewGuid(),
+            ["branchLineage"] = new JArray("main", "draft")
+        };
+
+        var character = new FictionCharacter
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            Slug = "scout",
+            DisplayName = "Scout",
+            Role = "support",
+            Importance = "medium",
+            PersonaId = persona.Id,
+            Persona = persona,
+            AgentId = agent.Id,
+            Agent = agent,
+            WorldBibleEntryId = entry.Id,
+            WorldBibleEntry = entry,
+            ProvenanceJson = provenance.ToString(),
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        var loreMetadata = new JObject
+        {
+            ["requiredFor"] = new JArray("scroll"),
+            ["backlogId"] = "lore-setup",
+            ["planPassId"] = Guid.NewGuid(),
+            ["branchLineage"] = new JArray("main", "draft")
+        };
+
+        var lore = new FictionLoreRequirement
+        {
+            Id = Guid.NewGuid(),
+            FictionPlanId = plan.Id,
+            FictionPlan = plan,
+            RequirementSlug = "origin-lore",
+            Title = "Origin lore",
+            Status = FictionLoreRequirementStatus.Blocked,
+            MetadataJson = loreMetadata.ToString(),
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        db.FictionProjects.Add(project);
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.Agents.Add(agent);
+        db.FictionWorldBibles.Add(worldBible);
+        db.FictionWorldBibleEntries.Add(entry);
+        db.FictionCharacters.Add(character);
+        db.FictionLoreRequirements.Add(lore);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetRoster(plan.Id, CancellationToken.None);
+        var ok = action.Result as OkObjectResult;
+        ok.Should().NotBeNull();
+        var roster = ok!.Value as FictionPlansController.FictionPlanRosterResponse;
+        roster.Should().NotBeNull();
+
+        roster!.Characters.Should().ContainSingle();
+        var rosterCharacter = roster.Characters.Single();
+        rosterCharacter.Provenance.Should().NotBeNull();
+        var characterProvenance = rosterCharacter.Provenance!.Value;
+        characterProvenance.TryGetProperty("source", out var sourceProp).Should().BeTrue();
+        sourceProp.GetString().Should().Be("vision");
+        characterProvenance.TryGetProperty("backlogId", out var backlogProp).Should().BeTrue();
+        backlogProp.GetString().Should().Be("outline-core");
+        characterProvenance.TryGetProperty("planPassId", out var planPassProp).Should().BeTrue();
+        planPassProp.GetGuid().Should().Be(provenance.Value<Guid>("planPassId"));
+        rosterCharacter.BranchLineage.Should().ContainInOrder("main", "draft");
+
+        roster.LoreRequirements.Should().ContainSingle();
+        var rosterLore = roster.LoreRequirements.Single();
+        rosterLore.Metadata.Should().NotBeNull();
+        var loreMeta = rosterLore.Metadata!.Value;
+        loreMeta.TryGetProperty("backlogId", out var loreBacklogProp).Should().BeTrue();
+        loreBacklogProp.GetString().Should().Be("lore-setup");
+        loreMeta.TryGetProperty("planPassId", out var lorePassProp).Should().BeTrue();
+        lorePassProp.GetGuid().Should().Be(loreMetadata.Value<Guid>("planPassId"));
+        rosterLore.BranchLineage.Should().ContainInOrder("main", "draft");
+    }
+
+    [Fact]
     public async Task GetBacklog_returns_items_with_task_metadata()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()

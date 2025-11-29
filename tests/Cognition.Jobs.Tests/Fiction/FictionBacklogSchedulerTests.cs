@@ -328,9 +328,11 @@ public class FictionBacklogSchedulerTests
         var scheduler = new FictionBacklogScheduler(db, jobClient, NullLogger<FictionBacklogScheduler>.Instance);
 
         var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
         var metadata = new Dictionary<string, string>
         {
-            ["providerId"] = providerId.ToString()
+            ["providerId"] = providerId.ToString(),
+            ["modelId"] = modelId.ToString()
         };
 
         var context = new FictionPhaseExecutionContext(
@@ -357,6 +359,149 @@ public class FictionBacklogSchedulerTests
         actionEvent.Payload.Value<string>("action").Should().Be("auto-resume");
         actionEvent.Payload.Value<string>("backlogId").Should().Be(backlogItem.BacklogId);
         actionEvent.Payload.Value<string>("source").Should().Be("automation");
+        actionEvent.Payload.Value<Guid?>("providerId").Should().Be(providerId);
+        actionEvent.Payload.Value<Guid?>("modelId").Should().Be(modelId);
+        actionEvent.Payload.Value<Guid?>("conversationPlanId").Should().Be(conversationPlan.Id);
+        actionEvent.Payload.Value<Guid?>("taskId").Should().Be(conversationTask.Id);
+    }
+
+    [Fact]
+    public async Task ScheduleAsync_stamps_conversation_task_metadata_and_queue_payload()
+    {
+        await using var db = CreateDbContext();
+        var planId = Guid.NewGuid();
+        var plan = new FictionPlan
+        {
+            Id = planId,
+            FictionProjectId = Guid.NewGuid(),
+            Name = "Metadata Plan",
+            PrimaryBranchSlug = "draft"
+        };
+
+        var persona = new Persona
+        {
+            Id = Guid.NewGuid(),
+            Name = "Author",
+            Role = "writer",
+            Voice = "steady"
+        };
+
+        var agent = new Agent
+        {
+            Id = Guid.NewGuid(),
+            PersonaId = persona.Id,
+            Persona = persona,
+            RolePlay = false
+        };
+
+        var conversation = new Conversation
+        {
+            Id = Guid.NewGuid(),
+            AgentId = agent.Id,
+            Agent = agent,
+            Title = "Backlog Conversation"
+        };
+
+        var conversationPlan = new ConversationPlan
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversation.Id,
+            Conversation = conversation,
+            PersonaId = persona.Id,
+            Persona = persona,
+            Title = "Resume Tasks"
+        };
+
+        var backlogItem = CreateBacklogItem(planId, "outline-core", null, new[] { "chapter-blueprint" }, createdOffsetMinutes: 0);
+
+        var conversationTask = new ConversationTask
+        {
+            Id = Guid.NewGuid(),
+            ConversationPlanId = conversationPlan.Id,
+            ConversationPlan = conversationPlan,
+            StepNumber = 1,
+            Thought = "Run architect",
+            ToolName = "fiction.chapter.architect",
+            ArgsJson = "{}",
+            Status = "Pending",
+            BacklogItemId = backlogItem.BacklogId
+        };
+
+        plan.CurrentConversationPlanId = conversationPlan.Id;
+
+        db.FictionPlans.Add(plan);
+        db.Personas.Add(persona);
+        db.Agents.Add(agent);
+        db.Conversations.Add(conversation);
+        db.ConversationPlans.Add(conversationPlan);
+        db.ConversationTasks.Add(conversationTask);
+        db.FictionPlanBacklogItems.Add(backlogItem);
+        await db.SaveChangesAsync();
+
+        var jobClient = Substitute.For<IFictionWeaverJobClient>();
+        var scheduler = new FictionBacklogScheduler(db, jobClient, NullLogger<FictionBacklogScheduler>.Instance);
+
+        var providerId = Guid.NewGuid();
+        var modelId = Guid.NewGuid();
+        var contextMetadata = new Dictionary<string, string>
+        {
+            ["providerId"] = providerId.ToString(),
+            ["modelId"] = modelId.ToString(),
+            ["conversationPlanId"] = conversationPlan.Id.ToString()
+        };
+
+        var context = new FictionPhaseExecutionContext(
+            planId,
+            agent.Id,
+            conversation.Id,
+            "draft",
+            Metadata: contextMetadata);
+
+        await scheduler.ScheduleAsync(
+            plan,
+            FictionPhase.VisionPlanner,
+            FictionPhaseResult.Success(FictionPhase.VisionPlanner),
+            context,
+            CancellationToken.None);
+
+        var updatedTask = await db.ConversationTasks.SingleAsync(t => t.Id == conversationTask.Id);
+        updatedTask.ProviderId.Should().Be(providerId);
+        updatedTask.ModelId.Should().Be(modelId);
+        updatedTask.AgentId.Should().Be(agent.Id);
+        updatedTask.BacklogItemId.Should().Be(backlogItem.BacklogId);
+        updatedTask.ConversationPlanId.Should().Be(conversationPlan.Id);
+
+        var args = JsonSerializer.Deserialize<Dictionary<string, object?>>(updatedTask.ArgsJson ?? "{}", new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        args["planId"]!.ToString().Should().Be(planId.ToString());
+        args["backlogItemId"]!.ToString().Should().Be(backlogItem.BacklogId);
+        args["conversationPlanId"]!.ToString().Should().Be(conversationPlan.Id.ToString());
+        args["conversationId"]!.ToString().Should().Be(conversation.Id.ToString());
+        args["providerId"]!.ToString().Should().Be(providerId.ToString());
+        args["agentId"]!.ToString().Should().Be(agent.Id.ToString());
+        args["modelId"]!.ToString().Should().Be(modelId.ToString());
+        args["branchSlug"]!.ToString().Should().Be("draft");
+
+        jobClient.Received(1).EnqueueChapterArchitect(
+            planId,
+            agent.Id,
+            conversation.Id,
+            Arg.Any<Guid>(),
+            providerId,
+            modelId,
+            "draft",
+            Arg.Is<IReadOnlyDictionary<string, string>>(md =>
+                md.ContainsKey("conversationPlanId") &&
+                md["conversationPlanId"] == conversationPlan.Id.ToString() &&
+                md.ContainsKey("conversationId") &&
+                md["conversationId"] == conversation.Id.ToString() &&
+                md.ContainsKey("providerId") &&
+                md["providerId"] == providerId.ToString() &&
+                md.ContainsKey("agentId") &&
+                md["agentId"] == agent.Id.ToString() &&
+                md.ContainsKey("branchSlug") &&
+                md["branchSlug"] == "draft" &&
+                md.ContainsKey("backlogItemId") &&
+                md["backlogItemId"] == backlogItem.BacklogId));
     }
 
     [Fact]

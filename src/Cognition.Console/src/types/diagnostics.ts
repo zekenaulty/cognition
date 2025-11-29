@@ -171,6 +171,9 @@ export type PlannerBacklogActionLog = {
   modelId?: string | null;
   agentId?: string | null;
   status?: string | null;
+  conversationId?: string | null;
+  conversationPlanId?: string | null;
+  taskId?: string | null;
   timestampUtc: string;
 };
 

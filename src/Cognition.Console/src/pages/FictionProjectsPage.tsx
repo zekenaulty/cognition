@@ -68,7 +68,7 @@ export default function FictionProjectsPage() {
   const [resumeTarget, setResumeTarget] = React.useState<FictionBacklogItem | null>(null);
   const [resuming, setResuming] = React.useState(false);
   const [resumeError, setResumeError] = React.useState<string | null>(null);
-  const [resumeDefaults, setResumeDefaults] = React.useState<{ providerId?: string; modelId?: string | null }>({});
+  const [resumeDefaults, setResumeDefaults] = React.useState<{ providerId?: string; modelId?: string | null; branchSlug?: string }>({});
   const [loreHistory, setLoreHistory] = React.useState<Record<string, LoreFulfillmentLog[]>>({});
   const [loreHistoryLoading, setLoreHistoryLoading] = React.useState(false);
   const [loreHistoryError, setLoreHistoryError] = React.useState<string | null>(null);
@@ -336,6 +336,29 @@ export default function FictionProjectsPage() {
     setResumeTarget(item);
   }, []);
 
+  const persistResumeDefaults = React.useCallback((defaults: { providerId?: string; modelId?: string | null; branchSlug?: string }) => {
+    setResumeDefaults(defaults);
+    try {
+      localStorage.setItem('fiction.resumeDefaults', JSON.stringify(defaults));
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem('fiction.resumeDefaults');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          setResumeDefaults(parsed);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
   const handleResumeSubmit = React.useCallback(
     async (payload: ResumeBacklogPayload) => {
       if (!token || !selectedPlanId || !resumeTarget) {
@@ -345,7 +368,7 @@ export default function FictionProjectsPage() {
       setResumeError(null);
       try {
         await fictionApi.resumeBacklog(selectedPlanId, resumeTarget.backlogId, payload, token);
-        setResumeDefaults({ providerId: payload.providerId, modelId: payload.modelId ?? null });
+        persistResumeDefaults({ providerId: payload.providerId, modelId: payload.modelId ?? null, branchSlug: payload.branchSlug });
         setResumeTarget(null);
         await fetchBacklog();
         await fetchActionLogs();
@@ -356,7 +379,7 @@ export default function FictionProjectsPage() {
         setResuming(false);
       }
     },
-    [token, selectedPlanId, resumeTarget, fetchBacklog, fetchActionLogs]
+    [token, selectedPlanId, resumeTarget, fetchBacklog, fetchActionLogs, persistResumeDefaults]
   );
 
   const handleResumeDialogClose = React.useCallback(() => {
@@ -752,7 +775,7 @@ export default function FictionProjectsPage() {
       <FictionResumeBacklogDialog
         open={Boolean(resumeTarget)}
         item={resumeTarget}
-        defaultBranch={roster?.branchSlug ?? undefined}
+        defaultBranch={resumeDefaults.branchSlug ?? roster?.branchSlug ?? undefined}
         defaultProviderId={resumeDefaults.providerId}
         defaultModelId={resumeDefaults.modelId ?? undefined}
         submitting={resuming}
@@ -775,6 +798,7 @@ export default function FictionProjectsPage() {
         accessToken={token}
         onClose={() => setPlanDialogOpen(false)}
         onCreated={handlePlanCreated}
+        onPrefillResume={setResumeDefaults}
       />
     </Stack>
   );
