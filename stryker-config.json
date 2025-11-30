@@ -1,0 +1,22 @@
+{
+  "$schema": "https://stryker-mutator.io/stryker.schema.json",
+  "stryker-config": {
+    "project": "tests/Cognition.Clients.Tests/Cognition.Clients.Tests.csproj",
+    "reporters": [
+      "progress",
+      "html"
+    ],
+    "logLevel": "info",
+    "concurrency": 1,
+    "timeoutMS": 10000,
+    "mutation-level": "Standard",
+    "ignore-methods": [
+      "ToString"
+    ],
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 50
+    }
+  }
+}

@@ -4,7 +4,7 @@
 - Finish the unit-testing expansion with CI rigor for pre-alpha.
 
 ## Scope
-- Tests and CI for planner, tool dispatcher, scope path hashing/flags, and (future) sandbox/HGTF once implemented.
+- Tests and CI for planner, tool dispatcher, scope path hashing/flags, sandbox policy/alerts (to current implementation), and future HGTF when implemented.
 - Coverage/mutation strategy (Stryker or equivalent), API regression nets, and documentation.
 
 ## Definition of Done
@@ -38,6 +38,6 @@
 - Capture scope/context changes as you work (static RAG in `plans/`) so later sessions can anchor.
 
 ## Initial Steps
-1) Codify hotspots list.
-2) Add missing API regression nets.
+1) Codify hotspots list (dispatcher enforce/deny/queue, sandbox policy/alerts, scope path flags, rate-limit/abuse API net, planner telemetry/alerts); waive remaining `unit_testing_expansion` items explicitly where out of scope.
+2) Add missing API regression nets (rate-limit/abuse) and targeted unit/integration tests for hotspots.
 3) Integrate mutation/coverage thresholds and document run commands.
