@@ -28,9 +28,14 @@ public class UsersController : ControllerBase
         [property: Required, StringLength(64, MinimumLength = 1)] string Username,
         [property: Required, MinLength(8)] string Password,
         [property: EmailAddress] string? Email);
-    public record LoginRequest(
-        [property: Required, StringLength(64, MinimumLength = 1)] string Username,
-        [property: Required] string Password);
+    public sealed class LoginRequest
+    {
+        [Required, StringLength(64, MinimumLength = 1)]
+        public string Username { get; init; } = string.Empty;
+
+        [Required]
+        public string Password { get; init; } = string.Empty;
+    }
     public record ChangePasswordRequest(
         [property: Required] string CurrentPassword,
         [property: Required, MinLength(8)] string NewPassword);

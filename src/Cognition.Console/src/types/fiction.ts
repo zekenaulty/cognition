@@ -135,6 +135,12 @@ export type FictionWorldBibleSummary = {
   status: string;
   continuityNotes: string[];
   updatedAtUtc: string;
+  agentId?: string | null;
+  personaId?: string | null;
+  sourcePlanPassId?: string | null;
+  sourceConversationId?: string | null;
+  sourceBacklogId?: string | null;
+  branchSlug?: string | null;
 };
 
 export type FictionLoreRequirementItem = {

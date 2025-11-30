@@ -587,6 +587,16 @@ public sealed class FictionPlansController : ControllerBase
         requirement.UpdatedAtUtc = DateTime.UtcNow;
         requirement.MetadataJson = UpdateLoreMetadata(requirement.MetadataJson, branchContext, request);
 
+        if (requirement.WorldBibleEntry is not null)
+        {
+            // Carry provenance into the linked world-bible entry for downstream roster/health surfaces.
+            requirement.WorldBibleEntry.SourcePlanPassId ??= request.PlanPassId;
+            requirement.WorldBibleEntry.SourceConversationId ??= request.ConversationId;
+            requirement.WorldBibleEntry.SourceBacklogId ??= request.BranchSlug ?? branchContext.Slug;
+            requirement.WorldBibleEntry.BranchSlug ??= branchContext.Slug;
+            requirement.WorldBibleEntry.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await EmitLoreFulfillmentTelemetry(plan, requirement, branchContext, request, cancellationToken).ConfigureAwait(false);
         await LogLoreFulfillmentEventAsync(plan, requirement, branchContext, request, cancellationToken).ConfigureAwait(false);
@@ -689,6 +699,10 @@ public sealed class FictionPlansController : ControllerBase
         obligation.Status = targetStatus;
         obligation.ResolvedAtUtc = DateTime.UtcNow;
         obligation.ResolvedByActor = ResolveActorName(HttpContext);
+        if (string.IsNullOrWhiteSpace(obligation.BranchSlug))
+        {
+            obligation.BranchSlug = obligation.FictionPlan?.PrimaryBranchSlug ?? "main";
+        }
         if (string.IsNullOrWhiteSpace(obligation.SourceBacklogId) && !string.IsNullOrWhiteSpace(request.BacklogId))
         {
             obligation.SourceBacklogId = request.BacklogId;
@@ -757,7 +771,13 @@ public sealed class FictionPlansController : ControllerBase
                 entity.WorldBibleEntry.Content.Summary,
                 entity.WorldBibleEntry.Content.Status,
                 entity.WorldBibleEntry.Content.ContinuityNotes ?? Array.Empty<string>(),
-                entity.WorldBibleEntry.UpdatedAtUtc ?? entity.WorldBibleEntry.CreatedAtUtc);
+                entity.WorldBibleEntry.UpdatedAtUtc ?? entity.WorldBibleEntry.CreatedAtUtc,
+                entity.WorldBibleEntry.AgentId,
+                entity.WorldBibleEntry.PersonaId,
+                entity.WorldBibleEntry.SourcePlanPassId,
+                entity.WorldBibleEntry.SourceConversationId,
+                entity.WorldBibleEntry.SourceBacklogId,
+                entity.WorldBibleEntry.BranchSlug);
 
         var provenance = TryParseJson(entity.ProvenanceJson);
         var branch = ResolveBranchContext(provenance, defaultBranch);
@@ -799,7 +819,13 @@ public sealed class FictionPlansController : ControllerBase
                 entity.WorldBibleEntry.Content.Summary,
                 entity.WorldBibleEntry.Content.Status,
                 entity.WorldBibleEntry.Content.ContinuityNotes ?? Array.Empty<string>(),
-                entity.WorldBibleEntry.UpdatedAtUtc ?? entity.WorldBibleEntry.CreatedAtUtc);
+                entity.WorldBibleEntry.UpdatedAtUtc ?? entity.WorldBibleEntry.CreatedAtUtc,
+                entity.WorldBibleEntry.AgentId,
+                entity.WorldBibleEntry.PersonaId,
+                entity.WorldBibleEntry.SourcePlanPassId,
+                entity.WorldBibleEntry.SourceConversationId,
+                entity.WorldBibleEntry.SourceBacklogId,
+                entity.WorldBibleEntry.BranchSlug);
 
         var metadata = TryParseJson(entity.MetadataJson);
         var branch = ResolveBranchContext(metadata, defaultBranch);
@@ -1176,7 +1202,9 @@ public sealed class FictionPlansController : ControllerBase
             ["notes"] = request.Notes,
             ["source"] = string.IsNullOrWhiteSpace(request.Source) ? "api" : request.Source,
             ["status"] = obligation.Status.ToString(),
-            ["branch"] = obligation.BranchSlug,
+            ["branch"] = string.IsNullOrWhiteSpace(obligation.BranchSlug)
+                ? obligation.FictionPlan?.PrimaryBranchSlug ?? "main"
+                : obligation.BranchSlug,
             ["branchLineage"] = obligation.BranchSlug is not null && obligation.BranchSlug.Equals("main", StringComparison.OrdinalIgnoreCase)
                 ? null
                 : ExtractBranchLineage(TryParseJson(obligation.MetadataJson)) is { } lineage && lineage.Count > 0
@@ -1634,7 +1662,13 @@ public sealed class FictionPlansController : ControllerBase
         string Summary,
         string Status,
         IReadOnlyList<string> ContinuityNotes,
-        DateTime UpdatedAtUtc);
+        DateTime UpdatedAtUtc,
+        Guid? AgentId,
+        Guid? PersonaId,
+        Guid? SourcePlanPassId,
+        Guid? SourceConversationId,
+        string? SourceBacklogId,
+        string? BranchSlug);
 
     public sealed record LoreRequirementRosterItem(
         Guid Id,

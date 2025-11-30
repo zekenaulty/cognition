@@ -59,6 +59,12 @@ public sealed record PlannerHealthWorldBibleEntry(
     bool IsActive,
     int? IterationIndex,
     string? BacklogItemId,
+    Guid? AgentId,
+    Guid? PersonaId,
+    Guid? SourcePlanPassId,
+    Guid? SourceConversationId,
+    string? SourceBacklogId,
+    string? BranchSlug,
     DateTime UpdatedAtUtc);
 
 public sealed record PlannerHealthPlanner(
@@ -180,6 +186,10 @@ public sealed record PlannerHealthTelemetry(
     IReadOnlyDictionary<string, int> CritiqueStatusCounts,
     IReadOnlyList<PlannerHealthExecutionFailure> RecentFailures);
 
+internal sealed record LorePlanStatus(int Blocked, int Planned);
+
+internal sealed record ObligationPlanStatus(int Open, int Drift, int Aging);
+
 public enum PlannerHealthAlertSeverity
 {
     Info,
@@ -290,7 +300,10 @@ public sealed class PlannerHealthService : IPlannerHealthService
             warnings.Add("No world-bible snapshots have been recorded yet.");
         }
 
-        var alerts = BuildAlerts(plannerReports, backlog, worldBibleIssues, telemetry, generatedAt);
+        var loreStatus = await LoadLoreStatusAsync(ct).ConfigureAwait(false);
+        var obligationStatus = await LoadObligationStatusAsync(ct).ConfigureAwait(false);
+
+        var alerts = BuildAlerts(plannerReports, backlog, worldBibleIssues, telemetry, loreStatus, obligationStatus, generatedAt);
         var status = DetermineStatus(plannerReports, backlog, worldBibleIssues, telemetry, alerts);
 
         var report = new PlannerHealthReport(
@@ -553,6 +566,64 @@ public sealed class PlannerHealthService : IPlannerHealthService
     }
 
     
+    private async Task<Dictionary<Guid, LorePlanStatus>> LoadLoreStatusAsync(CancellationToken ct)
+    {
+        if (_db.Model.FindEntityType(typeof(FictionLoreRequirement)) is null)
+        {
+            return new Dictionary<Guid, LorePlanStatus>();
+        }
+
+        var stats = await _db.FictionLoreRequirements
+            .AsNoTracking()
+            .GroupBy(r => r.FictionPlanId)
+            .Select(g => new
+            {
+                PlanId = g.Key,
+                Blocked = g.Count(r => r.Status == FictionLoreRequirementStatus.Blocked),
+                Planned = g.Count(r => r.Status == FictionLoreRequirementStatus.Planned)
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return stats.ToDictionary(
+            s => s.PlanId,
+            s => new LorePlanStatus(s.Blocked, s.Planned));
+    }
+
+    private async Task<Dictionary<Guid, ObligationPlanStatus>> LoadObligationStatusAsync(CancellationToken ct)
+    {
+        if (_db.Model.FindEntityType(typeof(FictionPersonaObligation)) is null)
+        {
+            return new Dictionary<Guid, ObligationPlanStatus>();
+        }
+
+        var cutoff = DateTime.UtcNow.AddHours(-12);
+        var obligations = await _db.FictionPersonaObligations
+            .AsNoTracking()
+            .Select(o => new
+            {
+                o.FictionPlanId,
+                o.Status,
+                o.MetadataJson,
+                o.CreatedAtUtc
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var grouped = obligations.GroupBy(o => o.FictionPlanId);
+        var result = new Dictionary<Guid, ObligationPlanStatus>();
+
+        foreach (var group in grouped)
+        {
+            var open = group.Count(o => o.Status == FictionPersonaObligationStatus.Open);
+            var drift = group.Count(o => o.MetadataJson != null && o.MetadataJson.Contains("voiceDrift", StringComparison.OrdinalIgnoreCase));
+            var aging = group.Count(o => o.Status == FictionPersonaObligationStatus.Open && o.CreatedAtUtc < cutoff);
+            result[group.Key] = new ObligationPlanStatus(open, drift, aging);
+        }
+
+        return result;
+    }
+
     private async Task<PlannerHealthWorldBibleReport> BuildWorldBibleReportAsync(CancellationToken ct)
     {
         var worldBibles = await _db.FictionWorldBibles
@@ -598,6 +669,12 @@ public sealed class PlannerHealthService : IPlannerHealthService
                     IsActive: e.IsActive,
                     IterationIndex: e.Content.IterationIndex,
                     BacklogItemId: e.Content.BacklogItemId,
+                    AgentId: e.AgentId,
+                    PersonaId: e.PersonaId,
+                    SourcePlanPassId: e.SourcePlanPassId,
+                    SourceConversationId: e.SourceConversationId,
+                    SourceBacklogId: e.SourceBacklogId,
+                    BranchSlug: e.BranchSlug,
                     UpdatedAtUtc: e.Content.UpdatedAtUtc != default ? e.Content.UpdatedAtUtc : (e.UpdatedAtUtc ?? e.CreatedAtUtc)))
                 .ToList();
 
@@ -1055,13 +1132,15 @@ public sealed class PlannerHealthService : IPlannerHealthService
         var hasCriticalContractAlerts = alerts.Any(a =>
             a.Id.StartsWith("backlog:contract", StringComparison.OrdinalIgnoreCase) &&
             a.Severity == PlannerHealthAlertSeverity.Error);
+        var hasLoreAlerts = alerts.Any(a => a.Id.StartsWith("lore:", StringComparison.OrdinalIgnoreCase));
+        var hasObligationAlerts = alerts.Any(a => a.Id.StartsWith("obligation:", StringComparison.OrdinalIgnoreCase));
 
         if (hasCriticalContractAlerts)
         {
             return PlannerHealthStatus.Critical;
         }
 
-        if (hasDegradedBacklog || hasRecentFailures || hasNoExecutions || hasCritiqueAlerts || hasWorldBibleIssues || hasWorldBibleAlerts || hasContractAlerts)
+        if (hasDegradedBacklog || hasRecentFailures || hasNoExecutions || hasCritiqueAlerts || hasWorldBibleIssues || hasWorldBibleAlerts || hasContractAlerts || hasLoreAlerts || hasObligationAlerts)
         {
             return PlannerHealthStatus.Degraded;
         }
@@ -1074,6 +1153,8 @@ public sealed class PlannerHealthService : IPlannerHealthService
         PlannerHealthBacklog backlog,
         IReadOnlyList<WorldBibleIssue> worldBibleIssues,
         PlannerHealthTelemetry telemetry,
+        IReadOnlyDictionary<Guid, LorePlanStatus> loreStatus,
+        IReadOnlyDictionary<Guid, ObligationPlanStatus> obligationStatus,
         DateTime generatedAtUtc)
     {
         var alerts = new List<PlannerHealthAlert>();
@@ -1081,6 +1162,12 @@ public sealed class PlannerHealthService : IPlannerHealthService
         void AddAlert(string id, PlannerHealthAlertSeverity severity, string title, string description)
         {
             alerts.Add(new PlannerHealthAlert(id, severity, title, description, generatedAtUtc));
+        }
+
+        string ResolvePlanName(Guid planId)
+        {
+            var plan = backlog.Plans.FirstOrDefault(p => p.PlanId == planId);
+            return plan?.PlanName ?? planId.ToString("N");
         }
 
         foreach (var planner in planners)
@@ -1108,6 +1195,25 @@ public sealed class PlannerHealthService : IPlannerHealthService
         if (backlog.OrphanedItems.Count > 0)
         {
             AddAlert("backlog:orphaned", PlannerHealthAlertSeverity.Warning, "Orphaned backlog items detected", $"{backlog.OrphanedItems.Count} backlog item(s) are no longer attached to a plan.");
+        }
+
+        var loreGaps = loreStatus
+            .Where(kvp => kvp.Value.Blocked + kvp.Value.Planned > 0)
+            .ToList();
+        if (loreGaps.Count > 0)
+        {
+            var planNames = loreGaps.Select(kvp => $"{ResolvePlanName(kvp.Key)} ({kvp.Value.Blocked} blocked, {kvp.Value.Planned} planned)").ToArray();
+            AddAlert("lore:blocked", PlannerHealthAlertSeverity.Warning, "Lore gaps detected", $"Lore requirements remain blocked or unfulfilled for {loreGaps.Count} plan(s): {string.Join("; ", planNames)}.");
+        }
+
+        var obligationIssues = obligationStatus
+            .Where(kvp => kvp.Value.Open > 0 || kvp.Value.Drift > 0 || kvp.Value.Aging > 0)
+            .ToList();
+        if (obligationIssues.Count > 0)
+        {
+            var planNames = obligationIssues.Select(kvp =>
+                $"{ResolvePlanName(kvp.Key)} (open {kvp.Value.Open}, drift {kvp.Value.Drift}, aging {kvp.Value.Aging})").ToArray();
+            AddAlert("obligation:open", PlannerHealthAlertSeverity.Warning, "Persona obligations require attention", $"Persona obligations remain open for {obligationIssues.Count} plan(s): {string.Join("; ", planNames)}.");
         }
 
         var contractEvents = backlog.TelemetryEvents

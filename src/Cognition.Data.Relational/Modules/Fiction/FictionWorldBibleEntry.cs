@@ -19,6 +19,17 @@ public class FictionWorldBibleEntry : BaseEntity
     public Guid? DerivedFromEntryId { get; set; }
     public FictionWorldBibleEntry? DerivedFromEntry { get; set; }
 
+    public Guid? AgentId { get; set; }
+    public Modules.Agents.Agent? Agent { get; set; }
+
+    public Guid? PersonaId { get; set; }
+    public Modules.Personas.Persona? Persona { get; set; }
+
+    public Guid? SourcePlanPassId { get; set; }
+    public Guid? SourceConversationId { get; set; }
+    public string? SourceBacklogId { get; set; }
+    public string? BranchSlug { get; set; }
+
     public Guid? FictionChapterScrollId { get; set; }
     public FictionChapterScroll? FictionChapterScroll { get; set; }
     public Guid? FictionChapterSceneId { get; set; }

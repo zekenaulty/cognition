@@ -44,6 +44,12 @@ export type PlannerHealthWorldBibleEntry = {
   isActive: boolean;
   iterationIndex?: number | null;
   backlogItemId?: string | null;
+  agentId?: string | null;
+  personaId?: string | null;
+  sourcePlanPassId?: string | null;
+  sourceConversationId?: string | null;
+  sourceBacklogId?: string | null;
+  branchSlug?: string | null;
   updatedAtUtc: string;
 };
 

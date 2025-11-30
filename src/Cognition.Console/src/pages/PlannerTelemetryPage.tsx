@@ -518,6 +518,15 @@ export default function PlannerTelemetryPage() {
     return [...serverAlerts, ...buildOpenSearchAlerts(openSearchReport)];
   }, [serverAlerts, openSearchReport]);
 
+  const fictionAlerts = React.useMemo(() => {
+    return serverAlerts.filter(alert =>
+      alert.id.startsWith('backlog:') ||
+      alert.id.startsWith('lore:') ||
+      alert.id.startsWith('obligation:') ||
+      alert.id.startsWith('worldbible:')
+    );
+  }, [serverAlerts]);
+
   const contractTelemetryEvents = React.useMemo(() => {
     if (!plannerReport) {
       return [];
@@ -708,6 +717,40 @@ export default function PlannerTelemetryPage() {
               {alert.description}
             </Alert>
           ))}
+        </Stack>
+      )}
+
+      {fictionAlerts.length > 0 && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ my: 1 }}>
+          {fictionAlerts.map(alert => {
+            const lower = alert.id.toLowerCase();
+            const linkText =
+              lower.startsWith('backlog:') ? 'View backlog' :
+              lower.startsWith('lore:') ? 'Review lore' :
+              lower.startsWith('obligation:') ? 'Resolve obligations' :
+              lower.startsWith('worldbible:') ? 'Open roster' :
+              null;
+            const onClick = () => {
+              if (lower.startsWith('backlog:') && rosterCardRef.current) {
+                rosterCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              } else if (lower.startsWith('lore:') && rosterCardRef.current) {
+                rosterCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              } else if (lower.startsWith('obligation:') && rosterCardRef.current) {
+                rosterCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              } else if (lower.startsWith('worldbible:') && rosterCardRef.current) {
+                rosterCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            };
+            return (
+              <Chip
+                key={`fx-${alert.id}`}
+                color={alert.severity === 'error' ? 'error' : alert.severity === 'warning' ? 'warning' : 'info'}
+                variant="outlined"
+                label={linkText ? `${alert.title} • ${linkText}` : alert.title}
+                onClick={linkText ? onClick : undefined}
+              />
+            );
+          })}
         </Stack>
       )}
 
@@ -1012,6 +1055,7 @@ export default function PlannerTelemetryPage() {
                               <TableCell>Status</TableCell>
                               <TableCell>Iteration</TableCell>
                               <TableCell>Backlog Item</TableCell>
+                              <TableCell>Provenance</TableCell>
                               <TableCell>Continuity Notes</TableCell>
                               <TableCell align="right">Last Updated</TableCell>
                             </TableRow>
@@ -1036,6 +1080,30 @@ export default function PlannerTelemetryPage() {
                                 </TableCell>
                                 <TableCell>{entry.iterationIndex ?? '—'}</TableCell>
                                 <TableCell>{entry.backlogItemId ?? '—'}</TableCell>
+                                <TableCell>
+                                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                    {entry.agentId && (
+                                      <Chip size="small" label={`Agent ${formatIdFragment(entry.agentId)}`} variant="outlined" />
+                                    )}
+                                    {entry.personaId && (
+                                      <Chip size="small" label={`Persona ${formatIdFragment(entry.personaId)}`} variant="outlined" />
+                                    )}
+                                    {entry.sourcePlanPassId && (
+                                      <Chip size="small" label={`Pass ${formatIdFragment(entry.sourcePlanPassId)}`} variant="outlined" />
+                                    )}
+                                    {entry.sourceConversationId && (
+                                      <Chip size="small" label={`Convo ${formatIdFragment(entry.sourceConversationId)}`} variant="outlined" />
+                                    )}
+                                    {entry.sourceBacklogId && <Chip size="small" label={`Backlog ${entry.sourceBacklogId}`} variant="outlined" />}
+                                    {entry.branchSlug && <Chip size="small" label={`Branch ${entry.branchSlug}`} variant="outlined" />}
+                                    {!entry.agentId &&
+                                      !entry.personaId &&
+                                      !entry.sourcePlanPassId &&
+                                      !entry.sourceConversationId &&
+                                      !entry.sourceBacklogId &&
+                                      !entry.branchSlug && <Typography variant="caption">—</Typography>}
+                                  </Stack>
+                                </TableCell>
                                 <TableCell>
                                   {entry.continuityNotes.length === 0 ? (
                                     '—'

@@ -504,12 +504,26 @@ public class FictionWorldBibleEntryConfiguration : IEntityTypeConfiguration<Fict
         b.Property(x => x.DerivedFromEntryId).HasColumnName("derived_from_entry_id");
         b.Property(x => x.FictionChapterScrollId).HasColumnName("fiction_chapter_scroll_id");
         b.Property(x => x.FictionChapterSceneId).HasColumnName("fiction_chapter_scene_id");
+        b.Property(x => x.AgentId).HasColumnName("agent_id");
+        b.Property(x => x.PersonaId).HasColumnName("persona_id");
+        b.Property(x => x.SourcePlanPassId).HasColumnName("source_plan_pass_id");
+        b.Property(x => x.SourceConversationId).HasColumnName("source_conversation_id");
+        b.Property(x => x.SourceBacklogId).HasColumnName("source_backlog_id");
+        b.Property(x => x.BranchSlug).HasColumnName("branch_slug");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
         b.HasOne(x => x.FictionWorldBible)
             .WithMany(bible => bible.Entries)
             .HasForeignKey(x => x.FictionWorldBibleId)
             .HasConstraintName("fk_fiction_world_bible_entries_bible");
+        b.HasOne(x => x.Agent)
+            .WithMany()
+            .HasForeignKey(x => x.AgentId)
+            .HasConstraintName("fk_fiction_world_bible_entries_agent");
+        b.HasOne(x => x.Persona)
+            .WithMany()
+            .HasForeignKey(x => x.PersonaId)
+            .HasConstraintName("fk_fiction_world_bible_entries_persona");
         b.HasOne(x => x.DerivedFromEntry)
             .WithMany()
             .HasForeignKey(x => x.DerivedFromEntryId)

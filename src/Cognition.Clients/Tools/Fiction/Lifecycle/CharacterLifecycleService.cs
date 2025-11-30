@@ -25,6 +25,7 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
     private readonly ILogger<CharacterLifecycleService> _logger;
     private readonly IReadOnlyList<IFictionLifecycleTelemetry> _telemetrySinks;
     private const string CharacterWorldBibleCategory = "characters";
+    private const string DefaultWorldBibleDomain = "core";
 
     public CharacterLifecycleService(
         CognitionDbContext db,
@@ -168,9 +169,16 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
             var resolvedWorldBibleEntryId = descriptor.WorldBibleEntryId
                 ?? entity.WorldBibleEntryId
                 ?? TryResolveWorldBibleEntryId(slug, worldBibleLookup);
+            var backlogId = TryReadDescriptorMetadataString(descriptor.Metadata, "backlogItemId");
             if (resolvedWorldBibleEntryId.HasValue)
             {
                 entity.WorldBibleEntryId = resolvedWorldBibleEntryId;
+                await UpdateWorldBibleEntryProvenanceAsync(resolvedWorldBibleEntryId.Value, persona.Id, agent.Id, descriptor, request, backlogId, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var entry = await EnsureWorldBibleEntryAsync(request, slug, descriptor, persona.Id, agent.Id, backlogId, cancellationToken).ConfigureAwait(false);
+                entity.WorldBibleEntryId = entry.Id;
             }
 
             var metadata = BuildCharacterMetadata(request, descriptor, persona, agent, slug);
@@ -651,6 +659,116 @@ public sealed class CharacterLifecycleService : ICharacterLifecycleService
         }
 
         return metadata;
+    }
+
+    private async Task<FictionWorldBibleEntry> EnsureWorldBibleEntryAsync(
+        CharacterLifecycleRequest request,
+        string characterSlug,
+        CharacterLifecycleDescriptor descriptor,
+        Guid personaId,
+        Guid agentId,
+        string? backlogId,
+        CancellationToken cancellationToken)
+    {
+        var bible = await _db.FictionWorldBibles
+            .FirstOrDefaultAsync(b => b.FictionPlanId == request.PlanId && b.BranchSlug == (request.BranchSlug ?? "main"), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (bible is null)
+        {
+            bible = new FictionWorldBible
+            {
+                Id = Guid.NewGuid(),
+                FictionPlanId = request.PlanId,
+                Domain = DefaultWorldBibleDomain,
+                BranchSlug = request.BranchSlug ?? "main",
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            _db.FictionWorldBibles.Add(bible);
+        }
+
+        var entrySlug = BuildWorldBibleCharacterSlug(characterSlug);
+        var entry = await _db.FictionWorldBibleEntries
+            .FirstOrDefaultAsync(e => e.FictionWorldBibleId == bible.Id && e.EntrySlug == entrySlug, cancellationToken)
+            .ConfigureAwait(false);
+
+            if (entry is null)
+            {
+                entry = new FictionWorldBibleEntry
+                {
+                    Id = Guid.NewGuid(),
+                FictionWorldBibleId = bible.Id,
+                EntrySlug = entrySlug,
+                EntryName = descriptor.Name ?? characterSlug,
+                Content = new FictionWorldBibleEntryContent
+                {
+                    Category = CharacterWorldBibleCategory,
+                    Branch = request.BranchSlug ?? "main",
+                    Summary = descriptor.Summary ?? descriptor.Notes ?? descriptor.Role ?? descriptor.Importance ?? string.Empty,
+                    BacklogItemId = backlogId,
+                    UpdatedAtUtc = DateTime.UtcNow
+                },
+                Version = 1,
+                ChangeType = FictionWorldBibleChangeType.Seed,
+                Sequence = 1,
+                IsActive = true,
+                AgentId = agentId,
+                PersonaId = personaId,
+                SourcePlanPassId = descriptor.CreatedByPlanPassId ?? request.PlanPassId,
+                SourceBacklogId = backlogId,
+                SourceConversationId = request.ConversationId,
+                BranchSlug = request.BranchSlug ?? "main",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            _db.FictionWorldBibleEntries.Add(entry);
+        }
+        else
+        {
+            entry.AgentId ??= agentId;
+            entry.PersonaId ??= personaId;
+            entry.SourcePlanPassId ??= descriptor.CreatedByPlanPassId ?? request.PlanPassId;
+            entry.SourceBacklogId ??= backlogId;
+            entry.SourceConversationId ??= request.ConversationId;
+            entry.BranchSlug ??= request.BranchSlug ?? "main";
+            entry.EntryName = descriptor.Name ?? entry.EntryName;
+            if (!string.IsNullOrWhiteSpace(descriptor.Summary))
+            {
+                entry.Content ??= new FictionWorldBibleEntryContent();
+                entry.Content.Summary = descriptor.Summary;
+                entry.Content.Branch = request.BranchSlug ?? entry.Content.Branch;
+                entry.Content.BacklogItemId ??= backlogId;
+            }
+            entry.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        return entry;
+    }
+
+    private async Task UpdateWorldBibleEntryProvenanceAsync(
+        Guid entryId,
+        Guid personaId,
+        Guid agentId,
+        CharacterLifecycleDescriptor descriptor,
+        CharacterLifecycleRequest request,
+        string? backlogId,
+        CancellationToken cancellationToken)
+    {
+        var entry = await _db.FictionWorldBibleEntries.FirstOrDefaultAsync(e => e.Id == entryId, cancellationToken).ConfigureAwait(false);
+        if (entry is null) return;
+
+        entry.AgentId ??= agentId;
+        entry.PersonaId ??= personaId;
+        entry.SourcePlanPassId ??= descriptor.CreatedByPlanPassId ?? request.PlanPassId;
+        entry.SourceBacklogId ??= backlogId;
+        entry.SourceConversationId ??= request.ConversationId;
+        entry.BranchSlug ??= request.BranchSlug ?? "main";
+        if (entry.Content is not null)
+        {
+            entry.Content.Branch = request.BranchSlug ?? entry.Content.Branch;
+            entry.Content.BacklogItemId ??= backlogId;
+        }
+        entry.UpdatedAtUtc = DateTime.UtcNow;
     }
 
     private static string? TryReadDescriptorMetadataString(IReadOnlyDictionary<string, object?>? metadata, string key)

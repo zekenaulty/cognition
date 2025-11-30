@@ -17,7 +17,7 @@ import {
   TableRow,
   Typography
 } from '@mui/material';
-import { FictionLoreRequirementItem, FictionPlanRoster, LoreFulfillmentLog } from '../../types/fiction';
+import { FictionLoreRequirementItem, FictionPlanRoster, FictionWorldBibleSummary, LoreFulfillmentLog } from '../../types/fiction';
 
 const EM_DASH = '\u2014';
 
@@ -111,6 +111,7 @@ export function FictionRosterPanel({
             <TableBody>
               {roster.characters.map(character => {
                 const provenanceChips = buildProvenanceChips(character.provenance, character.branchLineage, character.createdByPlanPassId);
+                const worldBibleProvenance = buildWorldBibleProvenanceChips(character.worldBible);
                 return (
                 <TableRow key={character.id} hover>
                   <TableCell>
@@ -157,6 +158,13 @@ export function FictionRosterPanel({
                           />
                           <Chip size="small" label={character.worldBible.status} />
                         </Stack>
+                        {worldBibleProvenance.length > 0 && (
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                            {worldBibleProvenance.map(chip => (
+                              <Chip key={`${character.id}-${chip}`} size="small" variant="outlined" label={chip} />
+                            ))}
+                          </Stack>
+                        )}
                       </Stack>
                     ) : (
                       <Typography variant="body2" color="text.secondary">
@@ -199,6 +207,7 @@ export function FictionRosterPanel({
               <TableBody>
                 {roster.loreRequirements.map(lore => {
                   const loreProvenanceChips = buildProvenanceChips(lore.metadata, lore.branchLineage, lore.createdByPlanPassId, lore.requirementSlug);
+                  const loreWorldBibleProvenance = buildWorldBibleProvenanceChips(lore.worldBible);
                   return (
                   <TableRow key={lore.id}>
                     <TableCell>
@@ -238,6 +247,13 @@ export function FictionRosterPanel({
                             />
                             <Chip size="small" label={lore.worldBible.status} />
                           </Stack>
+                          {loreWorldBibleProvenance.length > 0 && (
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                              {loreWorldBibleProvenance.map(chip => (
+                                <Chip key={`${lore.id}-${chip}`} size="small" variant="outlined" label={chip} />
+                              ))}
+                            </Stack>
+                          )}
                         </Stack>
                       ) : (
                         <Typography variant="body2" color="text.secondary">
@@ -449,6 +465,34 @@ function buildProvenanceChips(
   }
   if (branchLineage && branchLineage.length > 1) {
     chips.push(`Lineage ${branchLineage.join(' -> ')}`);
+  }
+
+  return chips;
+}
+
+function buildWorldBibleProvenanceChips(worldBible?: FictionWorldBibleSummary | null) {
+  if (!worldBible) {
+    return [];
+  }
+
+  const chips: string[] = [];
+  if (worldBible.agentId) {
+    chips.push(`Agent ${formatIdSegment(worldBible.agentId)}`);
+  }
+  if (worldBible.personaId) {
+    chips.push(`Persona ${formatIdSegment(worldBible.personaId)}`);
+  }
+  if (worldBible.sourceBacklogId) {
+    chips.push(`Backlog ${worldBible.sourceBacklogId}`);
+  }
+  if (worldBible.sourcePlanPassId) {
+    chips.push(`Pass ${formatIdSegment(worldBible.sourcePlanPassId)}`);
+  }
+  if (worldBible.sourceConversationId) {
+    chips.push(`Convo ${formatIdSegment(worldBible.sourceConversationId)}`);
+  }
+  if (worldBible.branchSlug) {
+    chips.push(`Branch ${worldBible.branchSlug}`);
   }
 
   return chips;

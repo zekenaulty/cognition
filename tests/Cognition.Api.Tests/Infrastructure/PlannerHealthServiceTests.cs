@@ -584,6 +584,12 @@ public class PlannerHealthServiceTests
             ChangeType = FictionWorldBibleChangeType.Seed,
             Sequence = 1,
             IsActive = true,
+            AgentId = Guid.NewGuid(),
+            PersonaId = Guid.NewGuid(),
+            SourcePlanPassId = Guid.NewGuid(),
+            SourceConversationId = Guid.NewGuid(),
+            SourceBacklogId = "backlog-123",
+            BranchSlug = "draft",
             CreatedAtUtc = staleTimestamp,
             UpdatedAtUtc = staleTimestamp
         });
@@ -607,6 +613,13 @@ public class PlannerHealthServiceTests
         report.Warnings.Should().Contain(w => w.Contains("stale", StringComparison.OrdinalIgnoreCase));
         alertPublisher.Published.Should().HaveCount(1);
         alertPublisher.Published.Single().Should().Contain(a => a.Id.StartsWith("worldbible:stale", StringComparison.OrdinalIgnoreCase));
+        var entry = report.WorldBible.Plans.Single().ActiveEntries.Single();
+        entry.AgentId.Should().NotBeNull();
+        entry.PersonaId.Should().NotBeNull();
+        entry.SourcePlanPassId.Should().NotBeNull();
+        entry.SourceConversationId.Should().NotBeNull();
+        entry.SourceBacklogId.Should().Be("backlog-123");
+        entry.BranchSlug.Should().Be("draft");
     }
 
     private static CognitionDbContext CreateDbContext()

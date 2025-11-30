@@ -196,6 +196,57 @@ public sealed class CharacterLifecycleServiceTests
     }
 
     [Fact]
+    public async Task ProcessAsync_mints_world_bible_entry_with_provenance_when_missing()
+    {
+        var options = new DbContextOptionsBuilder<CognitionDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        await using var db = new CharacterLifecycleTestDbContext(options);
+        var project = new FictionProject { Id = Guid.NewGuid(), Title = "Provenance Saga" };
+        var planPassId = Guid.NewGuid();
+        var plan = new FictionPlan
+        {
+            Id = Guid.NewGuid(),
+            FictionProjectId = project.Id,
+            FictionProject = project,
+            Name = "Plan Provenance"
+        };
+
+        db.FictionProjects.Add(project);
+        db.FictionPlans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var service = new CharacterLifecycleService(db, NullLogger<CharacterLifecycleService>.Instance);
+        var descriptor = new CharacterLifecycleDescriptor(
+            Name: "Captain Mira",
+            Track: true,
+            Slug: "captain-mira",
+            Role: "protagonist",
+            Importance: "high",
+            Summary: "Relentless captain balancing duty and loyalty.");
+
+        var request = new CharacterLifecycleRequest(
+            plan.Id,
+            ConversationId: Guid.NewGuid(),
+            PlanPassId: planPassId,
+            new[] { descriptor },
+            Array.Empty<LoreRequirementDescriptor>(),
+            Source: "vision",
+            BranchSlug: "draft");
+
+        await service.ProcessAsync(request, CancellationToken.None);
+
+        var entry = await db.FictionWorldBibleEntries.SingleAsync();
+        entry.AgentId.Should().NotBeNull();
+        entry.PersonaId.Should().NotBeNull();
+        entry.SourcePlanPassId.Should().Be(planPassId);
+        entry.BranchSlug.Should().Be("draft");
+        entry.EntrySlug.Should().StartWith("characters:");
+        entry.Content.Branch.Should().Be("draft");
+    }
+
+    [Fact]
     public async Task ProcessAsync_includes_branch_metadata_for_characters_and_lore()
     {
         var options = new DbContextOptionsBuilder<CognitionDbContext>()
