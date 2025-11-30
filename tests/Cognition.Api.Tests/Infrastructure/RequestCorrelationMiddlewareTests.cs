@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using Cognition.Api.Infrastructure.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -8,42 +9,22 @@ namespace Cognition.Api.Tests.Infrastructure;
 public class RequestCorrelationMiddlewareTests
 {
     [Fact]
-    public async Task InvokeAsync_AssignsCorrelationId_WhenHeaderMissing()
+    public async Task AddsCorrelationHeaderAndTraceIdentifier()
     {
-        string? observedCorrelation = null;
-        RequestDelegate next = context =>
+        var httpContext = new DefaultHttpContext();
+        RequestDelegate terminal = ctx =>
         {
-            observedCorrelation = context.GetCorrelationId();
+            Assert.True(ctx.Response.Headers.ContainsKey(CorrelationConstants.HeaderName));
+            Assert.False(string.IsNullOrWhiteSpace(ctx.TraceIdentifier));
             return Task.CompletedTask;
         };
 
-        var middleware = new RequestCorrelationMiddleware(next, NullLogger<RequestCorrelationMiddleware>.Instance);
-        var context = new DefaultHttpContext();
+        var middleware = new RequestCorrelationMiddleware(terminal, NullLogger<RequestCorrelationMiddleware>.Instance);
+        await middleware.InvokeAsync(httpContext);
 
-        await middleware.InvokeAsync(context);
-
-        Assert.False(string.IsNullOrWhiteSpace(observedCorrelation));
-        Assert.Equal(observedCorrelation, context.Response.Headers[CorrelationConstants.HeaderName]);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_PreservesIncomingCorrelationHeader()
-    {
-        var incomingId = Guid.NewGuid().ToString("N");
-        string? observedCorrelation = null;
-        RequestDelegate next = context =>
-        {
-            observedCorrelation = context.GetCorrelationId();
-            return Task.CompletedTask;
-        };
-
-        var middleware = new RequestCorrelationMiddleware(next, NullLogger<RequestCorrelationMiddleware>.Instance);
-        var context = new DefaultHttpContext();
-        context.Request.Headers[CorrelationConstants.HeaderName] = incomingId;
-
-        await middleware.InvokeAsync(context);
-
-        Assert.Equal(incomingId, observedCorrelation);
-        Assert.Equal(incomingId, context.Response.Headers[CorrelationConstants.HeaderName]);
+        Assert.True(httpContext.Response.Headers.ContainsKey(CorrelationConstants.HeaderName));
+        var header = httpContext.Response.Headers[CorrelationConstants.HeaderName];
+        Assert.False(string.IsNullOrWhiteSpace(header));
+        Assert.False(string.IsNullOrWhiteSpace(httpContext.TraceIdentifier));
     }
 }

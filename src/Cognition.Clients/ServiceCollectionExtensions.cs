@@ -6,11 +6,13 @@ using Cognition.Clients.Tools.Fiction.Weaver;
 using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Fiction.Authoring;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Cognition.Clients.Agents;
 using Polly;
 using System.Net;
 using System.Net.Http;
 using Cognition.Clients.Scope;
+using Cognition.Clients.Tools.Sandbox;
 
 namespace Cognition.Clients;
 
@@ -51,6 +53,14 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<IPlannerTelemetry, LoggerPlannerTelemetry>();
         services.AddSingleton<IPlannerQuotaService, PlannerQuotaService>();
+        services.AddOptions<ToolSandboxOptions>();
+        services.AddSingleton<IConfigureOptions<ToolSandboxOptions>, ToolSandboxOptionsSetup>();
+        services.AddSingleton<ISandboxPolicyEvaluator, SandboxPolicyEvaluator>();
+        services.AddSingleton<ISandboxTelemetry, LoggerSandboxTelemetry>();
+        services.AddOptions<ToolSandboxAlertOptions>();
+        services.AddSingleton<ISandboxAlertPublisher, LoggerSandboxAlertPublisher>();
+        services.AddSingleton<IToolSandboxApprovalQueue, InMemorySandboxApprovalQueue>();
+        services.AddSingleton<IToolSandboxWorker, ProcessSandboxWorker>();
         services.AddScoped<IPlannerTranscriptStore, PlannerTranscriptStore>();
         services.AddScoped<IPlannerTemplateRepository, PlannerTemplateRepository>();
         services.AddSingleton<IPlannerCatalog, PlannerCatalog>();

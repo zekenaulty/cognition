@@ -7,6 +7,7 @@ using Cognition.Clients.Retrieval;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Tools.Sandbox;
 using Cognition.Contracts;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Common;
@@ -70,7 +71,7 @@ public class ToolDispatcherScopeTests
         var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         var telemetry = new SpyPlannerTelemetry();
         var quotaService = new AllowAllPlannerQuotaService();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry, CreateSandbox(), CreateSandboxTelemetry(), NullSandboxAlertPublisher.Instance, NullSandboxApprovalQueue.Instance, NullSandboxWorker.Instance, new OptionsMonitorStub<ToolSandboxOptions>(new ToolSandboxOptions { Mode = SandboxMode.Disabled }));
 
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
@@ -164,7 +165,7 @@ public class ToolDispatcherScopeTests
         var scopePathBuilder = ScopePathBuilderTestHelper.CreateBuilder();
         var telemetry = new SpyPlannerTelemetry();
         var quotaService = new AllowAllPlannerQuotaService();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry, CreateSandbox(), CreateSandboxTelemetry(), NullSandboxAlertPublisher.Instance, NullSandboxApprovalQueue.Instance, NullSandboxWorker.Instance, new OptionsMonitorStub<ToolSandboxOptions>(new ToolSandboxOptions { Mode = SandboxMode.Disabled }));
 
         var agentId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
@@ -251,7 +252,7 @@ public class ToolDispatcherScopeTests
         var registry = new SingleToolRegistry(classPath, typeof(TestPlannerTool));
         var scopePathBuilder = services.GetRequiredService<IScopePathBuilder>();
         var quotaService = new AllowAllPlannerQuotaService();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry, CreateSandbox(), CreateSandboxTelemetry(), NullSandboxAlertPublisher.Instance, NullSandboxApprovalQueue.Instance, NullSandboxWorker.Instance, new OptionsMonitorStub<ToolSandboxOptions>(new ToolSandboxOptions { Mode = SandboxMode.Disabled }));
 
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
@@ -337,7 +338,13 @@ public class ToolDispatcherScopeTests
             NullLogger<ToolDispatcher>.Instance,
             ScopePathBuilderTestHelper.CreateBuilder(),
             new AllowAllPlannerQuotaService(),
-            new SpyPlannerTelemetry());
+            new SpyPlannerTelemetry(),
+            CreateSandbox(),
+            CreateSandboxTelemetry(),
+            NullSandboxAlertPublisher.Instance,
+            NullSandboxApprovalQueue.Instance,
+            NullSandboxWorker.Instance,
+            new OptionsMonitorStub<ToolSandboxOptions>(new ToolSandboxOptions { Mode = SandboxMode.Disabled }));
 
         var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
@@ -416,7 +423,7 @@ public class ToolDispatcherScopeTests
         var registry = new SingleToolRegistry(classPath, typeof(TestPlannerTool));
         var scopePathBuilder = services.GetRequiredService<IScopePathBuilder>();
         var quotaService = new AllowAllPlannerQuotaService();
-        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry);
+        var dispatcher = new ToolDispatcher(db, services, registry, NullLogger<ToolDispatcher>.Instance, scopePathBuilder, quotaService, telemetry, CreateSandbox(), CreateSandboxTelemetry(), NullSandboxAlertPublisher.Instance, NullSandboxApprovalQueue.Instance, NullSandboxWorker.Instance, new OptionsMonitorStub<ToolSandboxOptions>(new ToolSandboxOptions { Mode = SandboxMode.Disabled }));
 
         var conversationId = Guid.NewGuid();
         var personaId = Guid.NewGuid();
@@ -447,6 +454,32 @@ public class ToolDispatcherScopeTests
         var logEntry = await db.ToolExecutionLogs.SingleAsync();
         logEntry.Success.Should().BeFalse();
         logEntry.Error.Should().NotBeNull();
+    }
+
+    private static ISandboxPolicyEvaluator CreateSandbox() =>
+        new SandboxPolicyEvaluator(new OptionsMonitorStub<ToolSandboxOptions>(new ToolSandboxOptions { Mode = SandboxMode.Disabled }), NullLogger<SandboxPolicyEvaluator>.Instance);
+
+    private static ISandboxTelemetry CreateSandboxTelemetry() =>
+        new LoggerSandboxTelemetry(NullLogger<LoggerSandboxTelemetry>.Instance);
+
+    private sealed class NullSandboxAlertPublisher : ISandboxAlertPublisher
+    {
+        public static readonly NullSandboxAlertPublisher Instance = new();
+        public Task PublishAsync(SandboxDecision decision, Cognition.Data.Relational.Modules.Tools.Tool tool, ToolContext context, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class NullSandboxApprovalQueue : IToolSandboxApprovalQueue
+    {
+        public static readonly NullSandboxApprovalQueue Instance = new();
+        public Task EnqueueAsync(ToolSandboxWorkRequest request, CancellationToken ct) => Task.CompletedTask;
+        public bool TryDequeue(out ToolSandboxWorkRequest? request) { request = null; return false; }
+        public IReadOnlyCollection<ToolSandboxWorkRequest> Snapshot() => Array.Empty<ToolSandboxWorkRequest>();
+    }
+
+    private sealed class NullSandboxWorker : IToolSandboxWorker
+    {
+        public static readonly NullSandboxWorker Instance = new();
+        public Task<ToolSandboxResult> ExecuteAsync(ToolSandboxWorkRequest request, CancellationToken ct) => Task.FromResult(new ToolSandboxResult(true, null, null));
     }
 
     private static string ToolClassPath<T>() where T : ITool
@@ -596,6 +629,27 @@ public class ToolDispatcherScopeTests
     {
         public PlannerQuotaDecision Evaluate(string plannerKey, PlannerQuotaContext context, Guid? personaId)
             => PlannerQuotaDecision.Allowed();
+    }
+
+    private sealed class OptionsMonitorStub<T> : IOptionsMonitor<T>
+    {
+        private readonly T _value;
+
+        public OptionsMonitorStub(T value) => _value = value;
+
+        public T CurrentValue => _value;
+
+        public T Get(string? name) => _value;
+
+        public IDisposable OnChange(Action<T, string?> listener) => NullDisposable.Instance;
+
+        private sealed class NullDisposable : IDisposable
+        {
+            public static readonly NullDisposable Instance = new();
+            public void Dispose()
+            {
+            }
+        }
     }
 
     private sealed class SpyPlannerTelemetry : IPlannerTelemetry

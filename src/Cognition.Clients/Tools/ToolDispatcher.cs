@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using Cognition.Clients.Scope;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Clients.Tools.Sandbox;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Tools;
 using Cognition.Data.Relational.Modules.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Cognition.Clients.Tools;
 
@@ -18,6 +20,12 @@ public class ToolDispatcher : IToolDispatcher
     private readonly IScopePathBuilder _scopePathBuilder;
     private readonly IPlannerQuotaService _plannerQuotas;
     private readonly IPlannerTelemetry _telemetry;
+    private readonly ISandboxPolicyEvaluator _sandboxPolicy;
+    private readonly ISandboxTelemetry _sandboxTelemetry;
+    private readonly ISandboxAlertPublisher _sandboxAlerts;
+    private readonly IToolSandboxApprovalQueue _sandboxQueue;
+    private readonly IToolSandboxWorker _sandboxWorker;
+    private readonly IOptionsMonitor<ToolSandboxOptions> _sandboxOptions;
 
     public ToolDispatcher(
         CognitionDbContext db,
@@ -26,7 +34,13 @@ public class ToolDispatcher : IToolDispatcher
         ILogger<ToolDispatcher> logger,
         IScopePathBuilder scopePathBuilder,
         IPlannerQuotaService plannerQuotas,
-        IPlannerTelemetry telemetry)
+        IPlannerTelemetry telemetry,
+        ISandboxPolicyEvaluator sandboxPolicy,
+        ISandboxTelemetry sandboxTelemetry,
+        ISandboxAlertPublisher sandboxAlerts,
+        IToolSandboxApprovalQueue sandboxQueue,
+        IToolSandboxWorker sandboxWorker,
+        IOptionsMonitor<ToolSandboxOptions> sandboxOptions)
     {
         _db = db;
         _sp = sp;
@@ -35,6 +49,12 @@ public class ToolDispatcher : IToolDispatcher
         _scopePathBuilder = scopePathBuilder ?? throw new ArgumentNullException(nameof(scopePathBuilder));
         _plannerQuotas = plannerQuotas ?? throw new ArgumentNullException(nameof(plannerQuotas));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
+        _sandboxPolicy = sandboxPolicy ?? throw new ArgumentNullException(nameof(sandboxPolicy));
+        _sandboxTelemetry = sandboxTelemetry ?? throw new ArgumentNullException(nameof(sandboxTelemetry));
+        _sandboxAlerts = sandboxAlerts ?? throw new ArgumentNullException(nameof(sandboxAlerts));
+        _sandboxQueue = sandboxQueue ?? throw new ArgumentNullException(nameof(sandboxQueue));
+        _sandboxWorker = sandboxWorker ?? throw new ArgumentNullException(nameof(sandboxWorker));
+        _sandboxOptions = sandboxOptions ?? throw new ArgumentNullException(nameof(sandboxOptions));
     }
 
     public async Task<(bool ok, PlannerResult? result, string? error)> ExecutePlannerAsync(
@@ -56,104 +76,137 @@ public class ToolDispatcher : IToolDispatcher
         PlannerResult? result = null;
         string? error = null;
         var ok = true;
+        var plannerParameters = new PlannerParameters(args);
 
-        try
+        var sandboxDecision = _sandboxPolicy.Evaluate(tool, plannerContext.ToolContext);
+        _sandboxTelemetry.RecordDecision(tool.Id, tool.ClassPath ?? string.Empty, sandboxDecision, plannerContext.ToolContext);
+
+        if (!sandboxDecision.IsAllowed)
         {
-            if (!_registry.TryResolveByClassPath(tool.ClassPath, out var implType))
-                throw new InvalidOperationException($"Tool impl not registered/known: {tool.ClassPath}");
-
-            if (!typeof(IPlannerTool).IsAssignableFrom(implType))
-                throw new InvalidOperationException($"Tool {tool.ClassPath} does not implement IPlannerTool.");
-
-            var impl = (IPlannerTool?)_sp.GetService(implType);
-            if (impl is null)
-                throw new InvalidOperationException($"Tool impl not registered in DI: {tool.ClassPath}");
-
-            var inputParams = tool.Parameters.Where(p => p.Direction == ToolParamDirection.Input).ToList();
-            var allowed = new HashSet<string>(inputParams.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
-            var extras = args.Keys.Where(k => !allowed.Contains(k)).ToList();
-            if (extras.Count > 0)
-                throw new ArgumentException($"Unknown parameter(s): {string.Join(", ", extras)}");
-
-            foreach (var p in inputParams)
+            ok = false;
+            error = sandboxDecision.Reason ?? "Sandbox policy denied planner execution.";
+            await _sandboxAlerts.PublishAsync(sandboxDecision, tool, plannerContext.ToolContext, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+            var options = _sandboxOptions.CurrentValue ?? new ToolSandboxOptions();
+            if (options.EnqueueOnDeny)
             {
-                if (!args.ContainsKey(p.Name) || args[p.Name] is null)
+                var work = new ToolSandboxWorkRequest(tool.Id, tool.ClassPath ?? string.Empty, plannerParameters.AsReadOnlyDictionary(), plannerContext.ToolContext, options);
+                await _sandboxQueue.EnqueueAsync(work, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+                error = "Sandbox enforcement queued for approval.";
+            }
+        }
+        else
+        {
+            try
+            {
+                // If enforcement is active, run through sandbox worker instead of in-proc
+                if (sandboxDecision.Mode == SandboxMode.Enforce)
                 {
-                    if (p.Required) throw new ArgumentException($"Missing required parameter '{p.Name}'");
-                    if (p.DefaultValue is not null)
+                    var work = new ToolSandboxWorkRequest(tool.Id, tool.ClassPath ?? string.Empty, plannerParameters.AsReadOnlyDictionary(), plannerContext.ToolContext, _sandboxOptions.CurrentValue);
+                    var sandboxResult = await _sandboxWorker.ExecuteAsync(work, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+                    ok = sandboxResult.Success;
+                    result = sandboxResult.Result as PlannerResult;
+                    error = sandboxResult.Error;
+                    return (ok, result, error);
+                }
+
+                if (sandboxDecision.AuditOnly)
+                {
+                    _logger.LogWarning("Sandbox audit-only: executing planner {ToolId} {ClassPath}", tool.Id, tool.ClassPath);
+                }
+                if (!_registry.TryResolveByClassPath(tool.ClassPath, out var implType))
+                    throw new InvalidOperationException($"Tool impl not registered/known: {tool.ClassPath}");
+
+                if (!typeof(IPlannerTool).IsAssignableFrom(implType))
+                    throw new InvalidOperationException($"Tool {tool.ClassPath} does not implement IPlannerTool.");
+
+                var impl = (IPlannerTool?)_sp.GetService(implType);
+                if (impl is null)
+                    throw new InvalidOperationException($"Tool impl not registered in DI: {tool.ClassPath}");
+
+                var inputParams = tool.Parameters.Where(p => p.Direction == ToolParamDirection.Input).ToList();
+                var allowed = new HashSet<string>(inputParams.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+                var extras = args.Keys.Where(k => !allowed.Contains(k)).ToList();
+                if (extras.Count > 0)
+                    throw new ArgumentException($"Unknown parameter(s): {string.Join(", ", extras)}");
+
+                foreach (var p in inputParams)
+                {
+                    if (!args.ContainsKey(p.Name) || args[p.Name] is null)
                     {
-                        args[p.Name] = p.DefaultValue.Count == 1 && p.DefaultValue.ContainsKey("value")
-                            ? p.DefaultValue["value"]
-                            : p.DefaultValue;
+                        if (p.Required) throw new ArgumentException($"Missing required parameter '{p.Name}'");
+                        if (p.DefaultValue is not null)
+                        {
+                            args[p.Name] = p.DefaultValue.Count == 1 && p.DefaultValue.ContainsKey("value")
+                                ? p.DefaultValue["value"]
+                                : p.DefaultValue;
+                        }
+                    }
+
+                    if (args.ContainsKey(p.Name))
+                    {
+                        args[p.Name] = CoerceToType(JsonToDotNet(args[p.Name]), p.Type);
                     }
                 }
 
-                if (args.ContainsKey(p.Name))
+                EnsureProviderModelArgs(tool, plannerContext.ToolContext, args);
+                var scopePath = plannerContext.ScopePath;
+                if (scopePath is null &&
+                    _scopePathBuilder.TryBuild(
+                        tenantId: null,
+                        appId: null,
+                        personaId: plannerContext.ToolContext.PersonaId,
+                        agentId: plannerContext.ToolContext.AgentId,
+                        conversationId: plannerContext.ToolContext.ConversationId,
+                        planId: null,
+                        projectId: null,
+                        worldId: null,
+                        out var inferredPath))
                 {
-                    args[p.Name] = CoerceToType(JsonToDotNet(args[p.Name]), p.Type);
+                    scopePath = inferredPath;
+                }
+
+                var enrichedContext = scopePath is null ? plannerContext : plannerContext with { ScopePath = scopePath };
+
+                var ctxWithToolId = enrichedContext.ToolId == tool.Id
+                    ? enrichedContext
+                    : enrichedContext with { ToolId = tool.Id };
+
+                var plannerKey = impl.Metadata?.Name ?? tool.Name ?? tool.ClassPath ?? "planner";
+                var quotaDecision = _plannerQuotas.Evaluate(plannerKey, new PlannerQuotaContext(), plannerContext.ToolContext.PersonaId);
+                PlannerTelemetryContext? quotaTelemetryContext = null;
+                if (!quotaDecision.IsAllowed)
+                {
+                    quotaTelemetryContext = BuildQuotaTelemetryContext(ctxWithToolId, impl.Metadata!, tool, plannerKey, quotaDecision);
+                }
+
+                if (!quotaDecision.IsAllowed)
+                {
+                    if (quotaTelemetryContext is not null)
+                    {
+                        await EmitQuotaTelemetryAsync(quotaTelemetryContext, quotaDecision, plannerContext.ToolContext.Ct).ConfigureAwait(false);
+                    }
+                    _logger.LogWarning("Planner quota exceeded for {Planner} (limit={Limit}, value={Value}) conversation={ConversationId}", plannerKey, quotaDecision.Limit, quotaDecision.LimitValue, plannerContext.ToolContext.ConversationId);
+                    ok = false;
+                    error = quotaDecision.Reason ?? $"Planner quota '{quotaDecision.Limit}' exceeded.";
+                    result = null;
+                }
+                else
+                {
+                    _logger.LogInformation("Executing planner {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId}", tool.Name, tool.Id, tool.ClassPath, plannerContext.ToolContext.ConversationId);
+                    result = await impl.PlanAsync(ctxWithToolId, plannerParameters, plannerContext.ToolContext.Ct).ConfigureAwait(false);
                 }
             }
-
-            EnsureProviderModelArgs(tool, plannerContext.ToolContext, args);
-
-            var plannerParameters = new PlannerParameters(args);
-            var scopePath = plannerContext.ScopePath;
-            if (scopePath is null &&
-                _scopePathBuilder.TryBuild(
-                    tenantId: null,
-                    appId: null,
-                    personaId: plannerContext.ToolContext.PersonaId,
-                    agentId: plannerContext.ToolContext.AgentId,
-                    conversationId: plannerContext.ToolContext.ConversationId,
-                    planId: null,
-                    projectId: null,
-                    worldId: null,
-                    out var inferredPath))
+            catch (OperationCanceledException) when (plannerContext.ToolContext.Ct.IsCancellationRequested)
             {
-                scopePath = inferredPath;
+                throw;
             }
-
-            var enrichedContext = scopePath is null ? plannerContext : plannerContext with { ScopePath = scopePath };
-
-            var ctxWithToolId = enrichedContext.ToolId == tool.Id
-                ? enrichedContext
-                : enrichedContext with { ToolId = tool.Id };
-
-            var plannerKey = impl.Metadata?.Name ?? tool.Name ?? tool.ClassPath ?? "planner";
-            var quotaDecision = _plannerQuotas.Evaluate(plannerKey, new PlannerQuotaContext(), plannerContext.ToolContext.PersonaId);
-            PlannerTelemetryContext? quotaTelemetryContext = null;
-            if (!quotaDecision.IsAllowed)
+            catch (Exception ex)
             {
-                quotaTelemetryContext = BuildQuotaTelemetryContext(ctxWithToolId, impl.Metadata!, tool, plannerKey, quotaDecision);
-            }
-
-            if (!quotaDecision.IsAllowed)
-            {
-                if (quotaTelemetryContext is not null)
-                {
-                    await EmitQuotaTelemetryAsync(quotaTelemetryContext, quotaDecision, plannerContext.ToolContext.Ct).ConfigureAwait(false);
-                }
-                _logger.LogWarning("Planner quota exceeded for {Planner} (limit={Limit}, value={Value}) conversation={ConversationId}", plannerKey, quotaDecision.Limit, quotaDecision.LimitValue, plannerContext.ToolContext.ConversationId);
                 ok = false;
-                error = quotaDecision.Reason ?? $"Planner quota '{quotaDecision.Limit}' exceeded.";
+                error = ex.Message;
                 result = null;
+                _logger.LogError(ex, "Planner execution failed for {ToolName} ({ToolId})", tool.Name, tool.Id);
             }
-            else
-            {
-                _logger.LogInformation("Executing planner {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId}", tool.Name, tool.Id, tool.ClassPath, plannerContext.ToolContext.ConversationId);
-                result = await impl.PlanAsync(ctxWithToolId, plannerParameters, plannerContext.ToolContext.Ct).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) when (plannerContext.ToolContext.Ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            ok = false;
-            error = ex.Message;
-            result = null;
-            _logger.LogError(ex, "Planner execution failed for {ToolName} ({ToolId})", tool.Name, tool.Id);
         }
 
         sw.Stop();
@@ -190,68 +243,100 @@ public class ToolDispatcher : IToolDispatcher
         var sw = Stopwatch.StartNew();
         object? result = null; string? error = null; var ok = true;
 
-        try
+        var sandboxDecision = _sandboxPolicy.Evaluate(tool, ctx);
+        _sandboxTelemetry.RecordDecision(tool.Id, tool.ClassPath ?? string.Empty, sandboxDecision, ctx);
+        if (!sandboxDecision.IsAllowed)
         {
-            // Resolve implementation by ClassPath through the safe registry
-            if (!_registry.TryResolveByClassPath(tool.ClassPath, out var implType))
-                throw new InvalidOperationException($"Tool impl not registered/known: {tool.ClassPath}");
-            var impl = (ITool?)_sp.GetService(implType);
-            if (impl is null)
-                throw new InvalidOperationException($"Tool impl not registered in DI: {tool.ClassPath}");
-
-            // Validate/prepare args from DB parameter schema
-            var inputParams = tool.Parameters.Where(p => p.Direction == ToolParamDirection.Input).ToList();
-            // Reject unknown args early
-            var allowed = new HashSet<string>(inputParams.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
-            var extras = args.Keys.Where(k => !allowed.Contains(k)).ToList();
-            if (extras.Count > 0)
-                throw new ArgumentException($"Unknown parameter(s): {string.Join(", ", extras)}");
-
-            foreach (var p in inputParams)
+            ok = false;
+            error = sandboxDecision.Reason ?? "Sandbox policy denied tool execution.";
+            await _sandboxAlerts.PublishAsync(sandboxDecision, tool, ctx, ctx.Ct).ConfigureAwait(false);
+            var options = _sandboxOptions.CurrentValue ?? new ToolSandboxOptions();
+            if (options.EnqueueOnDeny)
             {
-                if (!args.ContainsKey(p.Name) || args[p.Name] is null)
+                var work = new ToolSandboxWorkRequest(tool.Id, tool.ClassPath ?? string.Empty, new Dictionary<string, object?>(args), ctx, options);
+                await _sandboxQueue.EnqueueAsync(work, ctx.Ct).ConfigureAwait(false);
+                error = "Sandbox enforcement queued for approval.";
+            }
+        }
+        else
+        {
+            try
+            {
+                if (sandboxDecision.Mode == SandboxMode.Enforce)
                 {
-                    if (p.Required) throw new ArgumentException($"Missing required parameter '{p.Name}'");
-                    if (p.DefaultValue is not null)
-                    {
-                        // DefaultValue stored as JSONB -> Dictionary<string, object?> or scalar
-                        args[p.Name] = p.DefaultValue.Count == 1 && p.DefaultValue.ContainsKey("value")
-                            ? p.DefaultValue["value"]
-                            : p.DefaultValue;
-                    }
+                    var work = new ToolSandboxWorkRequest(tool.Id, tool.ClassPath ?? string.Empty, new Dictionary<string, object?>(args), ctx, _sandboxOptions.CurrentValue);
+                    var sandboxResult = await _sandboxWorker.ExecuteAsync(work, ctx.Ct).ConfigureAwait(false);
+                    ok = sandboxResult.Success;
+                    result = sandboxResult.Result;
+                    error = sandboxResult.Error;
+                    return (ok, result, error);
                 }
-                // Light type coercion from declared param type
-                if (args.ContainsKey(p.Name))
+
+                if (sandboxDecision.AuditOnly)
                 {
-                    args[p.Name] = CoerceToType(JsonToDotNet(args[p.Name]), p.Type);
-                    // Enforce enum/options if provided
-                    if (p.Options is not null && p.Options.TryGetValue("values", out var optsObj) && optsObj is not null)
+                    _logger.LogWarning("Sandbox audit-only: executing tool {ToolId} {ClassPath}", tool.Id, tool.ClassPath);
+                }
+                // Resolve implementation by ClassPath through the safe registry
+                if (!_registry.TryResolveByClassPath(tool.ClassPath, out var implType))
+                    throw new InvalidOperationException($"Tool impl not registered/known: {tool.ClassPath}");
+                var impl = (ITool?)_sp.GetService(implType);
+                if (impl is null)
+                    throw new InvalidOperationException($"Tool impl not registered in DI: {tool.ClassPath}");
+
+                // Validate/prepare args from DB parameter schema
+                var inputParams = tool.Parameters.Where(p => p.Direction == ToolParamDirection.Input).ToList();
+                // Reject unknown args early
+                var allowed = new HashSet<string>(inputParams.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+                var extras = args.Keys.Where(k => !allowed.Contains(k)).ToList();
+                if (extras.Count > 0)
+                    throw new ArgumentException($"Unknown parameter(s): {string.Join(", ", extras)}");
+
+                foreach (var p in inputParams)
+                {
+                    if (!args.ContainsKey(p.Name) || args[p.Name] is null)
                     {
-                        var allowedValues = FlattenValues(optsObj);
-                        var vStr = args[p.Name]?.ToString();
-                        if (allowedValues.Count > 0 && vStr is not null && !allowedValues.Contains(vStr, StringComparer.OrdinalIgnoreCase))
+                        if (p.Required) throw new ArgumentException($"Missing required parameter '{p.Name}'");
+                        if (p.DefaultValue is not null)
                         {
-                            throw new ArgumentException($"Parameter '{p.Name}' must be one of: {string.Join(", ", allowedValues)}");
+                            // DefaultValue stored as JSONB -> Dictionary<string, object?> or scalar
+                            args[p.Name] = p.DefaultValue.Count == 1 && p.DefaultValue.ContainsKey("value")
+                                ? p.DefaultValue["value"]
+                                : p.DefaultValue;
+                        }
+                    }
+                    // Light type coercion from declared param type
+                    if (args.ContainsKey(p.Name))
+                    {
+                        args[p.Name] = CoerceToType(JsonToDotNet(args[p.Name]), p.Type);
+                        // Enforce enum/options if provided
+                        if (p.Options is not null && p.Options.TryGetValue("values", out var optsObj) && optsObj is not null)
+                        {
+                            var allowedValues = FlattenValues(optsObj);
+                            var vStr = args[p.Name]?.ToString();
+                            if (allowedValues.Count > 0 && vStr is not null && !allowedValues.Contains(vStr, StringComparer.OrdinalIgnoreCase))
+                            {
+                                throw new ArgumentException($"Parameter '{p.Name}' must be one of: {string.Join(", ", allowedValues)}");
+                            }
                         }
                     }
                 }
+
+                // Default provider/model selection: prefer Tool.ClientProfile, then Agent.ClientProfile, then OpenAI gpt-4o
+                EnsureProviderModelArgs(tool, ctx, args);
+
+                _logger.LogInformation("Executing tool {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId} persona {PersonaId}", tool.Name, tool.Id, tool.ClassPath, ctx.ConversationId, ctx.PersonaId);
+                result = await impl.ExecuteAsync(ctx, args);
+                ok = true; error = null;
             }
-
-            // Default provider/model selection: prefer Tool.ClientProfile, then Agent.ClientProfile, then OpenAI gpt-4o
-            EnsureProviderModelArgs(tool, ctx, args);
-
-            _logger.LogInformation("Executing tool {ToolName} ({ToolId}) class {ClassPath} conv {ConversationId} persona {PersonaId}", tool.Name, tool.Id, tool.ClassPath, ctx.ConversationId, ctx.PersonaId);
-            result = await impl.ExecuteAsync(ctx, args);
-            ok = true; error = null;
-        }
-        catch (OperationCanceledException) when (ctx.Ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            ok = false; error = ex.Message; result = null;
-            _logger.LogError(ex, "Tool execution failed for {ToolName} ({ToolId})", tool.Name, tool.Id);
+            catch (OperationCanceledException) when (ctx.Ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                ok = false; error = ex.Message; result = null;
+                _logger.LogError(ex, "Tool execution failed for {ToolName} ({ToolId})", tool.Name, tool.Id);
+            }
         }
         // log and return
         if (log)
