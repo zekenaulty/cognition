@@ -2,7 +2,8 @@
 
 export interface AssistantMessageAppended {
   conversationId: string;
-  personaId: string;
+  agentId?: string;
+  personaId?: string;
   content: string;
   timestamp: string;
   messageId?: string;
@@ -55,7 +56,8 @@ export interface ToolExecutionCompleted {
 // Streaming token delta during assistant generation
 export interface AssistantTokenDelta {
   conversationId: string;
-  personaId: string;
+  agentId?: string;
+  personaId?: string;
   // server may send delta/content/token; accept any
   delta?: string;
   content?: string;
@@ -65,20 +67,23 @@ export interface AssistantTokenDelta {
 
 export interface ConversationCreated {
   conversationId: string;
-  personaId: string;
+  agentId?: string;
+  personaId?: string;
   title?: string | null;
   timestamp?: string;
 }
 
 export interface ConversationJoined {
   conversationId: string;
-  personaId: string;
+  agentId?: string;
+  personaId?: string;
   timestamp?: string;
 }
 
 export interface ConversationLeft {
   conversationId: string;
-  personaId: string;
+  agentId?: string;
+  personaId?: string;
   timestamp?: string;
 }
 

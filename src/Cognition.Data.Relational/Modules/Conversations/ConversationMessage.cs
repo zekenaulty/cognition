@@ -7,8 +7,8 @@ public class ConversationMessage : BaseEntity
     public Guid ConversationId { get; set; }
     public Conversation Conversation { get; set; } = null!;
 
-    public Guid FromPersonaId { get; set; }
-    public Modules.Personas.Persona FromPersona { get; set; } = null!;
+    public Guid? FromPersonaId { get; set; }
+    public Modules.Personas.Persona? FromPersona { get; set; }
     public Guid? ToPersonaId { get; set; }
     public Modules.Personas.Persona? ToPersona { get; set; }
 

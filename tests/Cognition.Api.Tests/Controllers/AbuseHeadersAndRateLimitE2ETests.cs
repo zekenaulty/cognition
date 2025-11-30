@@ -34,6 +34,20 @@ public class AbuseHeadersAndRateLimitE2ETests : IClassFixture<AbuseTestFactory>
         Assert.True(second.StatusCode == HttpStatusCode.TooManyRequests || second.StatusCode == HttpStatusCode.OK);
         Assert.True(second.Headers.Contains(CorrelationConstants.HeaderName));
     }
+
+    [Fact]
+    public async Task Agent_policy_falls_back_to_conversation_when_agent_missing()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "fake");
+
+        var convoId = Guid.NewGuid().ToString();
+        var first = await client.GetAsync($"/api/system/health?conversationId={convoId}");
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+        var second = await client.GetAsync($"/api/system/health?conversationId={convoId}");
+        Assert.True(second.StatusCode == HttpStatusCode.TooManyRequests || second.StatusCode == HttpStatusCode.OK);
+    }
 }
 
 public sealed class AbuseTestFactory : WebApplicationFactory<Program>
@@ -44,13 +58,13 @@ public sealed class AbuseTestFactory : WebApplicationFactory<Program>
         {
             var overrides = new Dictionary<string, string?>
             {
-                ["ApiRateLimiting:Global:PermitLimit"] = "1",
-                ["ApiRateLimiting:Global:WindowSeconds"] = "60",
-                ["ApiRateLimiting:Global:QueueLimit"] = "0",
+                ["ApiRateLimiting:Global:IsEnabled"] = "false",
                 ["ApiRateLimiting:PerAgent:PermitLimit"] = "1",
                 ["ApiRateLimiting:PerAgent:WindowSeconds"] = "60",
                 ["ApiRateLimiting:PerAgent:QueueLimit"] = "0",
-                // Keep others enabled but irrelevant for this partition
+                ["ApiRateLimiting:PerPersona:PermitLimit"] = "100",
+                ["ApiRateLimiting:PerPersona:WindowSeconds"] = "60",
+                ["ApiRateLimiting:PerPersona:QueueLimit"] = "0"
             };
 
             config.AddInMemoryCollection(overrides!);

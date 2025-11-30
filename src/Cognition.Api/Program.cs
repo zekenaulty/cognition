@@ -154,12 +154,22 @@ builder.Services.AddRateLimiter(options =>
         options.AddPolicy(ApiRateLimitingOptions.AgentPolicyName, httpContext =>
         {
             var agentId = ApiRateLimiterPartitionKeys.ResolveAgentId(httpContext);
-            if (string.IsNullOrEmpty(agentId))
+            var conversationId = ApiRateLimiterPartitionKeys.ResolveConversationId(httpContext);
+            var personaId = ApiRateLimiterPartitionKeys.ResolvePersonaId(httpContext);
+            var userId = ApiRateLimiterPartitionKeys.ResolveUserId(httpContext);
+
+            string? key = null;
+            if (!string.IsNullOrEmpty(agentId)) key = $"agent:{agentId}";
+            else if (!string.IsNullOrEmpty(conversationId)) key = $"conversation:{conversationId}";
+            else if (!string.IsNullOrEmpty(personaId)) key = $"persona:{personaId}";
+            else if (!string.IsNullOrEmpty(userId)) key = $"user:{userId}";
+
+            if (string.IsNullOrEmpty(key))
             {
                 return RateLimitPartition.GetNoLimiter("agent:none");
             }
 
-            return RateLimitPartition.GetFixedWindowLimiter($"agent:{agentId}", _ => apiRateLimitingOptions.PerAgent!.ToLimiterOptions());
+            return RateLimitPartition.GetFixedWindowLimiter(key, _ => apiRateLimitingOptions.PerAgent!.ToLimiterOptions());
         });
     }
 });

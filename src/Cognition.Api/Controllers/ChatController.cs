@@ -50,12 +50,10 @@ public class ChatController : ControllerBase
     {
         try
         {
-            var personaId = await _db.Agents.AsNoTracking()
-                .Where(a => a.Id == req.AgentId)
-                .Select(a => (Guid?)a.PersonaId)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (!personaId.HasValue) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
-            var reply = await _agents.AskAsync(personaId.Value, req.ProviderId, req.ModelId, req.Input, cancellationToken);
+            var agentExists = await _db.Agents.AsNoTracking()
+                .AnyAsync(a => a.Id == req.AgentId, cancellationToken);
+            if (!agentExists) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
+            var reply = await _agents.AskAsync(req.AgentId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
             return Ok(new { reply });
         }
         catch (Exception ex)
@@ -69,12 +67,10 @@ public class ChatController : ControllerBase
     {
         try
         {
-            var personaId = await _db.Agents.AsNoTracking()
-                .Where(a => a.Id == req.AgentId)
-                .Select(a => (Guid?)a.PersonaId)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (!personaId.HasValue) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
-            var reply = await _agents.AskWithToolsAsync(personaId.Value, req.ProviderId, req.ModelId, req.Input, cancellationToken);
+            var agentExists = await _db.Agents.AsNoTracking()
+                .AnyAsync(a => a.Id == req.AgentId, cancellationToken);
+            if (!agentExists) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
+            var reply = await _agents.AskWithToolsAsync(req.AgentId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
             return Ok(new { reply });
         }
         catch (Exception ex)
@@ -148,65 +144,24 @@ public class ChatController : ControllerBase
     [HttpPost("ask-chat")]
     public async Task<IActionResult> AskChat([FromBody] ChatRequest req, CancellationToken cancellationToken = default)
     {
-        // Resolve personaId/agentId for this conversation
-        var agentPersona = await _db.Conversations.AsNoTracking()
-            .Where(c => c.Id == req.ConversationId)
-            .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => new { a.Id, a.PersonaId })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (agentPersona == null) return NotFound(ApiErrorResponse.Create("conversation_or_agent_not_found", "Conversation/Agent not found."));
-        var fromAgentId = agentPersona.Id;
-        var fromPersonaId = agentPersona.PersonaId;
-        var message = new ConversationMessage
+        var conversation = await _db.Conversations
+            .Include(c => c.Agent)
+            .FirstOrDefaultAsync(c => c.Id == req.ConversationId, cancellationToken);
+        if (conversation == null || conversation.Agent == null)
         {
-            ConversationId = req.ConversationId,
-            FromPersonaId = fromPersonaId,
-            FromAgentId = fromAgentId,
-            Content = req.Input,
-            Role = Data.Relational.Modules.Common.ChatRole.User,
-            CreatedAtUtc = DateTime.UtcNow,
-            Metatype = "UserMessage"
-        };
-        _db.ConversationMessages.Add(message);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        // Emit UserMessageAppended
-        var userMsgEvt = new UserMessageAppended(req.ConversationId, fromPersonaId, req.Input);
-        await _bus.Publish(userMsgEvt);
-
-        var assistantContent = await _agents.ChatAsync(req.ConversationId, fromPersonaId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
-        if (string.IsNullOrWhiteSpace(assistantContent.Reply))
-        {
-            assistantContent.Reply = "(No reply...)";
+            return NotFound(ApiErrorResponse.Create("conversation_or_agent_not_found", "Conversation/Agent not found."));
         }
-        var assistantAgentId = fromAgentId;
-        var assistantMessage = new ConversationMessage
-        {
-            ConversationId = req.ConversationId,
-            FromPersonaId = fromPersonaId,
-            FromAgentId = assistantAgentId,
-            Content = assistantContent.Reply,
-            Role = Data.Relational.Modules.Common.ChatRole.Assistant,
-            CreatedAtUtc = DateTime.UtcNow,
-            Metatype = "TextResponse"
-        };
 
+        var agentId = conversation.AgentId;
+        var personaId = conversation.Agent.PersonaId;
 
-        _db.ConversationMessages.Add(assistantMessage);
-        await _db.SaveChangesAsync(cancellationToken);
-        var assistantEvt = new AssistantMessageAppended(req.ConversationId, fromPersonaId, assistantContent.Reply);
-        await _bus.Publish(assistantEvt);
+        // Publish user message event (DB persistence handled by AgentService.ChatAsync)
+        await _bus.Publish(new UserMessageAppended(req.ConversationId, personaId, req.Input));
 
-        // Touch conversation updated timestamp
-        try
-        {
-            var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == req.ConversationId, cancellationToken);
-            if (conv != null)
-            {
-                conv.UpdatedAtUtc = DateTime.UtcNow;
-                await _db.SaveChangesAsync(cancellationToken);
-            }
-        }
-        catch { }
+        var (reply, messageId) = await _agents.ChatAsync(req.ConversationId, agentId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
+        var safeReply = string.IsNullOrWhiteSpace(reply) ? "(No reply...)" : reply;
+
+        await _bus.Publish(new AssistantMessageAppended(req.ConversationId, personaId, safeReply));
 
         // If conversation has a title now (AgentService may have set it), broadcast update via hub
         try
@@ -219,11 +174,11 @@ public class ChatController : ControllerBase
         }
         catch { }
 
-        // Return 202 Accepted
-        return Accepted(new { 
-            ok = true, 
-            correlationId = message.Id,
-            content = assistantContent,
+        return Accepted(new
+        {
+            ok = true,
+            correlationId = messageId,
+            content = safeReply,
         });
     }
 

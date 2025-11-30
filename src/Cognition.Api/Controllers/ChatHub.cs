@@ -21,13 +21,14 @@ namespace Cognition.Api.Controllers
         }
 
         // Called by server to push assistant messages to clients
-        public async Task SendAssistantMessage(string conversationId, string personaId, string content, string messageId)
+        public async Task SendAssistantMessage(string conversationId, string? agentId, string? personaId, string content, string messageId)
         {
             // Send structured event for UI placeholder matching
             var evt = new
             {
                 ConversationId = conversationId,
                 Content = content,
+                AgentId = agentId,
                 PersonaId = personaId,
                 Timestamp = DateTime.UtcNow.ToString("o"),
                 MessageId = messageId
@@ -50,11 +51,12 @@ namespace Cognition.Api.Controllers
         //}
 
         // Streaming token delta from backend during generation
-        public async Task SendAssistantDelta(string conversationId, string personaId, string delta)
+        public async Task SendAssistantDelta(string conversationId, string? agentId, string? personaId, string delta)
         {
             var evt = new
             {
                 conversationId = conversationId,
+                agentId = agentId,
                 personaId = personaId,
                 delta = delta,
                 timestamp = DateTime.UtcNow.ToString("o")
@@ -67,8 +69,46 @@ namespace Cognition.Api.Controllers
             await Clients.Group(conversationId).SendAsync("FictionPhaseProgressed", payload);
         }
 
-        public async Task AppendUserMessage(string conversationId, string text, string personaId, string providerId, string? modelId)
+        public async Task AppendUserMessage(string conversationId, string text, string? agentId, string? personaId, string providerId, string? modelId)
         {
+            if (!Guid.TryParse(conversationId, out var conversationGuid))
+            {
+                throw new HubException("invalid_conversation_id");
+            }
+
+            // Resolve agentId from conversation when not supplied
+            Guid resolvedAgentId;
+            if (Guid.TryParse(agentId, out var parsedAgent))
+            {
+                resolvedAgentId = parsedAgent;
+            }
+            else
+            {
+                var convoAgent = await _db.Conversations.AsNoTracking()
+                    .Where(c => c.Id == conversationGuid)
+                    .Select(c => c.AgentId)
+                    .FirstOrDefaultAsync();
+                if (convoAgent == Guid.Empty)
+                {
+                    throw new HubException("conversation_not_found");
+                }
+                resolvedAgentId = convoAgent;
+            }
+
+            // Resolve persona from agent when not provided (persona is optional for agent-first flows)
+            Guid? resolvedPersonaId = null;
+            if (Guid.TryParse(personaId, out var parsedPersona) && parsedPersona != Guid.Empty)
+            {
+                resolvedPersonaId = parsedPersona;
+            }
+            else
+            {
+                resolvedPersonaId = await _db.Agents.AsNoTracking()
+                    .Where(a => a.Id == resolvedAgentId)
+                    .Select(a => (Guid?)a.PersonaId)
+                    .FirstOrDefaultAsync();
+            }
+
             Guid? modelGuid = null;
             if (!string.IsNullOrWhiteSpace(modelId) && Guid.TryParse(modelId, out var tmp))
             {
@@ -76,14 +116,14 @@ namespace Cognition.Api.Controllers
             }
 
             var response = await _agentService.ChatAsync(
-                Guid.Parse(conversationId),
-                Guid.Parse(personaId),
+                conversationGuid,
+                resolvedAgentId,
                 Guid.Parse(providerId),
                 modelGuid,
                 text,
                 CancellationToken.None);
 
-            await SendAssistantMessage(conversationId, personaId, response.Reply, response.MessageId.ToString());
+            await SendAssistantMessage(conversationId, resolvedAgentId.ToString(), resolvedPersonaId?.ToString(), response.Reply, response.MessageId.ToString());
             // Try to broadcast conversation title if available (AgentService may have just set it)
             try
             {

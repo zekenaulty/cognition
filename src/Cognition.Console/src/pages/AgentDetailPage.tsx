@@ -52,7 +52,7 @@ export default function AgentDetailPage() {
           {agent && (
             <>
               <Typography variant="subtitle1">AgentId: {agent.id}</Typography>
-              <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>PersonaId: {agent.personaId}</Typography>
+              <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>PersonaId: {agent.personaId ?? '(none)'} </Typography>
               <Stack direction="row" spacing={2} sx={{ my: 2 }}>
                 <FormControl size="small" sx={{ minWidth: 260 }}>
                   <InputLabel>Client Profile</InputLabel>

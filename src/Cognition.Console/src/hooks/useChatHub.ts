@@ -40,6 +40,7 @@ export function useChatHub(options: UseChatHubOptions) {
     // Send a user message to the server
     const sendUserMessage = async (
       text: string,
+      agentId?: string,
       personaId?: string,
       providerId?: string,
       modelId?: string
@@ -49,7 +50,7 @@ export function useChatHub(options: UseChatHubOptions) {
       try {
         const convId = conversationIdRef.current;
         if (!convId) return false;
-        await conn.invoke('AppendUserMessage', convId, text, personaId, providerId, modelId);
+        await conn.invoke('AppendUserMessage', convId, text, agentId, personaId, providerId, modelId);
         return true;
       } catch (err) {
         console.error('Hub sendUserMessage error:', err);
@@ -61,6 +62,7 @@ export function useChatHub(options: UseChatHubOptions) {
     const sendUserMessageTo = async (
       convId: string,
       text: string,
+      agentId?: string,
       personaId?: string,
       providerId?: string,
       modelId?: string
@@ -68,7 +70,7 @@ export function useChatHub(options: UseChatHubOptions) {
       const conn = connectionRef.current;
       if (!conn || conn.state !== signalR.HubConnectionState.Connected) return false;
       try {
-        await conn.invoke('AppendUserMessage', convId, text, personaId, providerId, modelId);
+        await conn.invoke('AppendUserMessage', convId, text, agentId, personaId, providerId, modelId);
         return true;
       } catch (err) {
         console.error('Hub sendUserMessageTo error:', err);
@@ -135,7 +137,7 @@ export function useChatHub(options: UseChatHubOptions) {
       connection.on('AssistantTokenDelta', (evt: AssistantTokenDelta) => {
         const text = (evt.delta ?? (evt as any).content ?? (evt as any).token ?? '') as string;
         try {
-          chatBus.emit('assistant-delta', { conversationId, personaId: evt.personaId, text, timestamp: evt.timestamp });
+          chatBus.emit('assistant-delta', { conversationId, agentId: (evt as any).agentId, personaId: evt.personaId, text, timestamp: evt.timestamp });
         } catch {}
       });
 

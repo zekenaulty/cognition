@@ -9,6 +9,7 @@ public static class ApiRateLimiterPartitionKeys
     private const string AgentHeaderName = "X-Agent-Id";
     private const string PersonaQueryName = "personaId";
     private const string AgentQueryName = "agentId";
+    private const string ConversationQueryName = "conversationId";
 
     public static string? ResolveUserId(HttpContext context)
     {
@@ -72,6 +73,21 @@ public static class ApiRateLimiterPartitionKeys
             }
         }
 
+        return null;
+    }
+
+    public static string? ResolveConversationId(HttpContext context)
+    {
+        if (context.Request.Query.TryGetValue(ConversationQueryName, out var queryValues))
+        {
+            foreach (var value in queryValues)
+            {
+                if (Guid.TryParse(value, out var parsed) && parsed != Guid.Empty)
+                {
+                    return parsed.ToString("N");
+                }
+            }
+        }
         return null;
     }
 

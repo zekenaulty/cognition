@@ -1,17 +1,17 @@
 type Handler<T> = (payload: T) => void;
 
 export type ChatBusEvents = {
-  'assistant-message': { conversationId: string; personaId: string; content: string; timestamp: string };
-  'plan-ready': { conversationId: string; personaId: string; plan: any; timestamp: string };
-  'tool-requested': { conversationId: string; personaId: string; toolId: string; args: Record<string, any>; timestamp: string };
-  'tool-completed': { conversationId: string; personaId: string; toolId: string; result: any; success: boolean; error?: string; timestamp: string };
+  'assistant-message': { conversationId: string; agentId?: string; personaId?: string; content: string; timestamp: string; messageId?: string };
+  'plan-ready': { conversationId: string; agentId?: string; personaId?: string; plan: any; timestamp: string };
+  'tool-requested': { conversationId: string; agentId?: string; personaId?: string; toolId: string; args: Record<string, any>; timestamp: string };
+  'tool-completed': { conversationId: string; agentId?: string; personaId?: string; toolId: string; result: any; success: boolean; error?: string; timestamp: string };
   'connection-state': { state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' };
-  'assistant-delta': { conversationId: string; personaId: string; text: string; timestamp?: string };
-  'assistant-version-appended': { conversationId: string; messageId: string; content: string; versionIndex: number };
-  'assistant-version-activated': { conversationId: string; messageId: string; versionIndex: number };
-  'conversation-created': { conversationId: string; personaId: string; title?: string | null; timestamp?: string };
-  'conversation-joined': { conversationId: string; personaId: string; timestamp?: string };
-  'conversation-left': { conversationId: string; personaId: string; timestamp?: string };
+  'assistant-delta': { conversationId: string; agentId?: string; personaId?: string; text: string; timestamp?: string };
+  'assistant-version-appended': { conversationId: string; agentId?: string; personaId?: string; messageId: string; content: string; versionIndex: number };
+  'assistant-version-activated': { conversationId: string; agentId?: string; personaId?: string; messageId: string; versionIndex: number };
+  'conversation-created': { conversationId: string; agentId?: string; personaId?: string; title?: string | null; timestamp?: string };
+  'conversation-joined': { conversationId: string; agentId?: string; personaId?: string; timestamp?: string };
+  'conversation-left': { conversationId: string; agentId?: string; personaId?: string; timestamp?: string };
   'conversation-updated': { conversationId: string; title?: string | null; timestamp?: string };
 };
 

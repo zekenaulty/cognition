@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Linq;
 using System.Text.Json;
 using Cognition.Clients.LLM;
@@ -122,7 +122,7 @@ public class AgentService : IAgentService
         catch (Exception ex)
         {
             _logger.LogError(ex, "LLM ChatAsync failed for provider {ProviderId} model {ModelId} conversation {ConversationId}", providerId, modelId, conversationId);
-            reply = "Sorry, I couldn’t complete that request.";
+            reply = "Sorry, I couldnâ€™t complete that request.";
         }
 
         // Persist assistant reply
@@ -175,7 +175,7 @@ public class AgentService : IAgentService
                 var recent = window.TakeLast(8).Select(m => $"{m.Role}: {m.Content}");
                 var titlePrompt = new List<ChatMessage>
                 {
-                    new ChatMessage("system", "You generate concise, descriptive conversation titles (3–6 words). No quotes, no punctuation at the end."),
+                    new ChatMessage("system", "You generate concise, descriptive conversation titles (3â€“6 words). No quotes, no punctuation at the end."),
                     new ChatMessage("user", string.Join("\n", recent))
                 };
                 var title = await client.ChatAsync(titlePrompt);
@@ -279,9 +279,12 @@ public class AgentService : IAgentService
 
 
 
-    public async Task<string> AskAsync(Guid personaId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
+    public async Task<string> AskAsync(Guid agentId, Guid providerId, Guid? modelId, string input, CancellationToken ct = default)
     {
-        var persona = await _db.Personas.FirstOrDefaultAsync(p => p.Id == personaId, ct);
+        var agent = await _db.Agents.AsNoTracking().Include(a => a.Persona).FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent == null) throw new ArgumentException("Agent not found", nameof(agentId));
+        var personaId = agent.PersonaId;
+        var persona = agent.Persona ?? await _db.Personas.AsNoTracking().FirstOrDefaultAsync(p => p.Id == personaId, ct);
         var sys = persona is null ? "" : BuildSystemMessage(persona);
         var (prov, modl) = await ResolveProviderModelForPersonaAsync(personaId, providerId, modelId, ct);
         var client = await _factory.CreateAsync(prov, modl, ct);
@@ -293,7 +296,7 @@ public class AgentService : IAgentService
         catch (Exception ex)
         {
             _logger.LogError(ex, "LLM GenerateAsync failed for provider {ProviderId} model {ModelId}", providerId, modelId);
-            return "Sorry, I couldn’t complete that request.";
+            return "Sorry, I couldnâ€™t complete that request.";
         }
     }
 
@@ -378,22 +381,21 @@ public class AgentService : IAgentService
         catch (Exception ex)
         {
             _logger.LogError(ex, "LLM GenerateAsync (ToolIndex) failed for provider {ProviderId} model {ModelId}", providerId, modelId);
-            return "Sorry, I couldn’t complete that request.";
+            return "Sorry, I couldnâ€™t complete that request.";
         }
     }
     
-    public async Task<string> AskWithPlanAsync(Guid conversationId, Guid personaId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default)
+    public async Task<string> AskWithPlanAsync(Guid conversationId, Guid agentId, Guid providerId, Guid? modelId, string input, int minSteps, int maxSteps, CancellationToken ct = default)
     {
+        var agent = await _db.Agents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent == null) throw new ArgumentException("Agent not found", nameof(agentId));
+        var personaId = agent.PersonaId;
         // 1. Save original message
-        var planUserFromAgentId = await _db.Agents.AsNoTracking()
-            .Where(a => a.PersonaId == personaId)
-            .Select(a => a.Id)
-            .FirstOrDefaultAsync(ct);
         var userMsg = new ConversationMessage
         {
             ConversationId = conversationId,
             FromPersonaId = personaId,
-            FromAgentId = planUserFromAgentId,
+            FromAgentId = agentId,
             Role = Cognition.Data.Relational.Modules.Common.ChatRole.User,
             Content = input,
             Timestamp = DateTime.UtcNow,
@@ -451,7 +453,7 @@ public class AgentService : IAgentService
         _db.ConversationPlans.Add(plan);
         await _db.SaveChangesAsync(ct);
 
-        // 4. Step loop: PLAN → tool → observe → persist
+        // 4. Step loop: PLAN â†’ tool â†’ observe â†’ persist
         var results = new List<string>();
         var completedSteps = new List<object>(); // for state
         for (int step = 1; step <= maxSteps; step++)
@@ -711,20 +713,20 @@ private static string CompactText(string? text, int maxLength)
 {
     if (string.IsNullOrWhiteSpace(text)) return string.Empty;
     var trimmed = text.Trim();
-    return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength] + "�";
+    return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength] + "…";
 }
 
     private static string CompactObservation(string? s, int max = 200)
     {
         if (string.IsNullOrWhiteSpace(s)) return "<no output>";
         var t = s.Trim().Replace("\r", " ").Replace("\n", " ");
-        return t.Length <= max ? t : t[..max] + "…";
+        return t.Length <= max ? t : t[..max] + "â€¦";
     }
     
     private static string BuildOutlinePlanPrompt(string input, string compactHistory, string toolIndex)
     {
         return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
-               "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
+               "Process: Plan â†’ one tool call â†’ observe â†’ iterate; finish with final_answer.\n" +
                "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
                "MODE: OUTLINE_PLAN\n" +
                $"UserRequest: \"{input}\"\n" +
@@ -736,7 +738,7 @@ private static string CompactText(string? text, int maxLength)
     private static string BuildStepPlanPrompt(string goalCompact, int maxSteps, string outlineJson, string completedJson, string toolIndex)
     {
         return $"You have tools. All work MUST be done by tools. Return JSON only for the current MODE. No prose.\n" +
-                     "Process: Plan → one tool call → observe → iterate; finish with final_answer.\n" +
+                     "Process: Plan â†’ one tool call â†’ observe â†’ iterate; finish with final_answer.\n" +
                      "Constraints: one tool per step; validate args; be concise; no clarifications unless essential.\n" +
                      "MODE: PLAN\n" +
                      $"STATE: Goal: \"{goalCompact}\"; Constraints: [\"Tools only\", \"Max {maxSteps}\", \"One tool per step\"]; OutlinePlan: {outlineJson}; Completed: {completedJson}\n" +
@@ -981,3 +983,4 @@ private static string CompactText(string? text, int maxLength)
     }
 
 }
+

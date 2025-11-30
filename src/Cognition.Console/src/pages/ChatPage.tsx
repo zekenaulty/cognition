@@ -249,6 +249,9 @@ export default function ChatPage() {
 
   useChatBus('assistant-message', msg => {
     if (!msg || msg.conversationId !== (conversationId ?? '')) return;
+    const displayFrom = msg.agentId
+      ? (agents.find(a => a.id === msg.agentId)?.label ?? assistantName)
+      : assistantName;
     setMessages(prev => {
       const updated = prev.map(m => ({ ...m, role: normalizeRole(m.role) }));
       const pendingIdx = updated.findIndex(m => m.role === 'assistant' && (m as any).pending);
@@ -262,6 +265,7 @@ export default function ChatPage() {
           id: (msg as any).messageId,
           pending: false,
           content: msg.content,
+          fromName: displayFrom,
           timestamp: msg.timestamp,
           versions: nextVersions,
           versionIndex: Math.max(0, nextVersions.length - 1),
@@ -272,7 +276,7 @@ export default function ChatPage() {
         role: 'assistant',
         id: (msg as any).messageId,
         content: msg.content,
-        fromName: assistantName,
+        fromName: displayFrom,
         timestamp: msg.timestamp,
         versions: [msg.content],
         versionIndex: 0,
@@ -312,18 +316,21 @@ export default function ChatPage() {
 
   useChatBus('plan-ready', evt => {
     if (!evt || evt.conversationId !== (conversationId ?? '')) return;
+    const label = evt.agentId ? (agents.find(a => a.id === evt.agentId)?.label ?? 'Agent') : 'Agent';
     const steps = Array.isArray(evt.plan) ? evt.plan : [evt.plan];
-    setPlanSteps(steps.filter(Boolean));
+    setPlanSteps(steps.filter(Boolean).map(s => `${label}: ${s}`));
   });
 
   useChatBus('tool-requested', evt => {
     if (!evt || evt.conversationId !== (conversationId ?? '')) return;
-    setToolActions(prev => [...prev, `Tool requested: ${evt.toolId}`]);
+    const label = evt.agentId ? (agents.find(a => a.id === evt.agentId)?.label ?? 'Agent') : 'Agent';
+    setToolActions(prev => [...prev, `${label} requested tool: ${evt.toolId}`]);
   });
 
   useChatBus('tool-completed', evt => {
     if (!evt || evt.conversationId !== (conversationId ?? '')) return;
-    setToolActions(prev => [...prev, `Tool completed: ${evt.toolId} (${evt.success ? 'success' : 'error'})`]);
+    const label = evt.agentId ? (agents.find(a => a.id === evt.agentId)?.label ?? 'Agent') : 'Agent';
+    setToolActions(prev => [...prev, `${label} completed tool: ${evt.toolId} (${evt.success ? 'success' : 'error'})`]);
   });
 
   useChatBus('assistant-version-appended', evt => {
@@ -379,10 +386,6 @@ export default function ChatPage() {
   const handleSendMessage = async (text: string) => {
     if (!accessToken || !text.trim() || !agentId) return;
     const personaForAgent = activePersonaId;
-    if (!personaForAgent) {
-      setError('Selected agent is missing a persona mapping.');
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
@@ -417,11 +420,11 @@ export default function ChatPage() {
       const sendSucceeded = await (async () => {
         if (convId) {
           try {
-            await chatHub.connectionRef.current?.invoke('AppendUserMessage', convId, text, personaForAgent, providerId, modelId);
+            await chatHub.connectionRef.current?.invoke('AppendUserMessage', convId, text, agentId, personaForAgent, providerId, modelId);
             return true;
           } catch {}
         }
-        return await chatHub.sendUserMessage(text, personaForAgent, providerId, modelId);
+        return await chatHub.sendUserMessage(text, agentId, personaForAgent, providerId, modelId);
       })();
 
       if (!sendSucceeded && convId) {

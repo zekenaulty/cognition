@@ -17,9 +17,9 @@ export default function AgentsPage() {
           <List>
             {agents.map(agent => {
               const personaName = agent.personaId ? personaNameMap[agent.personaId] : undefined;
-              const primary = personaName || agent.label || agent.id;
+              const primary = agent.label || personaName || agent.id;
               const secondaryParts = [`AgentId: ${agent.id}`];
-              if (agent.personaId) secondaryParts.push(`PersonaId: ${agent.personaId}`);
+              if (agent.personaId) secondaryParts.push(`PersonaId: ${agent.personaId}${personaName ? ` (${personaName})` : ''}`);
               return (
                 <React.Fragment key={agent.id}>
                   <ListItem disableGutters onClick={() => navigate(`/agents/${agent.id}`)} sx={{ cursor: 'pointer' }}>
