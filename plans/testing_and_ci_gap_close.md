@@ -35,6 +35,7 @@
 
 ## Worklog Protocol
 - Follow `plans/README.md`: each step in `plans/testing_and_ci_gap_close_step_YYYYMMDD_HHMM_<topic>.md` with goal/context/commands/files/tests/issues/decision/completion/next actions.
+- Capture scope/context changes as you work (static RAG in `plans/`) so later sessions can anchor.
 
 ## Initial Steps
 1) Codify hotspots list.

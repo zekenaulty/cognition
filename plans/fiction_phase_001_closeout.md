@@ -59,3 +59,4 @@
 
 ## Worklog Protocol
 - Follow `plans/README.md`: step notes at `plans/fiction_phase_001_closeout_step_YYYYMMDD_HHMM_<topic>.md` with goal/context/commands/files/tests/issues/decision/completion/next actions.
+- Capture scope/context changes as you work (static RAG in `plans/`) so later sessions can anchor.

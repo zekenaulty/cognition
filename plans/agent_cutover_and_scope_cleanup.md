@@ -53,6 +53,7 @@
 
 ## Worklog Protocol
 - Follow `plans/README.md`: each step gets `plans/agent_cutover_and_scope_cleanup_step_YYYYMMDD_HHMM_<topic>.md` with goal/context/commands/files/tests/issues/decision/completion/next actions.
+- Capture scope/context changes as you work (static RAG in `plans/`) so later sessions can anchor.
 
 ## Initial Steps
 1) Inventory persona usages across controllers (e.g., Chat), entities (Conversation*, Plan, Message), services, UI; classify keep/remove/isolate (persona-only image flows, PersonaPersonas).

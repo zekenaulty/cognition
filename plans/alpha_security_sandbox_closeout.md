@@ -45,6 +45,7 @@
 
 ## Worklog Protocol
 - Follow `plans/README.md`: each step in `plans/alpha_security_sandbox_closeout_step_YYYYMMDD_HHMM_<topic>.md` with goal/context/commands/files/tests/issues/decision/completion/next actions.
+- Capture scope/context changes as you work (static RAG in `plans/`) so later sessions can anchor.
 
 ## Initial Steps
 1) Design sandbox policy surface and dispatcher integration.
