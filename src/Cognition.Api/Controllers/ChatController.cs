@@ -39,11 +39,19 @@ public class ChatController : ControllerBase
         _hubContext = hubContext;
     }
 
-    public record AskRequest(
-        [property: NotEmptyGuid] Guid AgentId,
-        [property: NotEmptyGuid] Guid ProviderId,
-        Guid? ModelId,
-        [property: Required, StringLength(4000, MinimumLength = 1)] string Input);
+    public sealed class AskRequest
+    {
+        [NotEmptyGuid]
+        public Guid AgentId { get; init; }
+
+        [NotEmptyGuid]
+        public Guid ProviderId { get; init; }
+
+        public Guid? ModelId { get; init; }
+
+        [Required, StringLength(4000, MinimumLength = 1)]
+        public string Input { get; init; } = string.Empty;
+    }
 
     [HttpPost("ask")]
     public async Task<IActionResult> Ask([FromBody] AskRequest req, CancellationToken cancellationToken = default)
@@ -79,11 +87,19 @@ public class ChatController : ControllerBase
         }
     }
 
-    public record ChatRequest(
-        [property: NotEmptyGuid] Guid ConversationId,
-        [property: NotEmptyGuid] Guid ProviderId,
-        Guid? ModelId,
-        [property: Required, StringLength(4000, MinimumLength = 1)] string Input);
+    public sealed class ChatRequest
+    {
+        [NotEmptyGuid]
+        public Guid ConversationId { get; init; }
+
+        [NotEmptyGuid]
+        public Guid ProviderId { get; init; }
+
+        public Guid? ModelId { get; init; }
+
+        [Required, StringLength(4000, MinimumLength = 1)]
+        public string Input { get; init; } = string.Empty;
+    }
 
 /*
 

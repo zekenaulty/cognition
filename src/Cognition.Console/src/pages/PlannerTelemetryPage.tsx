@@ -831,7 +831,7 @@ export default function PlannerTelemetryPage() {
           {planAgingObligations.length > 0 && (
             <Alert severity="warning">
               {planAgingObligations.length} persona obligation
-              {planAgingObligations.length === 1 ? '' : 's'} aging without resolution (>{AGING_THRESHOLD_HOURS}h).
+              {planAgingObligations.length === 1 ? '' : 's'} aging without resolution ({AGING_THRESHOLD_HOURS}h).
             </Alert>
           )}
         </Stack>

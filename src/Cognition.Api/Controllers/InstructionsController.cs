@@ -19,8 +19,46 @@ public class InstructionsController : ControllerBase
     private readonly CognitionDbContext _db;
     public InstructionsController(CognitionDbContext db) => _db = db;
 
-    public record CreateInstructionRequest(string Name, string Content, string Kind = "Other", bool RolePlay = false, string[]? Tags = null, string? Version = null);
-    public record PatchInstructionRequest(string? Name, string? Content, string? Kind, bool? RolePlay, string[]? Tags, string? Version, bool? IsActive);
+    public sealed class CreateInstructionRequest
+    {
+        public string Name { get; init; } = string.Empty;
+        public string Content { get; init; } = string.Empty;
+        public string Kind { get; init; } = "Other";
+        public bool RolePlay { get; init; } = false;
+        public string[]? Tags { get; init; }
+        public string? Version { get; init; }
+        public CreateInstructionRequest() { }
+        public CreateInstructionRequest(string name, string content, string kind = "Other", bool rolePlay = false, string[]? tags = null, string? version = null)
+        {
+            Name = name;
+            Content = content;
+            Kind = kind;
+            RolePlay = rolePlay;
+            Tags = tags;
+            Version = version;
+        }
+    }
+    public sealed class PatchInstructionRequest
+    {
+        public string? Name { get; init; }
+        public string? Content { get; init; }
+        public string? Kind { get; init; }
+        public bool? RolePlay { get; init; }
+        public string[]? Tags { get; init; }
+        public string? Version { get; init; }
+        public bool? IsActive { get; init; }
+        public PatchInstructionRequest() { }
+        public PatchInstructionRequest(string? name, string? content, string? kind, bool? rolePlay, string[]? tags, string? version, bool? isActive)
+        {
+            Name = name;
+            Content = content;
+            Kind = kind;
+            RolePlay = rolePlay;
+            Tags = tags;
+            Version = version;
+            IsActive = isActive;
+        }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken = default)
@@ -75,8 +113,38 @@ public class InstructionSetsController : ControllerBase
     private readonly CognitionDbContext _db;
     public InstructionSetsController(CognitionDbContext db) => _db = db;
 
-    public record CreateSetRequest(string Name, string? Scope, Guid? ScopeRefId, string? Description);
-    public record PatchSetRequest(string? Name, string? Scope, Guid? ScopeRefId, string? Description, bool? IsActive);
+    public sealed class CreateSetRequest
+    {
+        public string Name { get; init; } = string.Empty;
+        public string? Scope { get; init; }
+        public Guid? ScopeRefId { get; init; }
+        public string? Description { get; init; }
+        public CreateSetRequest() { }
+        public CreateSetRequest(string name, string? scope, Guid? scopeRefId, string? description)
+        {
+            Name = name;
+            Scope = scope;
+            ScopeRefId = scopeRefId;
+            Description = description;
+        }
+    }
+    public sealed class PatchSetRequest
+    {
+        public string? Name { get; init; }
+        public string? Scope { get; init; }
+        public Guid? ScopeRefId { get; init; }
+        public string? Description { get; init; }
+        public bool? IsActive { get; init; }
+        public PatchSetRequest() { }
+        public PatchSetRequest(string? name, string? scope, Guid? scopeRefId, string? description, bool? isActive)
+        {
+            Name = name;
+            Scope = scope;
+            ScopeRefId = scopeRefId;
+            Description = description;
+            IsActive = isActive;
+        }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken = default)

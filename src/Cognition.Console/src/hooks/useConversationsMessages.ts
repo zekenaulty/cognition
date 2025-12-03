@@ -3,7 +3,7 @@ import { fetchConversations, fetchMessages } from '../api/client';
 import { normalizeRole } from '../utils/chat';
 import { useUserSettings } from './useUserSettings';
 
-type Conv = { id: string; title?: string | null };
+type Conv = { id: string; title?: string | null; providerId?: string | null; modelId?: string | null };
 type Message = {
   id?: string;
   role: 'system' | 'user' | 'assistant';
@@ -38,7 +38,12 @@ export function useConversationsMessages(accessToken: string, agentId: string | 
     const loadConvs = async () => {
       if (!accessToken || !agentId) return;
       const list = await fetchConversations(accessToken, { agentId });
-      const items: Conv[] = (list as any[]).map((c: any) => ({ id: c.id ?? c.Id, title: c.title ?? c.Title }));
+      const items: Conv[] = (list as any[]).map((c: any) => ({
+        id: c.id ?? c.Id,
+        title: c.title ?? c.Title,
+        providerId: c.providerId ?? c.ProviderId ?? null,
+        modelId: c.modelId ?? c.ModelId ?? null
+      }));
       setConversations(items);
       // Do NOT auto-select a conversation. Routing/new-convo flow controls selection now.
     };
@@ -91,7 +96,10 @@ export function useConversationsMessages(accessToken: string, agentId: string | 
         const tb = b.timestamp ? Date.parse(b.timestamp) : 0;
         return ta - tb;
       });
-      setMessages(combined);
+      setMessages(prev => {
+        if (combined.length === 0) return prev; // avoid dropping pending UI messages when fetch returns empty
+        return combined;
+      });
     };
     loadMsgs();
   }, [accessToken, conversationId]);

@@ -38,6 +38,25 @@ export async function fetchConversations(accessToken: string, options?: { agentI
   return [];
 }
 
+export async function fetchConversationSettings(accessToken: string, conversationId: string): Promise<{ providerId?: string | null; modelId?: string | null }> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const res = await fetch(`/api/conversations/${conversationId}/settings`, { headers });
+  if (res.ok) return await res.json();
+  return {};
+}
+
+export async function patchConversationSettings(accessToken: string, conversationId: string, payload: { providerId?: string; modelId?: string | null }) {
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+  await fetch(`/api/conversations/${conversationId}/settings`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({
+      ProviderId: payload.providerId,
+      ModelId: payload.modelId
+    })
+  });
+}
+
 export async function fetchMessages(accessToken: string, conversationId: string): Promise<any[]> {
   const headers = { Authorization: `Bearer ${accessToken}` };
   const res = await fetch(`/api/conversations/${conversationId}/messages`, { headers });

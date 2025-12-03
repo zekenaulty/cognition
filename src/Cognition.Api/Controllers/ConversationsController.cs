@@ -26,27 +26,70 @@ public class ConversationsController : ControllerBase
     private readonly IHubContext<ChatHub> _hub;
     public ConversationsController(CognitionDbContext db, IHubContext<ChatHub> hub) { _db = db; _hub = hub; }
 
-    public record CreateConversationRequest(
-        [property: NotEmptyGuid] Guid AgentId,
-        [property: StringLength(256)]
-        string? Title,
-        [property: MaxLength(32)]
-        Guid[]? ParticipantIds);
-    public record AddMessageRequest(
-        [property: NotEmptyGuid] Guid FromPersonaId,
-        [property: NotEmptyGuid] Guid? ToPersonaId,
-        ChatRole Role,
-        [property: Required, StringLength(4000, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Content must contain non-whitespace characters.")]
-        string Content,
-        [property: StringLength(128)]
-        string? Metatype = null);
-    public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc, DateTime? UpdatedAtUtc);
-    public record AddVersionRequest(
-        [property: Required, StringLength(4000, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Content must contain non-whitespace characters.")]
-        string Content);
-    public record SetActiveVersionRequest(
-        [property: Range(0, int.MaxValue)]
-        int Index);
+    public sealed class CreateConversationRequest
+    {
+        [NotEmptyGuid]
+        public Guid AgentId { get; init; }
+
+        [StringLength(256)]
+        public string? Title { get; init; }
+
+        [MaxLength(32)]
+        public Guid[]? ParticipantIds { get; init; }
+    }
+    public sealed class AddMessageRequest
+    {
+        [NotEmptyGuid]
+        public Guid FromPersonaId { get; init; }
+
+        [NotEmptyGuid]
+        public Guid? ToPersonaId { get; init; }
+
+        public ChatRole Role { get; init; }
+
+        [Required, StringLength(4000, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Content must contain non-whitespace characters.")]
+        public string Content { get; init; } = string.Empty;
+
+        [StringLength(128)]
+        public string? Metatype { get; init; }
+
+        public AddMessageRequest() { }
+
+        public AddMessageRequest(Guid fromPersonaId, Guid? toPersonaId, ChatRole role, string content, string? metatype = null)
+        {
+            FromPersonaId = fromPersonaId;
+            ToPersonaId = toPersonaId;
+            Role = role;
+            Content = content;
+            Metatype = metatype;
+        }
+    }
+    public record ConversationListItem(Guid Id, string? Title, DateTime CreatedAtUtc, DateTime? UpdatedAtUtc, Guid? ProviderId, Guid? ModelId);
+    public sealed class AddVersionRequest
+    {
+        [Required, StringLength(4000, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Content must contain non-whitespace characters.")]
+        public string Content { get; init; } = string.Empty;
+
+        public AddVersionRequest() { }
+        public AddVersionRequest(string content)
+        {
+            Content = content;
+        }
+    }
+
+    public sealed class ConversationSettingsRequest
+    {
+        public Guid? ProviderId { get; init; }
+        public Guid? ModelId { get; init; }
+    }
+
+    public sealed record ConversationSettingsResponse(Guid? ProviderId, Guid? ModelId);
+
+    public sealed class SetActiveVersionRequest
+    {
+        [Range(0, int.MaxValue)]
+        public int Index { get; init; }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? participantId, [FromQuery] Guid? agentId, CancellationToken cancellationToken = default)
@@ -103,11 +146,77 @@ public class ConversationsController : ControllerBase
             );
         }
 
-        var items = await q
+        var conversations = await q
             .OrderByDescending(c => c.UpdatedAtUtc ?? c.CreatedAtUtc)
-            .Select(c => new ConversationListItem(c.Id, c.Title, c.CreatedAtUtc, c.UpdatedAtUtc))
             .ToListAsync(cancellationToken);
+
+        var items = conversations
+            .Select(c =>
+            {
+                var provider = TryReadMetadataGuid(c.Metadata, "providerId");
+                var model = TryReadMetadataGuid(c.Metadata, "modelId");
+                return new ConversationListItem(c.Id, c.Title, c.CreatedAtUtc, c.UpdatedAtUtc, provider, model);
+            })
+            .ToList();
+
         return Ok(items);
+    }
+
+    [HttpGet("{id:guid}/settings")]
+    public async Task<ActionResult<ConversationSettingsResponse>> GetSettings(Guid id, CancellationToken cancellationToken = default)
+    {
+        var conv = await _db.Conversations
+            .AsNoTracking()
+            .Include(c => c.Agent)
+                .ThenInclude(a => a.ClientProfile)
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (conv is null)
+        {
+            return NotFound();
+        }
+
+        Guid? providerId = TryReadMetadataGuid(conv.Metadata, "providerId");
+        Guid? modelId = TryReadMetadataGuid(conv.Metadata, "modelId");
+
+        if (!providerId.HasValue && conv.Agent?.ClientProfile is not null)
+        {
+            providerId = conv.Agent.ClientProfile.ProviderId;
+            modelId = conv.Agent.ClientProfile.ModelId ?? modelId;
+        }
+
+        if (!providerId.HasValue || !modelId.HasValue)
+        {
+            var defaults = await ResolveDefaultLlmAsync(cancellationToken).ConfigureAwait(false);
+            providerId ??= defaults.providerId;
+            modelId ??= defaults.modelId;
+        }
+
+        return new ConversationSettingsResponse(providerId, modelId);
+    }
+
+    [HttpPatch("{id:guid}/settings")]
+    public async Task<IActionResult> UpdateSettings(Guid id, [FromBody] ConversationSettingsRequest req, CancellationToken cancellationToken = default)
+    {
+        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == id, cancellationToken).ConfigureAwait(false);
+        if (conv is null)
+        {
+            return NotFound();
+        }
+
+        conv.Metadata ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (req.ProviderId.HasValue)
+        {
+            conv.Metadata["providerId"] = req.ProviderId.Value;
+        }
+        if (req.ModelId.HasValue)
+        {
+            conv.Metadata["modelId"] = req.ModelId.Value;
+        }
+        conv.UpdatedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return NoContent();
     }
 
     [HttpPost]
@@ -117,8 +226,39 @@ public class ConversationsController : ControllerBase
         {
             Title = string.IsNullOrWhiteSpace(req.Title) ? null : req.Title.Trim(),
             CreatedAtUtc = DateTime.UtcNow,
-            AgentId = req.AgentId
+            AgentId = req.AgentId,
+            Metadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         };
+
+        // Seed provider/model from agent's client profile if available
+        var agentProfile = await _db.Agents
+            .AsNoTracking()
+            .Include(a => a.ClientProfile)
+            .Where(a => a.Id == req.AgentId)
+            .Select(a => a.ClientProfile)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (agentProfile is not null)
+        {
+            conv.Metadata["providerId"] = agentProfile.ProviderId;
+            if (agentProfile.ModelId.HasValue)
+            {
+                conv.Metadata["modelId"] = agentProfile.ModelId.Value;
+            }
+        }
+        else
+        {
+            var defaults = await ResolveDefaultLlmAsync(cancellationToken).ConfigureAwait(false);
+            if (defaults.providerId.HasValue)
+            {
+                conv.Metadata["providerId"] = defaults.providerId.Value;
+            }
+            if (defaults.modelId.HasValue)
+            {
+                conv.Metadata["modelId"] = defaults.modelId.Value;
+            }
+        }
+
         _db.Conversations.Add(conv);
         await _db.SaveChangesAsync(cancellationToken);
         // participants (optional)
@@ -372,5 +512,57 @@ public class ConversationsController : ControllerBase
         await _db.SaveChangesAsync(cancellationToken);
         await _hub.Clients.Group(conversationId.ToString()).SendAsync("AssistantActiveVersionChanged", new { ConversationId = conversationId, MessageId = messageId, VersionIndex = req.Index }, cancellationToken);
         return Ok(new { msg.Id, msg.ActiveVersionIndex });
+    }
+
+    private static Guid? TryReadMetadataGuid(Dictionary<string, object?>? metadata, string key)
+    {
+        if (metadata is null)
+        {
+            return null;
+        }
+
+        if (metadata.TryGetValue(key, out var value) && value is not null)
+        {
+            var str = value.ToString();
+            if (Guid.TryParse(str, out var guid))
+            {
+                return guid;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<(Guid? providerId, Guid? modelId)> ResolveDefaultLlmAsync(CancellationToken cancellationToken)
+    {
+        // Prefer Gemini/Google providers and models containing flash/2.5/2.0
+        var providers = await _db.Providers
+            .AsNoTracking()
+            .OrderBy(p => p.Name)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        Guid? preferredProviderId = providers
+            .FirstOrDefault(p => p.Name.Contains("Gemini", StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Google", StringComparison.OrdinalIgnoreCase))
+            ?.Id ?? providers.FirstOrDefault()?.Id;
+
+        Guid? preferredModelId = null;
+        if (preferredProviderId.HasValue)
+        {
+            var models = await _db.Models
+                .AsNoTracking()
+                .Where(m => m.ProviderId == preferredProviderId.Value)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            preferredModelId = models
+                .FirstOrDefault(m =>
+                    m.Name.Contains("flash", StringComparison.OrdinalIgnoreCase) ||
+                    m.Name.Contains("2.5", StringComparison.OrdinalIgnoreCase) ||
+                    m.Name.Contains("2.0", StringComparison.OrdinalIgnoreCase))
+                ?.Id ?? models.FirstOrDefault()?.Id;
+        }
+
+        return (preferredProviderId, preferredModelId);
     }
 }

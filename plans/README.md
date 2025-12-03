@@ -74,3 +74,5 @@ A lightweight, shared workflow for planning work, tracking steps, and keeping an
 - Don’t mix multiple actions in one step note.
 - Do be explicit when referencing code: cite class/filename/method paths and evidence of behavior; no vague “lip service” summaries.
   - Rationale: vague statements like “fixed planner health alerts” without file/method references or test evidence create ambiguity, hide drift, and break handoffs. Always cite exact paths (e.g., `src/Cognition.Api/Infrastructure/Planning/PlannerHealthService.cs:630`), what changed, and how it was verified (tests run, telemetry observed).
+  - 
+- Capture scope/context changes as you work (static RAG in `plans/`) so later sessions can anchor. Always.

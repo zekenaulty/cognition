@@ -20,13 +20,38 @@ public class ClientProfilesController : ControllerBase
     private readonly CognitionDbContext _db;
     public ClientProfilesController(CognitionDbContext db) => _db = db;
 
-    public record CreateRequest(string Name, Guid ProviderId, Guid? ModelId, Guid? ApiCredentialId,
-        string? UserName, string? BaseUrlOverride, int MaxTokens = 8192, double Temperature = 0.7, double TopP = 0.95,
-        double PresencePenalty = 0, double FrequencyPenalty = 0, bool Stream = true, bool LoggingEnabled = false);
+    public sealed class CreateRequest
+    {
+        public string Name { get; init; } = string.Empty;
+        public Guid ProviderId { get; init; }
+        public Guid? ModelId { get; init; }
+        public Guid? ApiCredentialId { get; init; }
+        public string? UserName { get; init; }
+        public string? BaseUrlOverride { get; init; }
+        public int MaxTokens { get; init; } = 8192;
+        public double Temperature { get; init; } = 0.7;
+        public double TopP { get; init; } = 0.95;
+        public double PresencePenalty { get; init; } = 0;
+        public double FrequencyPenalty { get; init; } = 0;
+        public bool Stream { get; init; } = true;
+        public bool LoggingEnabled { get; init; } = false;
+    }
 
-    public record UpdateRequest(Guid? ModelId, Guid? ApiCredentialId,
-        string? UserName, string? BaseUrlOverride, int? MaxTokens, double? Temperature, double? TopP,
-        double? PresencePenalty, double? FrequencyPenalty, bool? Stream, bool? LoggingEnabled, bool? IsActive);
+    public sealed class UpdateRequest
+    {
+        public Guid? ModelId { get; init; }
+        public Guid? ApiCredentialId { get; init; }
+        public string? UserName { get; init; }
+        public string? BaseUrlOverride { get; init; }
+        public int? MaxTokens { get; init; }
+        public double? Temperature { get; init; }
+        public double? TopP { get; init; }
+        public double? PresencePenalty { get; init; }
+        public double? FrequencyPenalty { get; init; }
+        public bool? Stream { get; init; }
+        public bool? LoggingEnabled { get; init; }
+        public bool? IsActive { get; init; }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken)

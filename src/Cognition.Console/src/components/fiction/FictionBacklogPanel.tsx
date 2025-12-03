@@ -376,7 +376,7 @@ export function FictionBacklogPanel({
         )}
         {agingObligations.length > 0 && (
           <Alert severity="warning" sx={{ mt: 1 }}>
-            {agingObligations.length} obligation{agingObligations.length === 1 ? '' : 's'} aging without resolution (>{AGING_THRESHOLD_HOURS}h).
+            {agingObligations.length} obligation{agingObligations.length === 1 ? '' : 's'} aging without resolution ({AGING_THRESHOLD_HOURS}h).
           </Alert>
         )}
         <List dense sx={{ mt: 1 }}>
@@ -568,14 +568,6 @@ function formatRelative(value?: string | null) {
 
 function formatResolutionNote(note: ReturnType<typeof summarizeObligationMetadata>['resolutionNotes'][number]) {
   return formatResolutionNoteText(note, formatRelative);
-}
-
-function isObligationAging(createdAt?: string | null, thresholdHours = 48) {
-  if (!createdAt) return false;
-  const created = new Date(createdAt);
-  if (Number.isNaN(created.getTime())) return false;
-  const ageMs = Date.now() - created.getTime();
-  return ageMs > thresholdHours * 60 * 60 * 1000;
 }
 
 function isObligationAging(createdAt?: string | null, thresholdHours = AGING_THRESHOLD_HOURS) {

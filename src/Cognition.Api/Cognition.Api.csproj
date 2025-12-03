@@ -31,4 +31,29 @@
     <ProjectReference Include="..\Cognition.Data.Vectors\Cognition.Data.Vectors.csproj" />
   </ItemGroup>
 
+  <!-- Build the Vite console and copy static assets into wwwroot on publish/rebuild -->
+  <Target Name="BuildConsoleApp" AfterTargets="Build" Condition=" '$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Release' ">
+    <PropertyGroup>
+      <ConsoleProjectRoot>$(MSBuildThisFileDirectory)..\Cognition.Console</ConsoleProjectRoot>
+      <ConsoleDist>$(ConsoleProjectRoot)\dist</ConsoleDist>
+      <ApiWwwRoot>$(MSBuildThisFileDirectory)wwwroot</ApiWwwRoot>
+    </PropertyGroup>
+    <RemoveDir Directories="$(ApiWwwRoot)" Condition="Exists('$(ApiWwwRoot)')" />
+    <Message Text="Building Cognition.Console (Vite) into $(ConsoleDist)" Importance="high" />
+    <Exec WorkingDirectory="$(ConsoleProjectRoot)" Command="npm install" />
+    <Exec WorkingDirectory="$(ConsoleProjectRoot)" Command="npm run build" />
+    <MakeDir Directories="$(ApiWwwRoot)" />
+    <Copy SourceFiles="@(ConsoleDist->'%(FullPath)')" DestinationFolder="$(ApiWwwRoot)" SkipUnchangedFiles="true" Condition="Exists('$(ConsoleDist)')" />
+    <Copy SourceFiles="@(ConsoleDist->'%(FullPath)')" DestinationFiles="@(ConsoleDist->'$(ApiWwwRoot)\%(RecursiveDir)%(Filename)%(Extension)')" Recursive="true" SkipUnchangedFiles="true" Condition="Exists('$(ConsoleDist)')" />
+  </Target>
+
+  <!-- Guard: fail build if SPA assets are missing after build -->
+  <Target Name="EnsureSpaAssets" AfterTargets="BuildConsoleApp">
+    <PropertyGroup>
+      <ApiWwwRoot>$(MSBuildThisFileDirectory)wwwroot</ApiWwwRoot>
+      <SpaIndex>$(ApiWwwRoot)\index.html</SpaIndex>
+    </PropertyGroup>
+    <Error Text="SPA assets missing: $(SpaIndex) not found. Vite build may have failed." Condition=" '$(SpaDisabled)' != 'true' And !Exists('$(SpaIndex)') " />
+  </Target>
+
 </Project>

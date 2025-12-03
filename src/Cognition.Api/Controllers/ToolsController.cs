@@ -26,35 +26,79 @@ public class ToolsController : ControllerBase
     private readonly IToolRegistry _registry;
     public ToolsController(CognitionDbContext db, IToolRegistry registry) { _db = db; _registry = registry; }
 
-    public record CreateToolRequest(
-        [property: Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
-        string Name,
-        [property: Required, StringLength(256, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "ClassPath must contain non-whitespace characters.")]
-        string ClassPath,
-        [property: StringLength(2048)]
-        string? Description,
-        string[]? Tags,
-        object? Metadata,
-        [property: StringLength(2048)]
-        string? Example,
-        bool IsActive = true,
-        [property: NotEmptyGuid]
-        Guid? ClientProfileId = null);
+    public sealed class CreateToolRequest
+    {
+        [Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
+        public string Name { get; init; } = string.Empty;
 
-    public record PatchToolRequest(
-        [property: StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters when provided.")]
-        string? Name,
-        [property: StringLength(256, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "ClassPath must contain non-whitespace characters when provided.")]
-        string? ClassPath,
-        [property: StringLength(2048)]
-        string? Description,
-        string[]? Tags,
-        object? Metadata,
-        [property: StringLength(2048)]
-        string? Example,
-        bool? IsActive,
-        [property: NotEmptyGuid]
-        Guid? ClientProfileId = null);
+        [Required, StringLength(256, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "ClassPath must contain non-whitespace characters.")]
+        public string ClassPath { get; init; } = string.Empty;
+
+        [StringLength(2048)]
+        public string? Description { get; init; }
+
+        public string[]? Tags { get; init; }
+        public object? Metadata { get; init; }
+
+        [StringLength(2048)]
+        public string? Example { get; init; }
+
+        public bool IsActive { get; init; } = true;
+
+        [NotEmptyGuid]
+        public Guid? ClientProfileId { get; init; }
+
+        public CreateToolRequest() { }
+
+        public CreateToolRequest(string name, string classPath, string? description, string[]? tags, object? metadata, string? example, bool isActive = true, Guid? clientProfileId = null)
+        {
+            Name = name;
+            ClassPath = classPath;
+            Description = description;
+            Tags = tags;
+            Metadata = metadata;
+            Example = example;
+            IsActive = isActive;
+            ClientProfileId = clientProfileId;
+        }
+    }
+
+    public sealed class PatchToolRequest
+    {
+        [StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters when provided.")]
+        public string? Name { get; init; }
+
+        [StringLength(256, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "ClassPath must contain non-whitespace characters when provided.")]
+        public string? ClassPath { get; init; }
+
+        [StringLength(2048)]
+        public string? Description { get; init; }
+
+        public string[]? Tags { get; init; }
+        public object? Metadata { get; init; }
+
+        [StringLength(2048)]
+        public string? Example { get; init; }
+
+        public bool? IsActive { get; init; }
+
+        [NotEmptyGuid]
+        public Guid? ClientProfileId { get; init; }
+
+        public PatchToolRequest() { }
+
+        public PatchToolRequest(string? name, string? classPath, string? description, string[]? tags, object? metadata, string? example, bool? isActive, Guid? clientProfileId = null)
+        {
+            Name = name;
+            ClassPath = classPath;
+            Description = description;
+            Tags = tags;
+            Metadata = metadata;
+            Example = example;
+            IsActive = isActive;
+            ClientProfileId = clientProfileId;
+        }
+    }
 
     [HttpGet]
     public async Task<IActionResult> ListTools(CancellationToken cancellationToken = default)
@@ -160,19 +204,39 @@ public class ToolParametersController : ControllerBase
     private readonly CognitionDbContext _db;
     public ToolParametersController(CognitionDbContext db) => _db = db;
 
-    public record CreateParamRequest(
-        [property: NotEmptyGuid]
-        Guid ToolId,
-        [property: Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
-        string Name,
-        [property: Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Type must contain non-whitespace characters.")]
-        string Type,
-        ToolParamDirection Direction = ToolParamDirection.Input,
-        bool Required = false,
-        object? DefaultValue = null,
-        object? Options = null,
-        [property: StringLength(1024)]
-        string? Description = null);
+    public sealed class CreateParamRequest
+    {
+        [NotEmptyGuid]
+        public Guid ToolId { get; init; }
+
+        [Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
+        public string Name { get; init; } = string.Empty;
+
+        [Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Type must contain non-whitespace characters.")]
+        public string Type { get; init; } = string.Empty;
+
+        public ToolParamDirection Direction { get; init; } = ToolParamDirection.Input;
+        public bool Required { get; init; } = false;
+        public object? DefaultValue { get; init; }
+        public object? Options { get; init; }
+
+        [StringLength(1024)]
+        public string? Description { get; init; }
+
+        public CreateParamRequest() { }
+
+        public CreateParamRequest(Guid toolId, string name, string type, ToolParamDirection direction = ToolParamDirection.Input, bool required = false, object? defaultValue = null, object? options = null, string? description = null)
+        {
+            ToolId = toolId;
+            Name = name;
+            Type = type;
+            Direction = direction;
+            Required = required;
+            DefaultValue = defaultValue;
+            Options = options;
+            Description = description;
+        }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? toolId, CancellationToken cancellationToken = default)
@@ -276,16 +340,33 @@ public class ToolProviderSupportsController : ControllerBase
     private readonly CognitionDbContext _db;
     public ToolProviderSupportsController(CognitionDbContext db) => _db = db;
 
-    public record CreateSupportRequest(
-        [property: NotEmptyGuid]
-        Guid ToolId,
-        [property: NotEmptyGuid]
-        Guid ProviderId,
-        [property: NotEmptyGuid]
-        Guid? ModelId,
-        SupportLevel SupportLevel = SupportLevel.Full,
-        [property: StringLength(1024)]
-        string? Notes = null);
+    public sealed class CreateSupportRequest
+    {
+        [NotEmptyGuid]
+        public Guid ToolId { get; init; }
+
+        [NotEmptyGuid]
+        public Guid ProviderId { get; init; }
+
+        [NotEmptyGuid]
+        public Guid? ModelId { get; init; }
+
+        public SupportLevel SupportLevel { get; init; } = SupportLevel.Full;
+
+        [StringLength(1024)]
+        public string? Notes { get; init; }
+
+        public CreateSupportRequest() { }
+
+        public CreateSupportRequest(Guid toolId, Guid providerId, Guid? modelId, SupportLevel supportLevel = SupportLevel.Full, string? notes = null)
+        {
+            ToolId = toolId;
+            ProviderId = providerId;
+            ModelId = modelId;
+            SupportLevel = supportLevel;
+            Notes = notes;
+        }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? toolId, [FromQuery] Guid? providerId, CancellationToken cancellationToken = default)

@@ -199,7 +199,9 @@ public static class StartupDataSeeder
         var gemini = await db.Providers.AsNoTracking().FirstOrDefaultAsync(p => p.Name == "Gemini");
         if (gemini != null)
         {
-            var model = await db.Models.AsNoTracking().FirstOrDefaultAsync(m => m.ProviderId == gemini.Id && (m.Name == "gemini-2.5-flash" || m.Name == "gemini-2.0-flash"));
+            var model = await db.Models.AsNoTracking().FirstOrDefaultAsync(m =>
+                m.ProviderId == gemini.Id &&
+                (m.Name.Contains("2.5-flash") || m.Name.Contains("2.0-flash") || m.Name.Contains("flash")));
             if (!await db.ClientProfiles.AnyAsync(cp => cp.Name == "Default Gemini"))
             {
                 db.ClientProfiles.Add(new Cognition.Data.Relational.Modules.LLM.ClientProfile

@@ -21,13 +21,24 @@ public class DataSourcesController : ControllerBase
     private readonly CognitionDbContext _db;
     public DataSourcesController(CognitionDbContext db) => _db = db;
 
-    public record CreateRequest(
-        [property: Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
-        string Name,
-        DataSourceType DataSourceType = DataSourceType.JsonStore,
-        [property: StringLength(128)]
-        string? CollectionName = null,
-        object? Config = null);
+    public sealed class CreateRequest
+    {
+        [Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
+        public string Name { get; init; } = string.Empty;
+        public DataSourceType DataSourceType { get; init; } = DataSourceType.JsonStore;
+        [StringLength(128)]
+        public string? CollectionName { get; init; }
+        public object? Config { get; init; }
+
+        public CreateRequest() { }
+        public CreateRequest(string name, DataSourceType dataSourceType, string? collectionName = null, object? config = null)
+        {
+            Name = name;
+            DataSourceType = dataSourceType;
+            CollectionName = collectionName;
+            Config = config;
+        }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
@@ -60,12 +71,22 @@ public class SystemVariablesController : ControllerBase
     private readonly CognitionDbContext _db;
     public SystemVariablesController(CognitionDbContext db) => _db = db;
 
-    public record CreateRequest(
-        [property: Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Key must contain non-whitespace characters.")]
-        string Key,
-        [property: StringLength(64)]
-        string? Type = null,
-        object? Value = null);
+    public sealed class CreateRequest
+    {
+        [Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Key must contain non-whitespace characters.")]
+        public string Key { get; init; } = string.Empty;
+        [StringLength(64)]
+        public string? Type { get; init; }
+        public object? Value { get; init; }
+
+        public CreateRequest() { }
+        public CreateRequest(string key, string? type = null, object? value = null)
+        {
+            Key = key;
+            Type = type;
+            Value = value;
+        }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken)

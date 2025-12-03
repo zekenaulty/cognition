@@ -23,64 +23,120 @@ public class PersonasController : ControllerBase
     private readonly CognitionDbContext _db;
     public PersonasController(CognitionDbContext db) => _db = db;
 
-    public record PersonaCreateRequest(
-        [property: Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
-        string Name,
-        [property: StringLength(128)]
-        string? Nickname,
-        [property: StringLength(256)]
-        string? Role,
-        [property: StringLength(64)]
-        string? Gender,
-        [property: StringLength(4000)]
-        string? Essence,
-        [property: StringLength(4000)]
-        string? Beliefs,
-        [property: StringLength(4000)]
-        string? Background,
-        [property: StringLength(4000)]
-        string? CommunicationStyle,
-        [property: StringLength(4000)]
-        string? EmotionalDrivers,
-        string[]? SignatureTraits,
-        string[]? NarrativeThemes,
-        string[]? DomainExpertise,
-        bool? IsPublic,
-        [property: StringLength(256)]
-        string? Voice);
+    public sealed class PersonaCreateRequest
+    {
+        [Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
+        public string Name { get; init; } = string.Empty;
+        [StringLength(128)]
+        public string? Nickname { get; init; }
+        [StringLength(256)]
+        public string? Role { get; init; }
+        [StringLength(64)]
+        public string? Gender { get; init; }
+        [StringLength(4000)]
+        public string? Essence { get; init; }
+        [StringLength(4000)]
+        public string? Beliefs { get; init; }
+        [StringLength(4000)]
+        public string? Background { get; init; }
+        [StringLength(4000)]
+        public string? CommunicationStyle { get; init; }
+        [StringLength(4000)]
+        public string? EmotionalDrivers { get; init; }
+        public string[]? SignatureTraits { get; init; }
+        public string[]? NarrativeThemes { get; init; }
+        public string[]? DomainExpertise { get; init; }
+        public bool? IsPublic { get; init; }
+        [StringLength(256)]
+        public string? Voice { get; init; }
+        public PersonaCreateRequest() { }
+        public PersonaCreateRequest(string name, string? nickname, string? role, string? gender, string? essence, string? beliefs, string? background, string? communicationStyle, string? emotionalDrivers, string[]? signatureTraits, string[]? narrativeThemes, string[]? domainExpertise, bool? isPublic, string? voice)
+        {
+            Name = name;
+            Nickname = nickname;
+            Role = role;
+            Gender = gender;
+            Essence = essence;
+            Beliefs = beliefs;
+            Background = background;
+            CommunicationStyle = communicationStyle;
+            EmotionalDrivers = emotionalDrivers;
+            SignatureTraits = signatureTraits;
+            NarrativeThemes = narrativeThemes;
+            DomainExpertise = domainExpertise;
+            IsPublic = isPublic;
+            Voice = voice;
+        }
+    }
 
-    public record VisibilityRequest(bool IsPublic);
-    public record GrantAccessRequest(
-        [property: NotEmptyGuid] Guid UserId,
-        bool IsDefault = false,
-        [property: StringLength(128)] string? Label = null);
-    public record PersonaUpdateRequest(
-        [property: StringLength(128, MinimumLength = 1), RegularExpression(@".*\S.*", ErrorMessage = "Name must contain non-whitespace characters when provided.")]
-        string? Name,
-        [property: StringLength(128)]
-        string? Nickname,
-        [property: StringLength(256)]
-        string? Role,
-        [property: StringLength(64)]
-        string? Gender,
-        [property: StringLength(4000)]
-        string? Essence,
-        [property: StringLength(4000)]
-        string? Beliefs,
-        [property: StringLength(4000)]
-        string? Background,
-        [property: StringLength(4000)]
-        string? CommunicationStyle,
-        [property: StringLength(4000)]
-        string? EmotionalDrivers,
-        string[]? SignatureTraits,
-        string[]? NarrativeThemes,
-        string[]? DomainExpertise,
-        bool? IsPublic,
-        [property: StringLength(256)]
-        string? Voice,
-        Cognition.Data.Relational.Modules.Personas.PersonaType? Type
-    );
+    public sealed class VisibilityRequest
+    {
+        public bool IsPublic { get; init; }
+        public VisibilityRequest() { }
+        public VisibilityRequest(bool isPublic) => IsPublic = isPublic;
+    }
+    public sealed class GrantAccessRequest
+    {
+        [NotEmptyGuid]
+        public Guid UserId { get; init; }
+        public bool IsDefault { get; init; }
+        [StringLength(128)]
+        public string? Label { get; init; }
+        public GrantAccessRequest() { }
+        public GrantAccessRequest(Guid userId, bool isDefault = false, string? label = null)
+        {
+            UserId = userId;
+            IsDefault = isDefault;
+            Label = label;
+        }
+    }
+    public sealed class PersonaUpdateRequest
+    {
+        [StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters when provided.")]
+        public string? Name { get; init; }
+        [StringLength(128)]
+        public string? Nickname { get; init; }
+        [StringLength(256)]
+        public string? Role { get; init; }
+        [StringLength(64)]
+        public string? Gender { get; init; }
+        [StringLength(4000)]
+        public string? Essence { get; init; }
+        [StringLength(4000)]
+        public string? Beliefs { get; init; }
+        [StringLength(4000)]
+        public string? Background { get; init; }
+        [StringLength(4000)]
+        public string? CommunicationStyle { get; init; }
+        [StringLength(4000)]
+        public string? EmotionalDrivers { get; init; }
+        public string[]? SignatureTraits { get; init; }
+        public string[]? NarrativeThemes { get; init; }
+        public string[]? DomainExpertise { get; init; }
+        public bool? IsPublic { get; init; }
+        [StringLength(256)]
+        public string? Voice { get; init; }
+        public Cognition.Data.Relational.Modules.Personas.PersonaType? Type { get; init; }
+        public PersonaUpdateRequest() { }
+        public PersonaUpdateRequest(string? name, string? nickname, string? role, string? gender, string? essence, string? beliefs, string? background, string? communicationStyle, string? emotionalDrivers, string[]? signatureTraits, string[]? narrativeThemes, string[]? domainExpertise, bool? isPublic, string? voice, Cognition.Data.Relational.Modules.Personas.PersonaType? type)
+        {
+            Name = name;
+            Nickname = nickname;
+            Role = role;
+            Gender = gender;
+            Essence = essence;
+            Beliefs = beliefs;
+            Background = background;
+            CommunicationStyle = communicationStyle;
+            EmotionalDrivers = emotionalDrivers;
+            SignatureTraits = signatureTraits;
+            NarrativeThemes = narrativeThemes;
+            DomainExpertise = domainExpertise;
+            IsPublic = isPublic;
+            Voice = voice;
+            Type = type;
+        }
+    }
 
     
     // Returns all personas with an IsOwner flag for the current user

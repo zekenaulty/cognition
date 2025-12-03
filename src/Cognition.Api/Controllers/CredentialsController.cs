@@ -20,7 +20,12 @@ public class CredentialsController : ControllerBase
     private readonly CognitionDbContext _db;
     public CredentialsController(CognitionDbContext db) => _db = db;
 
-    public record CreateRequest(Guid ProviderId, string KeyRef, string? Notes);
+    public sealed class CreateRequest
+    {
+        public Guid ProviderId { get; init; }
+        public string KeyRef { get; init; } = string.Empty;
+        public string? Notes { get; init; }
+    }
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] Guid? providerId, CancellationToken cancellationToken)
