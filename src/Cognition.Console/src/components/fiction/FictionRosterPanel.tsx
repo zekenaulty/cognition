@@ -32,6 +32,8 @@ type Props = {
   loreHistoryError?: string | null;
 };
 
+export type FictionRosterPanelProps = Props;
+
 export function FictionRosterPanel({
   roster,
   loading,
