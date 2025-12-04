@@ -138,7 +138,7 @@ export async function request<T>(path: string, options: RequestInit = {}, access
   let res: Response
   try {
     res = await fetch(url, { ...options, headers })
-  } catch (e: any) {
+  } catch {
     const hint = navigator.onLine ? '' : ' (offline)'
     throw new ApiError(`Network error contacting API${hint}`, url, undefined, undefined, true)
   }

@@ -195,10 +195,6 @@ export default function ChatPage() {
     }
   };
 
-  const handleGenerateImage = async () => {
-    await generateFromChat();
-  };
-
   const handleRememberLast = async () => {
     try {
       if (!accessToken || !conversationId) return;

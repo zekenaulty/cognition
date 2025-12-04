@@ -41,7 +41,7 @@ export default function MarkdownView({ content }: Props) {
           rehypeHighlight,
         ]}
         components={{
-          a({ node, href, ...props }) {
+          a({ node: _node, href, ...props }) {
             const url = String(href || '').trim();
             const lower = url.toLowerCase();
             const isHash = url.startsWith('#');

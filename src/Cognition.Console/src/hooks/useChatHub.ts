@@ -5,7 +5,6 @@ import {
   PlanReady,
   ToolExecutionRequested,
   ToolExecutionCompleted,
-  ChatBusEvent,
   AssistantTokenDelta,
 } from '../types/events';
 import { chatBus } from '../bus/chatBus';

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Stack, Card, CardContent, Alert, CircularProgress, Typography } from '@mui/material';
+import { Box, Card, CardContent, Alert, CircularProgress, Typography } from '@mui/material';
 import { PlanTimeline } from './PlanTimeline';
 import { ToolTrace } from './ToolTrace';
 import { MessageList } from './MessageList';

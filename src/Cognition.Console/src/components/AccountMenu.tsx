@@ -13,7 +13,6 @@ export default function AccountMenu() {
   const open = Boolean(anchor)
   const navigate = useNavigate()
 
-  const initials = auth?.username?.slice(0, 1).toUpperCase() || '?'
 
   return (
     <>

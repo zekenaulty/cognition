@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchConversations, fetchMessages } from '../api/client';
 import { normalizeRole } from '../utils/chat';
-import { useUserSettings } from './useUserSettings';
 
 type Conv = { id: string; title?: string | null; providerId?: string | null; modelId?: string | null };
 type Message = {
@@ -32,7 +31,6 @@ export function useConversationsMessages(accessToken: string, agentId: string | 
   const [conversations, setConversations] = useState<Conv[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const settings = useUserSettings();
 
   useEffect(() => {
     const loadConvs = async () => {

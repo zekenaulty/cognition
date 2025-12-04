@@ -74,14 +74,6 @@ export function FictionBacklogPanel({
   obligationActionError = null,
   personaContext = null
 }: Props) {
-  if (loading) {
-    return <LinearProgress />;
-  }
-
-  if (error) {
-    return <Alert severity="warning">{error}</Alert>;
-  }
-
   const backlogItems = items ?? [];
   const contractItems = React.useMemo(
     () => backlogItems.filter(item => (item.status ?? '').toString().toLowerCase() === 'contract'),
@@ -107,6 +99,14 @@ export function FictionBacklogPanel({
     });
     return map;
   }, [obligations]);
+
+  if (loading) {
+    return <LinearProgress />;
+  }
+
+  if (error) {
+    return <Alert severity="warning">{error}</Alert>;
+  }
 
   const renderTable = () => {
     if (backlogItems.length === 0) {
@@ -651,4 +651,3 @@ function formatIdFragment(value?: string | null) {
   const trimmed = value.replace(/-/g, '');
   return trimmed.length <= 8 ? trimmed : trimmed.slice(0, 8);
 }
-

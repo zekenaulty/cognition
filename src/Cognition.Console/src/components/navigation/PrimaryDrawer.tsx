@@ -1,5 +1,5 @@
 import React from 'react';
-import { Drawer, Box, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, Accordion, AccordionSummary, AccordionDetails, Tooltip, IconButton, Typography, Chip } from '@mui/material';
+import { Drawer, Box, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Accordion, AccordionSummary, AccordionDetails, Tooltip, IconButton, Typography, Chip } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import ImageIcon from '@mui/icons-material/Image';
 import WorkIcon from '@mui/icons-material/Work';

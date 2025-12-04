@@ -35,7 +35,7 @@ export function useImageActions(setMessages: (fn: (prev: any[]) => any[]) => voi
           : m
       ));
       setPendingImageId(null);
-    } catch (err) {
+    } catch {
       // Remove pending placeholder on error
       setMessages(prev => prev.filter(m => m.imageId !== localId));
       setPendingImageId(null);

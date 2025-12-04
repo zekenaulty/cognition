@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Box, IconButton, Popover, Tab, Tabs, TextField, Tooltip } from '@mui/material'
 import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions'
 // emoji-mart v5
@@ -73,4 +73,3 @@ export default function EmojiButton({ onInsert, onCloseFocus }: Props) {
     </>
   )
 }
-

@@ -8,7 +8,7 @@ Persist a global default LLM provider/model in the database, expose admin APIs/U
 - Out: Per-user defaults, per-agent overrides UI, CI wiring.
 
 ## Deliverables
-- Schema entry (table or GlobalDefault flag) storing providerId/modelId with audit fields.
+- Schema entry, table with active and priority flags, storing providerId/modelId with audit fields.
 - API endpoints: `GET /api/settings/llm-defaults`, `PATCH /api/settings/llm-defaults` (admin-only) with validation.
 - Chat resolver uses stored defaults before heuristics.
 - Admin settings page to view/change defaults (provider dropdown → models).
@@ -46,3 +46,37 @@ Persist a global default LLM provider/model in the database, expose admin APIs/U
 - [ ] Chat hook consumes stored defaults; hardcoded fallback demoted
 - [ ] Admin UI page to set defaults
 - [ ] Tests (unit/API/manual UI)
+
+
+Example POCO:
+```csharp
+using Cognition.Data.Relational.Modules.Common;
+
+namespace Cognition.Data.Relational.Modules.LLM;
+
+public sealed class LlmGlobalDefault : BaseEntity
+{
+    /// <summary>
+    /// The selected model that represents the global default.
+    /// Provider is reachable via Model.Provider.
+    /// </summary>
+    public Guid ModelId { get; set; }
+    public Model Model { get; set; } = null!;
+
+    /// <summary>
+    /// If false, this row is ignored by the resolver.
+    /// </summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Lower values win. Resolver takes the active row with the lowest priority.
+    /// </summary>
+    public int Priority { get; set; } = 0;
+
+    /// <summary>
+    /// Audit: who last changed this default (user id from your identity system).
+    /// </summary>
+    public Guid? UpdatedByUserId { get; set; }
+}
+
+```

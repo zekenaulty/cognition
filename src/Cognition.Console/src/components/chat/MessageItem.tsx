@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTts } from '../../hooks/useTts';
 import styles from './chat.module.css';
-import { Box, Typography, IconButton, Tooltip } from '@mui/material';
+import { Box, IconButton, Tooltip } from '@mui/material';
 import { FeedbackBar } from './FeedbackBar';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import RefreshIcon from '@mui/icons-material/Refresh';

@@ -35,3 +35,9 @@ Reduce `src/Cognition.Console/src/pages/PlannerTelemetryPage.tsx` from a monolit
 - [ ] Presentational components extracted
 - [ ] Page container simplified
 - [ ] Errors fixed; build succeeds
+
+## Turns (estimates)
+1) Inventory & boundaries (1 turn): map current state/props/errors; decide hook/component slices; no code moved yet.
+2) Data hooks (1–2 turns): create `usePlannerTelemetryData` and `usePlannerFilters`; wire page to hooks; keep UI inline for now.
+3) Presentational components (1–2 turns): extract charts/tables/cards into components; keep props minimal; verify renders.
+4) Cleanup & fixes (1 turn): tighten types, remove dead code, ensure build/type checks pass; manual page check.

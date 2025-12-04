@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Alert,
-  Box,
   Button,
   Dialog,
   DialogActions,
@@ -16,8 +15,7 @@ import {
   Select,
   Stack,
   Switch,
-  TextField,
-  Typography
+  TextField
 } from '@mui/material';
 import { ApiError, api, fictionApi, fetchModels, fetchProviders } from '../../api/client';
 import {

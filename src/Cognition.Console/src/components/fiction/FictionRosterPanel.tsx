@@ -42,26 +42,6 @@ export function FictionRosterPanel({
   loreHistoryLoading = false,
   loreHistoryError = null
 }: Props) {
-  if (loading) {
-    return <LinearProgress />;
-  }
-
-  if (error) {
-    return (
-      <Alert severity="warning">
-        {error}
-      </Alert>
-    );
-  }
-
-  if (!roster) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        {placeholder}
-      </Typography>
-    );
-  }
-
   const [fulfillingId, setFulfillingId] = React.useState<string | null>(null);
   const handleFulfillClick = React.useCallback(
     async (requirement: FictionLoreRequirementItem) => {
@@ -86,6 +66,26 @@ export function FictionRosterPanel({
     const all = Object.values(loreHistory).flat();
     return all.sort((a, b) => new Date(b.timestampUtc).getTime() - new Date(a.timestampUtc).getTime()).slice(0, 25);
   }, [loreHistory]);
+
+  if (loading) {
+    return <LinearProgress />;
+  }
+
+  if (error) {
+    return (
+      <Alert severity="warning">
+        {error}
+      </Alert>
+    );
+  }
+
+  if (!roster) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        {placeholder}
+      </Typography>
+    );
+  }
 
   return (
     <Stack spacing={3}>

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { api, LoginResponse } from '../api/client'
+import { api } from '../api/client'
 import { jwtDecode } from 'jwt-decode'
 
 type JwtPayload = { sub: string; unique_name?: string; primary_persona?: string; exp?: number; role?: string | string[]; [k: string]: any }
@@ -66,7 +66,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     const t = setTimeout(() => { refresh().catch(() => logout()) }, inMs)
     return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.accessToken, auth?.expiresAt])
 
   async function login(username: string, password: string) {
@@ -112,7 +111,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuth({ ...auth, primaryPersonaId: personaId })
   }
 
-  const value = useMemo<AuthContextValue>(() => ({ auth, isAuthenticated, login, logout, refresh, setPrimaryPersona }), [auth])
+  const value = useMemo<AuthContextValue>(
+    () => ({ auth, isAuthenticated, login, logout, refresh, setPrimaryPersona }),
+    [auth, isAuthenticated, login, logout, refresh, setPrimaryPersona]
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

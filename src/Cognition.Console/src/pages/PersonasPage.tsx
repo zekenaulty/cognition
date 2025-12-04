@@ -358,7 +358,7 @@ export default function PersonasPage() {
           setAgenticOpen(false);
           setAgenticLoading(false);
           return;
-        } catch (err) {
+        } catch {
           lastError = `Attempt ${attempt}: LLM did not return valid JSON. Raw reply: ${body.reply}`;
         }
       } catch (e: any) {

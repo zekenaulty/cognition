@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { api } from '../api/client'
-import { Alert, Box, Button, Card, CardContent, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from '@mui/material'
 import { PersonaForm, PersonaModel } from '../components/PersonaForm'
 
 export default function ProfilePage() {
-  const { auth, setPrimaryPersona } = useAuth()
-  const [personas, setPersonas] = useState<Array<{ id: string; name: string }>>([])
+  const { auth } = useAuth()
   const [saveOk, setSaveOk] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [email, setEmail] = useState<string>('')
@@ -15,9 +14,6 @@ export default function ProfilePage() {
 
   useEffect(() => {
     let mounted = true
-    api.listPersonas(auth?.accessToken)
-      .then(items => { if (mounted) setPersonas(items) })
-      .catch(e => setErr(e.message || 'Failed to load personas'))
     // Load user profile via /users/me
     if (auth) {
       api.me(auth.accessToken)
