@@ -29,6 +29,7 @@ public class CognitionDbContext : DbContext
     public DbSet<Model> Models => Set<Model>();
     public DbSet<ClientProfile> ClientProfiles => Set<ClientProfile>();
     public DbSet<ApiCredential> ApiCredentials => Set<ApiCredential>();
+    public DbSet<LlmGlobalDefault> LlmGlobalDefaults => Set<LlmGlobalDefault>();
 
     public DbSet<Instruction> Instructions => Set<Instruction>();
     public DbSet<InstructionSet> InstructionSets => Set<InstructionSet>();

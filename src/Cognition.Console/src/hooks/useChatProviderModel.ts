@@ -1,5 +1,5 @@
-import { useCallback, useEffect } from 'react';
-import { fetchConversationSettings, patchConversationSettings } from '../api/client';
+import { useCallback, useEffect, useState } from 'react';
+import { fetchConversationSettings, fetchLlmDefaults, patchConversationSettings } from '../api/client';
 import { useProvidersModels } from './useProvidersModels';
 
 const isGeminiLike = (name?: string, displayName?: string) => {
@@ -18,6 +18,7 @@ export function useChatProviderModel(
   conversations: any[],
   setConversations: (fn: (prev: any[]) => any[]) => void
 ) {
+  const [globalDefault, setGlobalDefault] = useState<{ providerId?: string; modelId?: string } | null>(null);
   const {
     providers,
     providerId,
@@ -40,40 +41,50 @@ export function useChatProviderModel(
     return (preferred ?? models[0]).id;
   }, [models]);
 
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetchLlmDefaults(accessToken);
+        if (cancelled) return;
+        setGlobalDefault({
+          providerId: resp?.providerId ?? undefined,
+          modelId: resp?.modelId ?? undefined,
+        });
+      } catch {
+        if (!cancelled) setGlobalDefault({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [accessToken]);
+
   // Force preferred defaults when no conversation is selected (new chat shell)
   useEffect(() => {
-    if (!conversationId) {
+    if (conversationId) return;
+    const defaultProvider = globalDefault?.providerId;
+    if (defaultProvider && providers.some(p => p.id === defaultProvider)) {
+      if (providerId !== defaultProvider) setProviderId(defaultProvider);
+      return;
+    }
+    if (!providerId) {
       const nextProvider = pickPreferredProvider();
       if (nextProvider) setProviderId(nextProvider);
+    }
+  }, [conversationId, globalDefault, providers, providerId, pickPreferredProvider, setProviderId]);
+
+  useEffect(() => {
+    if (conversationId) return;
+    const defaultModel = globalDefault?.modelId;
+    if (defaultModel && models.some(m => m.id === defaultModel)) {
+      if (modelId !== defaultModel) setModelId(defaultModel);
+      return;
+    }
+    if (!modelId) {
       const nextModel = pickPreferredModel();
       if (nextModel) setModelId(nextModel);
     }
-  }, [conversationId, pickPreferredProvider, pickPreferredModel, setModelId, setProviderId]);
-
-  // If a better preferred exists and current points to OpenAI, override for new chat shell
-  useEffect(() => {
-    if (conversationId) return;
-    const preferred = pickPreferredProvider();
-    if (preferred && providerId && preferred !== providerId) {
-      const current = providers.find(p => p.id === providerId);
-      const currentIsOpenAi = current && (current.name || '').toLowerCase().includes('openai');
-      if (currentIsOpenAi) {
-        setProviderId(preferred);
-      }
-    }
-  }, [conversationId, pickPreferredProvider, providerId, providers, setProviderId]);
-
-  useEffect(() => {
-    if (conversationId) return;
-    const preferred = pickPreferredModel();
-    if (preferred && modelId && preferred !== modelId) {
-      const current = models.find(m => m.id === modelId);
-      const currentIsOpenAi = current && (current.name || '').toLowerCase().includes('gpt');
-      if (currentIsOpenAi) {
-        setModelId(preferred);
-      }
-    }
-  }, [conversationId, pickPreferredModel, modelId, models, setModelId]);
+  }, [conversationId, globalDefault, modelId, models, pickPreferredModel, setModelId]);
 
   // Hydrate provider/model when entering a conversation
   useEffect(() => {
@@ -90,15 +101,21 @@ export function useChatProviderModel(
       try {
         const settingsResp = await fetchConversationSettings(accessToken, conversationId);
         if (cancelled) return;
-        if (settingsResp?.providerId) setProviderId(settingsResp.providerId);
-        if (settingsResp?.modelId) setModelId(settingsResp.modelId);
-        if (!settingsResp?.providerId) {
-          const next = pickPreferredProvider();
-          if (next) setProviderId(next);
+        if (settingsResp?.providerId) {
+          setProviderId(settingsResp.providerId);
+        } else {
+          const defaultProvider = globalDefault?.providerId && providers.some(p => p.id === globalDefault.providerId)
+            ? globalDefault.providerId
+            : pickPreferredProvider();
+          if (defaultProvider) setProviderId(defaultProvider);
         }
-        if (!settingsResp?.modelId) {
-          const nextModel = pickPreferredModel();
-          if (nextModel) setModelId(nextModel);
+        if (settingsResp?.modelId) {
+          setModelId(settingsResp.modelId);
+        } else {
+          const defaultModel = globalDefault?.modelId && models.some(m => m.id === globalDefault.modelId)
+            ? globalDefault.modelId
+            : pickPreferredModel();
+          if (defaultModel) setModelId(defaultModel);
         }
       } catch {
         // ignore
@@ -106,7 +123,7 @@ export function useChatProviderModel(
     };
     hydrate();
     return () => { cancelled = true; };
-  }, [accessToken, conversationId, conversations, pickPreferredModel, pickPreferredProvider, setModelId, setProviderId]);
+  }, [accessToken, conversationId, conversations, globalDefault, models, pickPreferredModel, pickPreferredProvider, providers, setModelId, setProviderId]);
 
   // Persist provider/model to conversation and conversation list
   useEffect(() => {

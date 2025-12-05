@@ -25,6 +25,7 @@ using Rebus.Config;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch;
 using Cognition.Clients.Configuration;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Api.Services;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using System.Globalization;
@@ -49,6 +50,7 @@ builder.Services.AddHttpClient("opensearch-bootstrap", (sp, client) =>
 });
 builder.Services.AddHttpClient("ops-alerts");
 builder.Services.AddCognitionTools();
+builder.Services.AddScoped<ILlmDefaultService, LlmDefaultService>();
 builder.Services.AddScoped<IPlannerHealthService, PlannerHealthService>();
 builder.Services.AddScoped<IOpenSearchBootstrapper, OpenSearchBootstrapper>();
 builder.Services.AddScoped<IOpenSearchDiagnosticsService, OpenSearchDiagnosticsService>();

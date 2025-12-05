@@ -10,6 +10,7 @@ using Cognition.Api.Infrastructure.Validation;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Common;
 using Cognition.Data.Relational.Modules.Conversations;
+using Cognition.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -24,7 +25,8 @@ public class ConversationsController : ControllerBase
 {
     private readonly CognitionDbContext _db;
     private readonly IHubContext<ChatHub> _hub;
-    public ConversationsController(CognitionDbContext db, IHubContext<ChatHub> hub) { _db = db; _hub = hub; }
+    private readonly ILlmDefaultService _llmDefaultService;
+    public ConversationsController(CognitionDbContext db, IHubContext<ChatHub> hub, ILlmDefaultService llmDefaultService) { _db = db; _hub = hub; _llmDefaultService = llmDefaultService; }
 
     public sealed class CreateConversationRequest
     {
@@ -535,7 +537,21 @@ public class ConversationsController : ControllerBase
 
     private async Task<(Guid? providerId, Guid? modelId)> ResolveDefaultLlmAsync(CancellationToken cancellationToken)
     {
-        // Prefer Gemini/Google providers and models containing flash/2.5/2.0
+        var defaultRow = await _db.LlmGlobalDefaults
+            .AsNoTracking()
+            .Include(d => d.Model)
+            .ThenInclude(m => m.Provider)
+            .Where(d => d.IsActive)
+            .OrderBy(d => d.Priority)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (defaultRow != null && defaultRow.Model is not null && defaultRow.Model.Provider is not null && defaultRow.Model.Provider.IsActive)
+        {
+            return (defaultRow.Model.ProviderId, defaultRow.ModelId);
+        }
+
+        // Fallback: prefer Gemini/Google providers and models containing flash/2.5/2.0
         var providers = await _db.Providers
             .AsNoTracking()
             .OrderBy(p => p.Name)

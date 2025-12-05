@@ -76,6 +76,37 @@ export async function fetchModels(accessToken: string, providerId: string): Prom
   if (res.ok) return await res.json();
   return [];
 }
+
+export type LlmDefaultsResponse = {
+  providerId?: string | null;
+  providerName?: string | null;
+  modelId?: string | null;
+  modelName?: string | null;
+  isActive?: boolean;
+  priority?: number;
+  updatedByUserId?: string | null;
+  updatedAtUtc?: string | null;
+};
+
+export async function fetchLlmDefaults(accessToken: string): Promise<LlmDefaultsResponse> {
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+  const res = await fetch('/api/settings/llm-defaults', { headers });
+  if (res.ok) return await res.json();
+  return {};
+}
+
+export async function updateLlmDefaults(accessToken: string, payload: { modelId: string; priority?: number; isActive?: boolean }) {
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+  await fetch('/api/settings/llm-defaults', {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({
+      ModelId: payload.modelId,
+      Priority: payload.priority ?? 0,
+      IsActive: payload.isActive ?? true,
+    }),
+  });
+}
 // Persona API client
 export async function fetchPersonas(accessToken: string, userId: string): Promise<any[]> {
   const headers = { Authorization: `Bearer ${accessToken}` };

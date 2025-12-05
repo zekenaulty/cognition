@@ -29,18 +29,14 @@ export function useProvidersModels(accessToken: string, initialProviderId: strin
       if (normProviders.length === 0) return;
 
       const preferred = normProviders.find(p => GEMINI_PREFERRED(p.name, p.displayName));
-
       const hasCurrent = providerId && normProviders.some(p => p.id === providerId);
-      const isCurrentOpenAI = providerId && normProviders.some(p => p.id === providerId && (p.name || '').toLowerCase().includes('openai'));
-
-      let next = providerId;
-      if (!hasCurrent || (isCurrentOpenAI && preferred)) {
-        next = (preferred ?? normProviders[0]).id;
+      if (!hasCurrent) {
+        const next = (preferred ?? normProviders[0]).id;
         setProviderId(next);
       }
     };
     loadProviders();
-  }, [accessToken]);
+  }, [accessToken, providerId]);
 
   useEffect(() => {
     const loadModels = async () => {
@@ -52,14 +48,13 @@ export function useProvidersModels(accessToken: string, initialProviderId: strin
 
       const preferred = normModels.find(m => FLASH_PREFERRED(m.name, m.displayName) || GEMINI_PREFERRED(m.name, m.displayName));
       const hasCurrent = modelId && normModels.some(m => m.id === modelId);
-      const isPreferredCurrent = modelId && preferred && preferred.id === modelId;
 
-      if (!hasCurrent || !isPreferredCurrent) {
+      if (!hasCurrent) {
         setModelId((preferred ?? normModels[0]).id);
       }
     };
     loadModels();
-  }, [accessToken, providerId]);
+  }, [accessToken, providerId, modelId]);
 
   return {
     providers,
