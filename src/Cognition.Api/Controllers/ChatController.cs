@@ -110,62 +110,6 @@ public class ChatController : ControllerBase
         public string Input { get; init; } = string.Empty;
     }
 
-/*
-
-    public record ChatRequest(
-        Guid ConversationId,
-        Guid PersonaId,
-        Guid ProviderId,
-        Guid? ModelId,
-        string Input);
-
-    [HttpPost("ask-chat")]
-    public async Task<IActionResult> AskChat([FromBody] ChatRequest req)
-    {
-        try
-        {
-            var reply = await _agents.ChatAsync(req.ConversationId, req.PersonaId, req.ProviderId, req.ModelId, req.Input, HttpContext.RequestAborted);
-            return Ok(new { reply });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(ApiErrorResponse.Create("conversation_not_found", ex.Message));
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, ApiErrorResponse.Create("chat_failed", ex.Message));
-        }
-    }
-
-    [HttpPost("ask-chat-v2")]
-    public async Task<IActionResult> AskChatV2([FromBody] ChatV2Request req, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var personaId = await _db.Conversations.AsNoTracking()
-                .Where(c => c.Id == req.ConversationId)
-                .Join(_db.Agents.AsNoTracking(), c => c.AgentId, a => a.Id, (c, a) => a.PersonaId)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (personaId == Guid.Empty)
-                return NotFound(ApiErrorResponse.Create("conversation_or_agent_not_found", "Conversation/Agent not found."));
-
-            var assistantContent = await _agents.ChatAsync(req.ConversationId, personaId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
-            if (string.IsNullOrWhiteSpace(assistantContent.Reply))
-            {
-                assistantContent.Reply = "(No reply...)";
-            }
-            return Accepted(new { ok = true, content = assistantContent });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(ApiErrorResponse.Create("conversation_not_found", ex.Message));
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, ApiErrorResponse.Create("ask_chat_v2_failed", ex.Message));
-        }
-    }
-*/
     [HttpPost("ask-chat")]
     public async Task<IActionResult> AskChat([FromBody] ChatRequest req, CancellationToken cancellationToken = default)
     {

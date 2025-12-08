@@ -24,6 +24,7 @@ public class LlmController : ControllerBase
     {
         var providers = await _db.Providers
             .AsNoTracking()
+            .Where(p => p.IsActive)
             .OrderBy(p => p.Name)
             .Select(p => new { p.Id, p.Name, p.DisplayName, p.BaseUrl, p.IsActive })
             .ToListAsync(cancellationToken);
@@ -35,7 +36,7 @@ public class LlmController : ControllerBase
     {
         var models = await _db.Models
             .AsNoTracking()
-            .Where(m => m.ProviderId == id)
+            .Where(m => m.ProviderId == id && !m.IsDeprecated)
             .OrderBy(m => m.Name)
             .Select(m => new {
                 m.Id, m.Name, m.DisplayName, m.SupportsVision, m.SupportsStreaming,
@@ -50,6 +51,7 @@ public class LlmController : ControllerBase
     {
         var q = _db.Models.AsNoTracking().AsQueryable();
         if (providerId.HasValue) q = q.Where(m => m.ProviderId == providerId.Value);
+        q = q.Where(m => !m.IsDeprecated);
         var models = await q
             .OrderBy(m => m.Name)
             .Select(m => new {

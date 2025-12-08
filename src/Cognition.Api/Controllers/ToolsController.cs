@@ -115,6 +115,11 @@ public class ToolsController : ControllerBase
         // Validate ClassPath is a resolvable ITool type
         if (!IsValidToolClassPath(normalizedClassPath, out var validationError))
             return BadRequest(ApiErrorResponse.Create("invalid_tool_class_path", validationError ?? "Invalid tool class path."));
+        if (req.ClientProfileId.HasValue)
+        {
+            var exists = await _db.ClientProfiles.AsNoTracking().AnyAsync(cp => cp.Id == req.ClientProfileId.Value, cancellationToken);
+            if (!exists) return BadRequest(ApiErrorResponse.Create("client_profile_not_found", "Client profile not found."));
+        }
         var tags = req.Tags is null
             ? null
             : req.Tags
@@ -174,7 +179,12 @@ public class ToolsController : ControllerBase
         if (req.Metadata != null) t.Metadata = req.Metadata as System.Collections.Generic.Dictionary<string, object?>;
         if (req.Example != null) t.Example = string.IsNullOrWhiteSpace(req.Example) ? null : req.Example.Trim();
         if (req.IsActive.HasValue) t.IsActive = req.IsActive.Value;
-        if (req.ClientProfileId.HasValue) t.ClientProfileId = req.ClientProfileId.Value;
+        if (req.ClientProfileId.HasValue)
+        {
+            var exists = await _db.ClientProfiles.AsNoTracking().AnyAsync(cp => cp.Id == req.ClientProfileId.Value, cancellationToken);
+            if (!exists) return BadRequest(ApiErrorResponse.Create("client_profile_not_found", "Client profile not found."));
+            t.ClientProfileId = req.ClientProfileId.Value;
+        }
         await _db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }

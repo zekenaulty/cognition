@@ -5,8 +5,10 @@ using System.Threading.Tasks;
 using Cognition.Api.Controllers;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
+using Cognition.Data.Relational;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Cognition.Api.Tests.Controllers;
@@ -18,14 +20,17 @@ public class ToolExecutionControllerTests
     {
         var dispatcher = new RecordingDispatcher();
         var services = new ServiceCollection().BuildServiceProvider();
-        var controller = new ToolExecutionController(dispatcher, services);
+        var db = new CognitionDbContext(new DbContextOptionsBuilder<CognitionDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var controller = new ToolExecutionController(dispatcher, services, db);
         var planId = Guid.NewGuid();
-        var request = new ToolExecutionController.ExecRequest(
-            Args: new Dictionary<string, object?>(),
-            AgentId: Guid.NewGuid(),
-            ConversationId: Guid.NewGuid(),
-            PersonaId: Guid.NewGuid(),
-            FictionPlanId: planId);
+        var request = new ToolExecutionController.ExecRequest
+        {
+            Args = new Dictionary<string, object?>(),
+            AgentId = Guid.NewGuid(),
+            ConversationId = Guid.NewGuid(),
+            PersonaId = Guid.NewGuid(),
+            FictionPlanId = planId
+        };
 
         await controller.Execute(Guid.NewGuid(), request, CancellationToken.None);
 
@@ -41,15 +46,18 @@ public class ToolExecutionControllerTests
     {
         var dispatcher = new RecordingDispatcher();
         var services = new ServiceCollection().BuildServiceProvider();
-        var controller = new ToolExecutionController(dispatcher, services);
+        var db = new CognitionDbContext(new DbContextOptionsBuilder<CognitionDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var controller = new ToolExecutionController(dispatcher, services, db);
         var existingPlan = Guid.NewGuid();
         var args = new Dictionary<string, object?> { ["planId"] = existingPlan };
-        var request = new ToolExecutionController.ExecRequest(
-            Args: args,
-            AgentId: Guid.NewGuid(),
-            ConversationId: Guid.NewGuid(),
-            PersonaId: Guid.NewGuid(),
-            FictionPlanId: Guid.NewGuid());
+        var request = new ToolExecutionController.ExecRequest
+        {
+            Args = args,
+            AgentId = Guid.NewGuid(),
+            ConversationId = Guid.NewGuid(),
+            PersonaId = Guid.NewGuid(),
+            FictionPlanId = Guid.NewGuid()
+        };
 
         await controller.Execute(Guid.NewGuid(), request, CancellationToken.None);
 
