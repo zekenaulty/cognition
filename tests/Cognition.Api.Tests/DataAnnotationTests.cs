@@ -103,7 +103,7 @@ public class DataAnnotationTests
     [Fact]
     public void AddMessageRequest_ShouldFail_WhenContentInvalidOrIdsEmpty()
     {
-        var model = new ConversationsController.AddMessageRequest(Guid.Empty, Guid.Empty, ChatRole.Assistant, " ", null);
+        var model = new Cognition.Api.Models.Conversations.AddMessageRequest(Guid.Empty, Guid.Empty, ChatRole.Assistant, " ", null);
         var results = Validate(model);
 
         Assert.Contains(results, r => r.ErrorMessage == "FromPersonaId must not be empty.");
@@ -114,10 +114,10 @@ public class DataAnnotationTests
     [Fact]
     public void AddVersionRequest_ShouldFail_WhenContentWhitespace()
     {
-        var model = new ConversationsController.AddVersionRequest(" ");
+        var model = new Cognition.Api.Models.Conversations.AddVersionRequest(" ");
         var results = Validate(model);
 
-        Assert.Contains(results, r => r.ErrorMessage?.Contains(nameof(ConversationsController.AddVersionRequest.Content)) == true);
+        Assert.Contains(results, r => r.ErrorMessage?.Contains(nameof(Cognition.Api.Models.Conversations.AddVersionRequest.Content)) == true);
     }
 
     [Fact]

@@ -17,6 +17,7 @@ using Rebus.Bus;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Conversations;
 using Cognition.Data.Relational.Modules.Fiction;
+using Cognition.Data.Relational.Modules.LLM;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -61,6 +62,10 @@ public class ChatController : ControllerBase
             var agentExists = await _db.Agents.AsNoTracking()
                 .AnyAsync(a => a.Id == req.AgentId, cancellationToken);
             if (!agentExists) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
+            if (!await ValidateProviderModel(req.ProviderId, req.ModelId, cancellationToken))
+            {
+                return BadRequest(ApiErrorResponse.Create("invalid_provider_or_model", "Provider/model pair is invalid or inactive."));
+            }
             var reply = await _agents.AskAsync(req.AgentId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
             return Ok(new { reply });
         }
@@ -78,6 +83,10 @@ public class ChatController : ControllerBase
             var agentExists = await _db.Agents.AsNoTracking()
                 .AnyAsync(a => a.Id == req.AgentId, cancellationToken);
             if (!agentExists) return NotFound(ApiErrorResponse.Create("agent_not_found", "Agent not found."));
+            if (!await ValidateProviderModel(req.ProviderId, req.ModelId, cancellationToken))
+            {
+                return BadRequest(ApiErrorResponse.Create("invalid_provider_or_model", "Provider/model pair is invalid or inactive."));
+            }
             var reply = await _agents.AskWithToolsAsync(req.AgentId, req.ProviderId, req.ModelId, req.Input, cancellationToken);
             return Ok(new { reply });
         }
@@ -168,6 +177,11 @@ public class ChatController : ControllerBase
             return NotFound(ApiErrorResponse.Create("conversation_or_agent_not_found", "Conversation/Agent not found."));
         }
 
+        if (!await ValidateProviderModel(req.ProviderId, req.ModelId, cancellationToken))
+        {
+            return BadRequest(ApiErrorResponse.Create("invalid_provider_or_model", "Provider/model pair is invalid or inactive."));
+        }
+
         var agentId = conversation.AgentId;
         var personaId = conversation.Agent.PersonaId;
 
@@ -234,6 +248,11 @@ public class ChatController : ControllerBase
         if (fictionPlan is null)
         {
             return NotFound(ApiErrorResponse.Create("fiction_plan_not_found", "Fiction plan not found."));
+        }
+
+        if (!await ValidateProviderModel(req.ProviderId, req.ModelId, cancellationToken))
+        {
+            return BadRequest(ApiErrorResponse.Create("invalid_provider_or_model", "Provider/model pair is invalid or inactive."));
         }
 
         var planFromAgentId = conversation.AgentId;
@@ -340,6 +359,16 @@ public class ChatController : ControllerBase
             WorldId: null);
         var ok = await retrieval.WriteAsync(scope, req.Content, req.Metadata ?? new(), cancellationToken);
         return Ok(new { ok });
+    }
+
+    private async Task<bool> ValidateProviderModel(Guid providerId, Guid? modelId, CancellationToken ct)
+    {
+        var provider = await _db.Set<Provider>().AsNoTracking().FirstOrDefaultAsync(p => p.Id == providerId && p.IsActive, ct);
+        if (provider is null) return false;
+        if (modelId is null) return true;
+        var model = await _db.Set<Model>().AsNoTracking().FirstOrDefaultAsync(m => m.Id == modelId.Value, ct);
+        if (model is null) return false;
+        return model.ProviderId == providerId && !model.IsDeprecated;
     }
 }
 
