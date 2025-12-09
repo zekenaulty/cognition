@@ -82,6 +82,27 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
             return;
         }
 
+        // Atomic claim: only proceed if we can move Pending -> InProgress for this item
+        var claimed = await _db.FictionPlanBacklogItems
+            .Where(x => x.Id == readyItem.Id && x.Status == FictionPlanBacklogStatus.Pending)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(i => i.Status, FictionPlanBacklogStatus.InProgress)
+                .SetProperty(i => i.InProgressAtUtc, DateTime.UtcNow)
+                .SetProperty(i => i.UpdatedAtUtc, DateTime.UtcNow),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (claimed == 0)
+        {
+            _logger.LogWarning("Backlog item {BacklogId} could not be claimed (already in progress or complete).", readyItem.BacklogId);
+            return;
+        }
+
+        // Reload the claimed item to ensure tracking reflects current state
+        readyItem = await _db.FictionPlanBacklogItems
+            .FirstAsync(x => x.Id == readyItem.Id, cancellationToken)
+            .ConfigureAwait(false);
+
         var phase = ResolvePhase(readyItem);
         if (phase is null)
         {
@@ -101,7 +122,6 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
 
         var conversationTask = await FindConversationTaskAsync(conversationPlanId, readyItem.BacklogId, cancellationToken).ConfigureAwait(false);
         UpdateConversationTaskMetadata(conversationTask, plan, readyItem, branch, providerId, modelId, context, conversationPlanId);
-        MarkBacklogInProgress(readyItem);
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         var metadata = BuildMetadata(context.Metadata, readyItem);
@@ -281,6 +301,22 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
 
         foreach (var item in staleItems)
         {
+            // Guard: only reset items still marked InProgress
+            var resetCount = await _db.FictionPlanBacklogItems
+                .Where(x => x.Id == item.Id && x.Status == FictionPlanBacklogStatus.InProgress)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(i => i.Status, FictionPlanBacklogStatus.Pending)
+                    .SetProperty(i => i.InProgressAtUtc, (DateTime?)null)
+                    .SetProperty(i => i.CompletedAtUtc, (DateTime?)null)
+                    .SetProperty(i => i.UpdatedAtUtc, now),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (resetCount == 0)
+            {
+                continue;
+            }
+
             var previousTimestamp = item.UpdatedAtUtc ?? item.InProgressAtUtc ?? item.CreatedAtUtc;
             var age = now - previousTimestamp;
 
@@ -320,11 +356,6 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
                     task.AgentId ??= context.AgentId == Guid.Empty ? task.AgentId : context.AgentId;
                 }
             }
-
-            item.Status = FictionPlanBacklogStatus.Pending;
-            item.InProgressAtUtc = null;
-            item.CompletedAtUtc = null;
-            item.UpdatedAtUtc = now;
 
             plan.CurrentConversationPlanId ??= resolvedConversationPlanId;
 

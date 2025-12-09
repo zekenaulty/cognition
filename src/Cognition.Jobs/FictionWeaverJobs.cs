@@ -249,6 +249,19 @@ public class FictionWeaverJobs
 
             _logger.LogInformation("Lore requirement {RequirementId} auto-fulfilled and linked to world bible entry {EntryId}.", requirement.Id, entry.Id);
         }
+        catch (DbUpdateException dbx)
+        {
+            // Handle concurrent fulfillment: if entry already exists/linked, swallow; otherwise rethrow
+            await _db.Entry(requirement).ReloadAsync(cancellationToken).ConfigureAwait(false);
+            if (requirement.WorldBibleEntryId.HasValue)
+            {
+                _logger.LogWarning("Lore requirement {RequirementId} already fulfilled concurrently; skipping duplicate.", requirement.Id);
+                return;
+            }
+
+            _logger.LogWarning(dbx, "Lore fulfillment unique constraint hit for requirement {RequirementId}; rethrowing.", requirement.Id);
+            throw;
+        }
         catch (Exception ex)
         {
             var failurePayload = BuildLoreAutomationEventPayload(
@@ -483,6 +496,12 @@ public class FictionWeaverJobs
             var progressStatus = isCancellation ? "cancelled" : "failed";
             checkpoint.Progress = BuildProgressSnapshot(phase, effectiveContext, progressStatus, failureSummary, null, isCancellation ? null : ex, startedAtUtc);
             checkpoint.Status = isCancellation ? FictionPlanCheckpointStatus.Cancelled : FictionPlanCheckpointStatus.Pending;
+
+            if (!string.IsNullOrEmpty(backlogItemId))
+            {
+                // Return backlog to pending so it can be retried
+                await SetBacklogStatusAsync(plan.Id, backlogItemId!, FictionPlanBacklogStatus.Pending, phase, effectiveContext, "phase-error", cancellationToken).ConfigureAwait(false);
+            }
 
             UpdateConversationTaskStatus(conversationTask, isCancellation ? "Cancelled" : "Failed", null, failureSummary);
 
