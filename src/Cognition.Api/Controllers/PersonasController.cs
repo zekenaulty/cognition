@@ -1,11 +1,11 @@
 using System;
-using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cognition.Api.Infrastructure.Security;
-using Cognition.Api.Infrastructure.Validation;
 using Cognition.Api.Infrastructure.ErrorHandling;
+using Cognition.Api.Models.Personas;
+using Cognition.Api.Services.Personas;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Users;
@@ -21,121 +21,11 @@ namespace Cognition.Api.Controllers;
 public class PersonasController : ControllerBase
 {
     private readonly CognitionDbContext _db;
-    public PersonasController(CognitionDbContext db) => _db = db;
-
-    public sealed class PersonaCreateRequest
+    private readonly IPersonaAccessService _personaAccess;
+    public PersonasController(CognitionDbContext db, IPersonaAccessService personaAccess)
     {
-        [Required, StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters.")]
-        public string Name { get; init; } = string.Empty;
-        [StringLength(128)]
-        public string? Nickname { get; init; }
-        [StringLength(256)]
-        public string? Role { get; init; }
-        [StringLength(64)]
-        public string? Gender { get; init; }
-        [StringLength(4000)]
-        public string? Essence { get; init; }
-        [StringLength(4000)]
-        public string? Beliefs { get; init; }
-        [StringLength(4000)]
-        public string? Background { get; init; }
-        [StringLength(4000)]
-        public string? CommunicationStyle { get; init; }
-        [StringLength(4000)]
-        public string? EmotionalDrivers { get; init; }
-        public string[]? SignatureTraits { get; init; }
-        public string[]? NarrativeThemes { get; init; }
-        public string[]? DomainExpertise { get; init; }
-        public bool? IsPublic { get; init; }
-        [StringLength(256)]
-        public string? Voice { get; init; }
-        public PersonaCreateRequest() { }
-        public PersonaCreateRequest(string name, string? nickname, string? role, string? gender, string? essence, string? beliefs, string? background, string? communicationStyle, string? emotionalDrivers, string[]? signatureTraits, string[]? narrativeThemes, string[]? domainExpertise, bool? isPublic, string? voice)
-        {
-            Name = name;
-            Nickname = nickname;
-            Role = role;
-            Gender = gender;
-            Essence = essence;
-            Beliefs = beliefs;
-            Background = background;
-            CommunicationStyle = communicationStyle;
-            EmotionalDrivers = emotionalDrivers;
-            SignatureTraits = signatureTraits;
-            NarrativeThemes = narrativeThemes;
-            DomainExpertise = domainExpertise;
-            IsPublic = isPublic;
-            Voice = voice;
-        }
-    }
-
-    public sealed class VisibilityRequest
-    {
-        public bool IsPublic { get; init; }
-        public VisibilityRequest() { }
-        public VisibilityRequest(bool isPublic) => IsPublic = isPublic;
-    }
-    public sealed class GrantAccessRequest
-    {
-        [NotEmptyGuid]
-        public Guid UserId { get; init; }
-        public bool IsDefault { get; init; }
-        [StringLength(128)]
-        public string? Label { get; init; }
-        public GrantAccessRequest() { }
-        public GrantAccessRequest(Guid userId, bool isDefault = false, string? label = null)
-        {
-            UserId = userId;
-            IsDefault = isDefault;
-            Label = label;
-        }
-    }
-    public sealed class PersonaUpdateRequest
-    {
-        [StringLength(128, MinimumLength = 1), RegularExpression(@".*\\S.*", ErrorMessage = "Name must contain non-whitespace characters when provided.")]
-        public string? Name { get; init; }
-        [StringLength(128)]
-        public string? Nickname { get; init; }
-        [StringLength(256)]
-        public string? Role { get; init; }
-        [StringLength(64)]
-        public string? Gender { get; init; }
-        [StringLength(4000)]
-        public string? Essence { get; init; }
-        [StringLength(4000)]
-        public string? Beliefs { get; init; }
-        [StringLength(4000)]
-        public string? Background { get; init; }
-        [StringLength(4000)]
-        public string? CommunicationStyle { get; init; }
-        [StringLength(4000)]
-        public string? EmotionalDrivers { get; init; }
-        public string[]? SignatureTraits { get; init; }
-        public string[]? NarrativeThemes { get; init; }
-        public string[]? DomainExpertise { get; init; }
-        public bool? IsPublic { get; init; }
-        [StringLength(256)]
-        public string? Voice { get; init; }
-        public Cognition.Data.Relational.Modules.Personas.PersonaType? Type { get; init; }
-        public PersonaUpdateRequest() { }
-        public PersonaUpdateRequest(string? name, string? nickname, string? role, string? gender, string? essence, string? beliefs, string? background, string? communicationStyle, string? emotionalDrivers, string[]? signatureTraits, string[]? narrativeThemes, string[]? domainExpertise, bool? isPublic, string? voice, Cognition.Data.Relational.Modules.Personas.PersonaType? type)
-        {
-            Name = name;
-            Nickname = nickname;
-            Role = role;
-            Gender = gender;
-            Essence = essence;
-            Beliefs = beliefs;
-            Background = background;
-            CommunicationStyle = communicationStyle;
-            EmotionalDrivers = emotionalDrivers;
-            SignatureTraits = signatureTraits;
-            NarrativeThemes = narrativeThemes;
-            DomainExpertise = domainExpertise;
-            IsPublic = isPublic;
-            Voice = voice;
-            Type = type;
-        }
+        _db = db;
+        _personaAccess = personaAccess;
     }
 
     
@@ -145,22 +35,7 @@ public class PersonasController : ControllerBase
     {
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
-        var q = _db.Personas.AsNoTracking().AsQueryable();
-        if (publicOnly == true) q = q.Where(p => p.IsPublic);
-        var items = await q
-            .OrderBy(p => p.Name)
-            .Select(p => new
-            {
-                p.Id,
-                p.Name,
-                p.Nickname,
-                p.Role,
-                p.IsPublic,
-                p.Type,
-                p.OwnedBy,
-                IsOwner = _db.UserPersonas.Any(up => up.UserId == caller && up.PersonaId == p.Id && up.IsOwner)
-            })
-            .ToListAsync(cancellationToken);
+        var items = await _personaAccess.ListWithOwnershipAsync(caller, publicOnly == true, cancellationToken);
         return Ok(items);
     }
 
@@ -169,12 +44,7 @@ public class PersonasController : ControllerBase
     [Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
     public async Task<IActionResult> ListSystem([FromQuery] bool? publicOnly, CancellationToken cancellationToken = default)
     {
-        var q = _db.Personas.AsNoTracking().Where(p => p.OwnedBy == OwnedBy.System);
-        if (publicOnly == true) q = q.Where(p => p.IsPublic);
-        var items = await q
-            .OrderBy(p => p.Name)
-            .Select(p => new { p.Id, p.Name, p.Nickname, p.Role, p.IsPublic, p.Type, p.OwnedBy })
-            .ToListAsync(cancellationToken);
+        var items = await _personaAccess.ListSystemAsync(publicOnly == true, cancellationToken);
         return Ok(items);
     }
 
@@ -198,25 +68,7 @@ public class PersonasController : ControllerBase
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
         var isAdmin = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator);
 
-        var linkedIds = await _db.UserPersonas.AsNoTracking()
-            .Where(up => up.UserId == caller)
-            .Select(up => up.PersonaId)
-            .ToListAsync(cancellationToken);
-        var primaryId = await _db.Users.AsNoTracking()
-            .Where(u => u.Id == caller)
-            .Select(u => u.PrimaryPersonaId)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        var ids = new HashSet<Guid>(linkedIds);
-        if (primaryId.HasValue) ids.Add(primaryId.Value);
-
-        var q = _db.Personas.AsNoTracking()
-            .Where(p => ids.Contains(p.Id) || (isAdmin && p.OwnedBy == OwnedBy.System));
-        if (publicOnly == true) q = q.Where(p => p.IsPublic);
-        var items = await q
-            .OrderBy(p => p.Name)
-            .Select(p => new { p.Id, p.Name, p.Nickname, p.Role, p.IsPublic, p.Type })
-            .ToListAsync(cancellationToken);
+        var items = await _personaAccess.ListForUserAsync(caller, isAdmin, publicOnly == true, cancellationToken);
         return Ok(items);
     }
 
@@ -230,9 +82,7 @@ public async Task<IActionResult> Update(Guid id, [FromBody] PersonaUpdateRequest
     var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     if (!Guid.TryParse(sub, out var caller)) return Forbid();
 
-    var canEdit = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
-        || (p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
-            .AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner, cancellationToken));
+    var canEdit = await _personaAccess.CanEditAsync(p, caller, role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator), cancellationToken);
     if (!canEdit) return Forbid();
 
     var isAdmin = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator);
@@ -447,72 +297,67 @@ public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToke
     [HttpPatch("{id:guid}/visibility")]
     public async Task<IActionResult> SetVisibility(Guid id, [FromBody] VisibilityRequest req, CancellationToken cancellationToken = default)
     {
-        var p = await _db.Personas.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        if (p == null) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
         var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
         if (!Guid.TryParse(sub, out var caller)) return Forbid();
-        var can = role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
-                  || (p.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
-                      .AnyAsync(up => up.UserId == caller && up.PersonaId == id && up.IsOwner, cancellationToken));
-        if (!can) return Forbid();
-        p.IsPublic = req.IsPublic;
-        p.UpdatedAtUtc = DateTime.UtcNow;
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _personaAccess.SetVisibilityAsync(id, req.IsPublic, caller, role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator), cancellationToken);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
         return NoContent();
     }
 
     [HttpPost("{id:guid}/access")]
     public async Task<IActionResult> GrantAccess(Guid id, [FromBody] GrantAccessRequest req, CancellationToken cancellationToken = default)
     {
-        if (!await _db.Personas.AnyAsync(p => p.Id == id, cancellationToken)) return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
-        if (!await _db.Users.AnyAsync(u => u.Id == req.UserId, cancellationToken)) return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
-        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id, cancellationToken);
-        var sub2 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        var role2 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (!Guid.TryParse(sub2, out var caller2)) return Forbid();
-        var canAccess = role2 == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
-                        || (persona.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
-                            .AnyAsync(up => up.UserId == caller2 && up.PersonaId == id && up.IsOwner, cancellationToken));
-        if (!canAccess) return Forbid();
-
-        var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == req.UserId && x.PersonaId == id, cancellationToken);
-        if (link == null)
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller)) return Forbid();
+        try
         {
-            link = new UserPersonas
-            {
-                UserId = req.UserId,
-                PersonaId = id,
-                IsDefault = req.IsDefault,
-                Label = string.IsNullOrWhiteSpace(req.Label) ? null : req.Label.Trim()
-            };
-            _db.UserPersonas.Add(link);
+            var linkId = await _personaAccess.GrantAccessAsync(id, req.UserId, req.IsDefault, req.Label, caller, role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator), cancellationToken);
+            return Ok(new { Id = linkId });
         }
-        else
+        catch (KeyNotFoundException ex) when (ex.Message == "persona_not_found")
         {
-            link.IsDefault = req.IsDefault;
-            link.Label = string.IsNullOrWhiteSpace(req.Label) ? null : req.Label.Trim();
-            link.UpdatedAtUtc = DateTime.UtcNow;
+            return NotFound(ApiErrorResponse.Create("persona_not_found", "Persona not found."));
         }
-        await _db.SaveChangesAsync(cancellationToken);
-        return Ok(new { link.Id });
+        catch (KeyNotFoundException ex) when (ex.Message == "user_not_found")
+        {
+            return NotFound(ApiErrorResponse.Create("user_not_found", "User not found."));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
     }
 
     [HttpDelete("{id:guid}/access/{userId:guid}")]
     public async Task<IActionResult> RevokeAccess(Guid id, Guid userId, CancellationToken cancellationToken = default)
     {
-        var link = await _db.UserPersonas.FirstOrDefaultAsync(x => x.UserId == userId && x.PersonaId == id, cancellationToken);
-        if (link == null) return NotFound(ApiErrorResponse.Create("persona_access_link_not_found", "Persona access link not found."));
-        var persona = await _db.Personas.AsNoTracking().FirstAsync(p => p.Id == id, cancellationToken);
-        var sub3 = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        var role3 = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-        if (!Guid.TryParse(sub3, out var caller3)) return Forbid();
-        var canAccess3 = role3 == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator)
-                         || (persona.OwnedBy == OwnedBy.User && await _db.UserPersonas.AsNoTracking()
-                             .AnyAsync(up => up.UserId == caller3 && up.PersonaId == id && up.IsOwner, cancellationToken));
-        if (!canAccess3) return Forbid();
-        _db.UserPersonas.Remove(link);
-        await _db.SaveChangesAsync(cancellationToken);
+        var sub = User.FindFirst("sub")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        if (!Guid.TryParse(sub, out var caller)) return Forbid();
+        try
+        {
+            await _personaAccess.RevokeAccessAsync(id, userId, caller, role == nameof(Cognition.Data.Relational.Modules.Users.UserRole.Administrator), cancellationToken);
+        }
+        catch (KeyNotFoundException ex) when (ex.Message == "persona_access_link_not_found")
+        {
+            return NotFound(ApiErrorResponse.Create("persona_access_link_not_found", "Persona access link not found."));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
         return NoContent();
     }
 }

@@ -27,6 +27,7 @@ using Cognition.Clients.Configuration;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Api.Services;
 using Cognition.Api.Services.Conversations;
+using Cognition.Api.Services.Personas;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using System.Globalization;
@@ -56,6 +57,7 @@ builder.Services.AddScoped<IConversationSettingsService, ConversationSettingsSer
 builder.Services.AddScoped<IConversationAccessService, ConversationAccessService>();
 builder.Services.AddScoped<IConversationFactory, ConversationFactory>();
 builder.Services.AddScoped<IConversationMessagesService, ConversationMessagesService>();
+builder.Services.AddScoped<IPersonaAccessService, PersonaAccessService>();
 builder.Services.AddScoped<IPlannerHealthService, PlannerHealthService>();
 builder.Services.AddScoped<IOpenSearchBootstrapper, OpenSearchBootstrapper>();
 builder.Services.AddScoped<IOpenSearchDiagnosticsService, OpenSearchDiagnosticsService>();

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Cognition.Api.Controllers;
 
-[Authorize(Policy = AuthorizationPolicies.UserOrHigher)]
+[Authorize(Policy = AuthorizationPolicies.AdministratorOnly)]
 [ApiController]
 [Route("api/diagnostics/planner")]
 public sealed class PlannerDiagnosticsController : ControllerBase

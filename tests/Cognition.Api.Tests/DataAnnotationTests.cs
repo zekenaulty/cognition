@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.ComponentModel.DataAnnotations;
 using Cognition.Api.Controllers;
+using Cognition.Api.Models.Personas;
 using Cognition.Api.Infrastructure.Validation;
 using Cognition.Data.Relational.Modules.Common;
 using Xunit;
@@ -76,16 +77,16 @@ public class DataAnnotationTests
     [Fact]
     public void PersonaCreateRequest_ShouldFail_WhenNameWhitespace()
     {
-        var model = new PersonasController.PersonaCreateRequest("  ", null, null, null, null, null, null, null, null, null, null, null, null, null);
+        var model = new PersonaCreateRequest("  ", null, null, null, null, null, null, null, null, null, null, null, null, null);
         var results = Validate(model);
 
-        Assert.Contains(results, r => r.ErrorMessage?.Contains(nameof(PersonasController.PersonaCreateRequest.Name)) == true);
+        Assert.Contains(results, r => r.ErrorMessage?.Contains(nameof(PersonaCreateRequest.Name)) == true);
     }
 
     [Fact]
     public void GrantAccessRequest_ShouldFail_WhenUserIdEmpty()
     {
-        var model = new PersonasController.GrantAccessRequest(Guid.Empty, false, "label");
+        var model = new GrantAccessRequest(Guid.Empty, false, "label");
         var results = Validate(model);
 
         Assert.Contains(results, r => r.ErrorMessage == "UserId must not be empty.");
@@ -94,10 +95,10 @@ public class DataAnnotationTests
     [Fact]
     public void PersonaUpdateRequest_ShouldFail_WhenNameWhitespace()
     {
-        var model = new PersonasController.PersonaUpdateRequest(" ", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        var model = new PersonaUpdateRequest(" ", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         var results = Validate(model);
 
-        Assert.Contains(results, r => r.ErrorMessage?.Contains(nameof(PersonasController.PersonaUpdateRequest.Name)) == true);
+        Assert.Contains(results, r => r.ErrorMessage?.Contains(nameof(PersonaUpdateRequest.Name)) == true);
     }
 
     [Fact]
