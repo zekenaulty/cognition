@@ -20,15 +20,12 @@ namespace Cognition.Jobs
 
         public async Task StartAsync()
         {
-            await _connection.StartAsync();
+            await EnsureConnectedAsync();
         }
 
         public async Task NotifyAssistantMessageAsync(Guid conversationId, Guid personaId, string content, Guid? messageId = null)
         {
-            if (_connection.State != HubConnectionState.Connected)
-            {
-                await _connection.StartAsync();
-            }
+            if (!await EnsureConnectedAsync().ConfigureAwait(false)) return;
 
             if (messageId.HasValue)
             {
@@ -42,22 +39,36 @@ namespace Cognition.Jobs
 
         public async Task NotifyAssistantDeltaAsync(Guid conversationId, Guid personaId, string delta)
         {
-            if (_connection.State != HubConnectionState.Connected)
-            {
-                await _connection.StartAsync();
-            }
+            if (!await EnsureConnectedAsync().ConfigureAwait(false)) return;
 
             await _connection.InvokeAsync("SendAssistantDelta", conversationId.ToString(), personaId.ToString(), delta);
         }
 
         public async Task NotifyPlanProgressAsync(Guid conversationId, object payload)
         {
-            if (_connection.State != HubConnectionState.Connected)
-            {
-                await _connection.StartAsync();
-            }
+            if (!await EnsureConnectedAsync().ConfigureAwait(false)) return;
 
             await _connection.InvokeAsync("SendPlanProgress", conversationId.ToString(), payload);
+        }
+
+        private async Task<bool> EnsureConnectedAsync()
+        {
+            if (_connection.State == HubConnectionState.Connected)
+            {
+                return true;
+            }
+
+            try
+            {
+                await _connection.StartAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"SignalRNotifier: failed to connect to {_hubUrl}: {ex.Message}");
+                return false;
+            }
+
+            return _connection.State == HubConnectionState.Connected;
         }
     }
 }

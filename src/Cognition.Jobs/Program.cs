@@ -1,6 +1,7 @@
 using Cognition.Jobs;
 using Cognition.Data.Relational;
 using Cognition.Clients;
+using Cognition.Data.Vectors.OpenSearch.OpenSearch;
 using Cognition.Clients.Tools.Fiction.Lifecycle;
 using Cognition.Clients.Tools.Planning;
 using Hangfire;
@@ -76,7 +77,9 @@ builder.Services.AddRebus(config =>
 // Register Db + clients so jobs can use the same services as API
 builder.Services.AddCognitionDb(builder.Configuration);
 builder.Services.AddCognitionClients();
+builder.Services.AddCognitionOpenSearchVectors(builder.Configuration);
 builder.Services.AddCognitionTools();
+builder.Services.AddScoped<Cognition.Clients.Retrieval.IRetrievalService, Cognition.Clients.Retrieval.RetrievalService>();
 builder.Services.AddScoped<IFictionWeaverJobClient, FictionWeaverJobClient>();
 builder.Services.AddTransient<IFictionBacklogScheduler, FictionBacklogScheduler>();
 builder.Services.AddOptions<PlannerQuotaOptions>()

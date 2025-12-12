@@ -1,11 +1,19 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Cognition.Data.Relational.Modules.Common;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using System.Text.Json;
 
 namespace Cognition.Data.Relational.Modules.Conversations;
 
 public class ConversationConfiguration : IEntityTypeConfiguration<Conversation>
 {
+    private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly ValueConverter<Dictionary<string, object?>?, string?> _dictConverter =
+        new(
+            v => v == null ? null : JsonSerializer.Serialize(v, _jsonOptions),
+            v => string.IsNullOrWhiteSpace(v) ? null : JsonSerializer.Deserialize<Dictionary<string, object?>>(v!, _jsonOptions));
+
     public void Configure(EntityTypeBuilder<Conversation> b)
     {
         b.ToTable("conversations");
@@ -14,7 +22,7 @@ public class ConversationConfiguration : IEntityTypeConfiguration<Conversation>
         b.Property(x => x.Title).HasColumnName("title");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
-        b.Property(x => x.Metadata).HasColumnName("metadata").HasColumnType("jsonb");
+        b.Property(x => x.Metadata).HasColumnName("metadata").HasColumnType("jsonb").HasConversion(_dictConverter);
         b.Property(x => x.AgentId).HasColumnName("agent_id");
         b.HasOne(x => x.Agent).WithMany().HasForeignKey(x => x.AgentId).HasConstraintName("fk_conversations_agents");
         b.HasIndex(x => x.AgentId);

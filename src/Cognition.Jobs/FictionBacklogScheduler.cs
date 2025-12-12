@@ -83,14 +83,36 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         }
 
         // Atomic claim: only proceed if we can move Pending -> InProgress for this item
-        var claimed = await _db.FictionPlanBacklogItems
-            .Where(x => x.Id == readyItem.Id && x.Status == FictionPlanBacklogStatus.Pending)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(i => i.Status, FictionPlanBacklogStatus.InProgress)
-                .SetProperty(i => i.InProgressAtUtc, DateTime.UtcNow)
-                .SetProperty(i => i.UpdatedAtUtc, DateTime.UtcNow),
-                cancellationToken)
-            .ConfigureAwait(false);
+        int claimed;
+        var providerName = _db.Database.ProviderName ?? string.Empty;
+        var isInMemory = providerName.IndexOf("InMemory", StringComparison.OrdinalIgnoreCase) >= 0;
+        if (isInMemory)
+        {
+            var pending = backlogItems.FirstOrDefault(x => x.Id == readyItem.Id);
+            if (pending != null && pending.Status == FictionPlanBacklogStatus.Pending)
+            {
+                pending.Status = FictionPlanBacklogStatus.InProgress;
+                pending.InProgressAtUtc = DateTime.UtcNow;
+                pending.UpdatedAtUtc = DateTime.UtcNow;
+                claimed = 1;
+                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                claimed = 0;
+            }
+        }
+        else
+        {
+            claimed = await _db.FictionPlanBacklogItems
+                .Where(x => x.Id == readyItem.Id && x.Status == FictionPlanBacklogStatus.Pending)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(i => i.Status, FictionPlanBacklogStatus.InProgress)
+                    .SetProperty(i => i.InProgressAtUtc, DateTime.UtcNow)
+                    .SetProperty(i => i.UpdatedAtUtc, DateTime.UtcNow),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         if (claimed == 0)
         {
@@ -260,6 +282,8 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
 
         var now = DateTime.UtcNow;
         var cutoff = now - BacklogResumeThreshold;
+        var providerName = _db.Database.ProviderName ?? string.Empty;
+        var isInMemory = providerName.IndexOf("InMemory", StringComparison.OrdinalIgnoreCase) >= 0;
         var staleItems = backlogItems
             .Where(item => item.Status == FictionPlanBacklogStatus.InProgress)
             .Where(item =>
@@ -302,15 +326,35 @@ public sealed class FictionBacklogScheduler : IFictionBacklogScheduler
         foreach (var item in staleItems)
         {
             // Guard: only reset items still marked InProgress
-            var resetCount = await _db.FictionPlanBacklogItems
-                .Where(x => x.Id == item.Id && x.Status == FictionPlanBacklogStatus.InProgress)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(i => i.Status, FictionPlanBacklogStatus.Pending)
-                    .SetProperty(i => i.InProgressAtUtc, (DateTime?)null)
-                    .SetProperty(i => i.CompletedAtUtc, (DateTime?)null)
-                    .SetProperty(i => i.UpdatedAtUtc, now),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            int resetCount;
+            if (isInMemory)
+            {
+                if (item.Status == FictionPlanBacklogStatus.InProgress)
+                {
+                    item.Status = FictionPlanBacklogStatus.Pending;
+                    item.InProgressAtUtc = null;
+                    item.CompletedAtUtc = null;
+                    item.UpdatedAtUtc = now;
+                    resetCount = 1;
+                    await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    resetCount = 0;
+                }
+            }
+            else
+            {
+                resetCount = await _db.FictionPlanBacklogItems
+                    .Where(x => x.Id == item.Id && x.Status == FictionPlanBacklogStatus.InProgress)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(i => i.Status, FictionPlanBacklogStatus.Pending)
+                        .SetProperty(i => i.InProgressAtUtc, (DateTime?)null)
+                        .SetProperty(i => i.CompletedAtUtc, (DateTime?)null)
+                        .SetProperty(i => i.UpdatedAtUtc, now),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             if (resetCount == 0)
             {

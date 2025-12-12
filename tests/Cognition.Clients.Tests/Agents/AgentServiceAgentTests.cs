@@ -42,7 +42,8 @@ public class AgentServiceAgentTests
             new StubLlmFactory(llm),
             new NullToolDispatcher(),
             new StubServiceProvider(),
-            NullLogger<AgentService>.Instance);
+            NullLogger<AgentService>.Instance,
+            new StubPromptBuilder());
 
         var result = await service.AskAsync(agent.Id, Guid.NewGuid(), null, "ping", CancellationToken.None);
 
@@ -60,7 +61,8 @@ public class AgentServiceAgentTests
             new StubLlmFactory(llm),
             new NullToolDispatcher(),
             new StubServiceProvider(),
-            NullLogger<AgentService>.Instance);
+            NullLogger<AgentService>.Instance,
+            new StubPromptBuilder());
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.AskAsync(Guid.NewGuid(), Guid.NewGuid(), null, "ping", CancellationToken.None));
     }
@@ -179,5 +181,11 @@ public class AgentServiceAgentTests
                 b.Ignore(p => p.Metrics);
             });
         }
+    }
+
+    private sealed class StubPromptBuilder : Cognition.Clients.Prompts.IPromptBuilder
+    {
+        public IReadOnlyList<ChatMessage> BuildChatPrompt(Cognition.Clients.Prompts.ChatPromptContext context)
+            => new List<ChatMessage> { new ChatMessage("system", context.SystemMessage ?? string.Empty), new ChatMessage("user", context.UserInput) };
     }
 }

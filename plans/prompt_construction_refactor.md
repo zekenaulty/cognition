@@ -1,77 +1,49 @@
 # Prompt Construction Refactor
 
 ## Objective
-Replace brittle, error-prone string interpolation (`$""`) used for constructing LLM prompt payloads in `AgentService` with a strongly-typed object model and deterministic JSON serialization. This eliminates escaping defects, prevents injection-style structure breakage, and decouples the "Mind's" content from its transport format.
+Refactor prompt assembly across agents/chat/tools to be composable, testable, and DRY, ensuring provider/model-specific instructions, scope context, and safety rails are applied consistently without duplicative string building.
 
 ## Scope
-- In: Creating strictly typed DTOs (Data Transfer Objects) for prompt components (e.g., `PlanContext`, `GoalDefinition`, `ToolResult`). Refactoring `AgentService.BuildStepPlanPrompt` and similar methods to populate these objects and serialize them.
-- Out: Changing the actual planner logic, tool execution flow, or the underlying `IChatClient` implementations. This is purely a refactor of *how* the message payload is assembled.
+- In: Server-side prompt builders used by chat/ask/ask-with-tools/planners; provider/model overrides; safety/system preambles; unit/regression coverage for prompt composition.
+- Out: Frontend prompt editing UI; new planner/tool features; LLM client transport changes.
 
 ## Deliverables
-- A set of domain-agnostic DTOs in `Cognition.Contracts` (or `Cognition.Clients.prompts`) representing the standard prompt schema.
-- A `PromptFactory` or updated service methods that map Domain Entities (Plans, ScopeTokens) to these DTOs.
-- Refactored `AgentService` that uses `System.Text.Json` to generate the final prompt string.
-- "Golden Master" unit tests verifying that the serialized output matches expected JSON structures.
+- Central prompt construction service/builder with clear inputs (agent/persona context, conversation history/summaries, tools/catalog, safety settings, provider/model options).
+- Updated chat/ask/ask-with-tools/planner call sites to use the builder.
+- Tests covering provider/model variations, tool inclusion, safety preambles, scope/identity tagging, and history windowing.
+- Docs/README snippet describing prompt composition contract.
 
-## Data / Service Changes
-- **New Classes:** Introduce `PromptSchema`, `PromptMessage`, `PromptContext` (names TBD based on analysis) to model the JSON structure explicitly.
-- **AgentService:** Remove all large interpolated string blocks (e.g., `$"{...}"`). Replace with object instantiation and `JsonSerializer.Serialize`.
-- **Serialization:** Configure a specific `JsonSerializerOptions` instance (likely `UnsafeRelaxedJsonEscaping` or strict, depending on LLM tolerance) to ensure clean payload generation.
-
-## Data / Service Changes (Revised)
-- **New Classes:** `PromptSchema`, `PromptMessage`, `PromptContext` DTOs.
-- **Data Entity Update (`PromptTemplate`):**
-    - *Immediate:* Treat the existing `Template` string as the **System Prompt** content only.
-    - *Future:* Migration to add `ConfigurationJson` column to `PromptTemplate` to store dynamic flags (e.g., `Temperature`, `ResponseFormat`, `IncludedModules`).
-- **Repository Update:** Modify `PlannerTemplateRepository` (or create `IPromptConfigurationSource`) to return a typed `PromptDefinition` instead of a raw string.
-    - *Old:* `GetTemplateAsync(id)` -> `string`
-    - *New:* `GetPromptConfigAsync(id)` -> `PromptDefinition { SystemInstruction, OutputSchema, Examples }`
-- **AgentService:** - Retrieve `PromptDefinition` from DB.
-    - Hydrate `PromptSchema` DTO using the definition + runtime variables (`PlanContext`).
-    - Serialize to final JSON.
-
-## Data / Service Changes (Revised with Relational Integration)
-- **New Classes:** `PromptSchema`, `PromptMessage`, `PromptContext` DTOs in Cognition.Contracts.
-- **Data Entity Alignment (`PromptTemplate`):**
-  - *Phase 1 (Minimal):* Reuse existing `Template` as `SystemInstruction` string; fetch via repository and inject into DTO.
-  - *Phase 2 (Deferred Migration):* Add columns `OutputSchemaJson` (string), `ExamplesJson` (string), `Version` (int). Create migration (e.g., 20251209_AddStructuredPromptFields.cs) with backfill (old Template -> SystemInstruction).
-- **Repository Update:** Evolve `PlannerTemplateRepository.GetTemplateAsync` to `GetPromptDefinitionAsync` -> `PromptDefinition { SystemInstruction, OutputSchema, Examples }`.
-- **AgentService:** 
-  - Fetch `PromptDefinition` from DB/repo.
-  - Build `PromptSchema` DTO: Merge definition with runtime vars (e.g., goal, tools).
-  - Serialize to JSON for LLM client.
-
-## Testing / Verification (Updated)
-- **Unit Tests:** Assert DTO serialization matches legacy string output; test with DB-fetched templates containing special chars.
-- **Integration Tests:** End-to-end planner run with mocked DB returning structured vs. legacy templates.
-- **Edge Cases:** Invalid JSON in new fields (validation throws); migration backfill preserves old data.
+## Data / API / Service Changes
+- Introduce prompt builder service(s) in API/Clients layer; optionally expose configuration (system prompts, safety blocks) via appsettings.
+- Adjust agent/chat/planner services to consume the builder instead of ad-hoc string interpolation.
 
 ## Migration / Rollout Order
-1) **Model Definition:** Create the DTO structure that mirrors the current expected JSON prompt format.
-2) **Test Harness:** Create a unit test that takes the *current* string output and asserts it against the *new* serialized output to ensure parity (Snapshot Testing).
-3) **Refactor Implementation:** Update `AgentService` to build the object graph instead of the string.
-4) **Validation:** Run the snapshot tests. Once parity is confirmed, swap the implementation.
-5) **Cleanup:** Remove the old string templates.
-
-- **Migration / Rollout Order (Extended):**
-6) **DB Alignment:** Implement Phase 1 (string reuse); defer Phase 2 to post-refactor bandwidth.
+1) Inventory current prompt assembly call sites (chat/ask/ask-with-tools/planners/tools) and shared helpers. **(done)**
+2) Add prompt builder abstraction + config; port one path (chat) first. **(done — chat path on builder)**
+3) Port tool/planner paths; dedupe safety/system preambles and history handling (next: Ask/AskWithTools/AskWithPlan; then WorldBible/planner prompts).
+4) Add snapshot/unit coverage for builder outputs and updated call sites; update docs after ports.
 
 ## Testing / Verification
-- **Unit Tests:** Verify that special characters (quotes, newlines, braces) in `Goal` or `ToolOutput` are correctly escaped by the serializer and do not break the JSON structure.
-- **Integration Tests:** Run a `Plan` execution cycle with a mock LLM to ensure the prompt received matches the tokenizer's expectations.
-- **Edge Cases:** Test with input data containing intentional JSON-breaking characters (e.g., `user_input": " } break_structure: true, "ignore": "`).
+- Unit tests for builder inputs → prompt outputs.
+- Regression: chat/ask/ask-with-tools happy paths; planner prompt construction with tools/catalog.
+- Optional snapshot tests for key prompt templates.
 
 ## Risk / Rollback
-- **Risk:** The `JsonSerializer` might produce slightly different whitespace or escaping sequences than the manual string (e.g., unicode escaping vs raw characters). Some over-fitted LLM prompts might degrade in performance if the formatting changes drastically.
-- **Mitigation:** Use "Golden Master" snapshot tests to verify the output is semantically identical before merging.
-- **Rollback:** Revert the changes to `AgentService.cs`; the new DTO classes can remain as unused code until fixed.
+- Risk: prompt changes affect model outputs. Mitigation: start with functional equivalence, snapshot key prompts.
+- Rollback: retain old helpers; feature-flag new builder if needed.
 
 ## Worklog Protocol
-- Step notes per `plans/README.md`, one discrete action each, with commands, paths, tests, decisions, and completion status.
+- Step notes per `plans/README.md`; one action per note with commands, files, tests, decisions, completion.
 
 ## Checklist
-- [ ] Define `Prompt` DTO classes (Model)
-- [ ] Create Snapshot/Golden Master tests for current prompt output
-- [ ] Refactor `AgentService.BuildStepPlanPrompt` to use `JsonSerializer`
-- [ ] Verify handling of special characters and large payloads
-- [ ] Remove legacy string interpolation code
+- [x] Call site inventory
+- [x] Prompt builder abstraction added
+- [ ] Chat/ask paths ported (chat ✅; Ask/AskWithTools/AskWithPlan remain)
+- [ ] Tool/planner paths ported (WorldBible/planner/tool prompts)
+- [ ] Tests added/updated (builder snapshots, Ask*/planner regressions)
+- [ ] Docs updated (prompt composition contract)
+
+## Next turns (short)
+1) Snapshot current Ask*/AskWithTools/AskWithPlan prompt shapes; extend builder to emit equivalent payloads; port these call sites.
+2) Snapshot planner/tool prompt templates (WorldBible, outline/step prompts); move into builder or dedicated prompt helpers; port call sites.
+3) Add builder snapshot tests and update docs snippet once ports are stable.

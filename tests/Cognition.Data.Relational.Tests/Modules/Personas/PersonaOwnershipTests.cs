@@ -35,19 +35,17 @@ public class PersonaOwnershipTests
 
         await db.SaveChangesAsync();
 
-        var links = await db.PersonaPersonas.AsNoTracking().ToListAsync();
-        Assert.Collection(links,
-            link =>
-            {
-                Assert.Equal(userPersona.Id, link.FromPersonaId);
-                Assert.Equal(characterPersona.Id, link.ToPersonaId);
-                Assert.True(link.IsOwner);
-            },
-            link =>
-            {
-                Assert.Equal(agentPersona.Id, link.FromPersonaId);
-                Assert.Equal(characterPersona.Id, link.ToPersonaId);
-                Assert.True(link.IsOwner);
-            });
+        var links = await db.PersonaPersonas
+            .AsNoTracking()
+            .ToListAsync();
+        Assert.Equal(2, links.Count);
+        Assert.Contains(links, link =>
+            link.FromPersonaId == userPersona.Id &&
+            link.ToPersonaId == characterPersona.Id &&
+            link.IsOwner);
+        Assert.Contains(links, link =>
+            link.FromPersonaId == agentPersona.Id &&
+            link.ToPersonaId == characterPersona.Id &&
+            link.IsOwner);
     }
 }

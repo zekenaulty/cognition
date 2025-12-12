@@ -92,3 +92,24 @@ public class ApiCredentialConfiguration : IEntityTypeConfiguration<ApiCredential
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
     }
 }
+
+public class LlmGlobalDefaultConfiguration : IEntityTypeConfiguration<LlmGlobalDefault>
+{
+    public void Configure(EntityTypeBuilder<LlmGlobalDefault> b)
+    {
+        b.ToTable("llm_global_defaults");
+        b.HasKey(x => x.Id).HasName("pk_llm_global_defaults");
+        b.Property(x => x.Id).HasColumnName("id");
+        b.Property(x => x.ModelId).HasColumnName("model_id");
+        b.Property(x => x.IsActive).HasColumnName("is_active");
+        b.Property(x => x.Priority).HasColumnName("priority");
+        b.Property(x => x.UpdatedByUserId).HasColumnName("updated_by_user_id");
+        b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+        b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+
+        b.HasOne(x => x.Model)
+            .WithMany()
+            .HasForeignKey(x => x.ModelId)
+            .HasConstraintName("fk_llm_global_defaults_models");
+    }
+}

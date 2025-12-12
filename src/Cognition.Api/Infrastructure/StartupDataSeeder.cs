@@ -9,6 +9,7 @@ using Cognition.Data.Relational.Modules.Users;
 using Cognition.Data.Relational.Modules.Prompts;
 using Cognition.Data.Relational.Modules.Common;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Cognition.Api.Infrastructure;
 
@@ -19,7 +20,23 @@ public static class StartupDataSeeder
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CognitionDbContext>();
         // Apply EF Core migrations to create/update schema
-        await db.Database.MigrateAsync();
+        try
+        {
+            await db.Database.MigrateAsync();
+        }
+        catch (PostgresException ex) when (ex.SqlState == "42P07")
+        {
+            logger.LogWarning(ex, "Skipping migration because table already exists (likely reuse of dev/test DB).");
+        }
+        catch (Exception ex) when (ex is PostgresException pex && pex.SqlState == "42P07"
+                                   || ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "Skipping migration because one or more tables already exist (likely reuse of dev/test DB).");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChanges", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "Skipping migration because model changes are pending but DB already provisioned.");
+        }
 
         var user = await EnsureUserAsync(db, logger, username: "Zythis", password: "root");
 

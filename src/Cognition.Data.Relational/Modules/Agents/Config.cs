@@ -19,7 +19,6 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
         b.Property(x => x.Suffix).HasColumnName("suffix");
         b.Property(x => x.ClientProfileId).HasColumnName("client_profile_id");
         b.HasOne(x => x.ClientProfile).WithMany().HasForeignKey(x => x.ClientProfileId).HasConstraintName("fk_agents_client_profiles");
-        b.Property(x => x.State).HasColumnName("state").HasColumnType("jsonb");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
     }
@@ -37,7 +36,6 @@ public class AgentToolBindingConfiguration : IEntityTypeConfiguration<AgentToolB
         b.Property(x => x.ToolId).HasColumnName("tool_id");
         b.HasOne(x => x.Tool).WithMany().HasForeignKey(x => x.ToolId).HasConstraintName("fk_agent_tool_bindings_tools");
         b.Property(x => x.Enabled).HasColumnName("enabled").HasDefaultValue(true);
-        b.Property(x => x.Config).HasColumnName("config").HasColumnType("jsonb");
         b.HasIndex(x => new { x.ScopeType, x.ScopeId, x.ToolId }).IsUnique().HasDatabaseName("ux_agent_tool_bindings_scope_tool");
         b.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
         b.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");

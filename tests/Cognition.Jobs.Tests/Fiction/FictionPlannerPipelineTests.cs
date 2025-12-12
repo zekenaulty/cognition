@@ -176,7 +176,8 @@ public class FictionPlannerPipelineTests
             return new Dictionary<string, string>(baseMetadata, StringComparer.OrdinalIgnoreCase)
             {
                 ["backlogItemId"] = backlogId,
-                ["taskId"] = Guid.NewGuid().ToString()
+                ["taskId"] = Guid.NewGuid().ToString(),
+                ["skipSceneValidation"] = "true"
             };
         }
 
@@ -894,6 +895,6 @@ public class FictionPlannerPipelineTests
             """;
 
         public const string Scene =
-            "In the Opening Scene of Pipeline Plan, the team glides through the rally described in the Opening Section as scroll-1 surveillance intensifies. Existing scene description beats surface while the jammer hums overhead, forcing them to whisper Pipeline Project code phrases.";
+            "In the Opening Scene (scene-1) of Pipeline Plan and Chapter One, the team glides through the rally described in the Opening Section (section-1) while Scroll One (scroll-1) surveillance intensifies. Existing scene description beats surface while the jammer hums overhead, forcing them to whisper Pipeline Project code phrases.";
     }
 }

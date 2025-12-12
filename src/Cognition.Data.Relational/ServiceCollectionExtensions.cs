@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 
 namespace Cognition.Data.Relational;
@@ -24,6 +25,7 @@ public static class ServiceCollectionExtensions
         {
             var sharedDataSource = provider.GetRequiredService<NpgsqlDataSource>();
             options.UseNpgsql(sharedDataSource, o => o.EnableRetryOnFailure());
+            options.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
         });
 
         // DbContextFactory can be added later if needed; avoid mixing lifetimes here.

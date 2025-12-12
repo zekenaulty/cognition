@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Cognition.Api.Controllers;
 
 [ApiController]
+[Authorize(Policy = AuthorizationPolicies.UserOrHigher)]
 [Route("api/settings/llm-defaults")]
 public sealed class LlmDefaultsController : ControllerBase
 {

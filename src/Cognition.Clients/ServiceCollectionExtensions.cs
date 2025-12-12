@@ -8,6 +8,7 @@ using Cognition.Clients.Tools.Fiction.Authoring;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Cognition.Clients.Agents;
+using Cognition.Clients.Prompts;
 using Polly;
 using System.Net;
 using System.Net.Http;
@@ -33,6 +34,7 @@ public static class ServiceCollectionExtensions
             // Allow long-running image generation (up to 10 minutes)
             c.Timeout = TimeSpan.FromMinutes(10);
         });
+        services.AddScoped<IPromptBuilder, PromptBuilder>();
         services.AddScoped<IImageService, ImageService>();
         services.AddScoped<IAgentService, AgentService>();
         services.AddScoped<IFictionPhaseRunner, VisionPlannerRunner>();

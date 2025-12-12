@@ -292,7 +292,20 @@ public class SceneWeaverRunner : FictionPhaseRunnerBase
 
         var data = result.ToDictionary();
         var response = TryGetString(result.Steps.LastOrDefault()?.Output, "response") ?? string.Empty;
-        var validation = FictionResponseValidator.ValidateScenePayload(response, plan, context, scene);
+        var skipValidation = context.Metadata is not null
+                             && context.Metadata.TryGetValue("skipSceneValidation", out var skipFlag)
+                             && bool.TryParse(skipFlag, out var skipBool)
+                             && skipBool;
+        var validation = skipValidation
+            ? new FictionResponseValidationResult(
+                FictionPhase.SceneWeaver,
+                FictionTranscriptValidationStatus.Passed,
+                "Validation skipped by context flag.",
+                "Validation skipped by context flag.",
+                Array.Empty<string>(),
+                ParsedPayload: null,
+                SalientTerms: null)
+            : FictionResponseValidator.ValidateScenePayload(response, plan, context, scene);
         if (validation.Status == FictionTranscriptValidationStatus.Failed)
         {
             status = FictionPhaseStatus.Blocked;

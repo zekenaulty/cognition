@@ -6,6 +6,7 @@ using Cognition.Api.Controllers;
 using Cognition.Clients.Tools;
 using Cognition.Clients.Tools.Planning;
 using Cognition.Data.Relational;
+using Cognition.Data.Relational.Modules.Tools;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,9 @@ public class ToolExecutionControllerTests
         var services = new ServiceCollection().BuildServiceProvider();
         var db = new CognitionDbContext(new DbContextOptionsBuilder<CognitionDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var controller = new ToolExecutionController(dispatcher, services, db);
+        var toolId = Guid.NewGuid();
+        db.Tools.Add(new Tool { Id = toolId, Name = "t1", IsActive = true, ClassPath = "x" });
+        await db.SaveChangesAsync();
         var planId = Guid.NewGuid();
         var request = new ToolExecutionController.ExecRequest
         {
@@ -32,7 +36,7 @@ public class ToolExecutionControllerTests
             FictionPlanId = planId
         };
 
-        await controller.Execute(Guid.NewGuid(), request, CancellationToken.None);
+        await controller.Execute(toolId, request, CancellationToken.None);
 
         dispatcher.CapturedArgs.Should().NotBeNull();
         dispatcher.CapturedArgs!.Should().ContainKey("planId").WhoseValue.Should().Be(planId);
@@ -48,6 +52,9 @@ public class ToolExecutionControllerTests
         var services = new ServiceCollection().BuildServiceProvider();
         var db = new CognitionDbContext(new DbContextOptionsBuilder<CognitionDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var controller = new ToolExecutionController(dispatcher, services, db);
+        var toolId = Guid.NewGuid();
+        db.Tools.Add(new Tool { Id = toolId, Name = "t1", IsActive = true, ClassPath = "x" });
+        await db.SaveChangesAsync();
         var existingPlan = Guid.NewGuid();
         var args = new Dictionary<string, object?> { ["planId"] = existingPlan };
         var request = new ToolExecutionController.ExecRequest
@@ -59,7 +66,7 @@ public class ToolExecutionControllerTests
             FictionPlanId = Guid.NewGuid()
         };
 
-        await controller.Execute(Guid.NewGuid(), request, CancellationToken.None);
+        await controller.Execute(toolId, request, CancellationToken.None);
 
         dispatcher.CapturedArgs.Should().NotBeNull();
         dispatcher.CapturedArgs!["planId"].Should().Be(existingPlan);

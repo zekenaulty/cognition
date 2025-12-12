@@ -27,6 +27,21 @@ public sealed class PlannerExecutionConfiguration : IEntityTypeConfiguration<Pla
         builder.Property(x => x.Artifacts).HasColumnName("artifacts").HasColumnType("jsonb");
         builder.Property(x => x.Metrics).HasColumnName("metrics").HasColumnType("jsonb");
         builder.Property(x => x.Diagnostics).HasColumnName("diagnostics").HasColumnType("jsonb");
-        builder.Property(x => x.Transcript).HasColumnName("transcript").HasColumnType("jsonb");
+
+        var jsonOptions = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        var transcriptConverter = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<List<PlannerExecutionTranscriptEntry>?, string?>(
+            v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, jsonOptions),
+            v => string.IsNullOrWhiteSpace(v) ? null : System.Text.Json.JsonSerializer.Deserialize<List<PlannerExecutionTranscriptEntry>>(v!, jsonOptions));
+        var transcriptComparer = new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<PlannerExecutionTranscriptEntry>?>(
+            (l, r) => System.Text.Json.JsonSerializer.Serialize(l ?? new List<PlannerExecutionTranscriptEntry>(), jsonOptions) ==
+                      System.Text.Json.JsonSerializer.Serialize(r ?? new List<PlannerExecutionTranscriptEntry>(), jsonOptions),
+            v => (v == null ? 0 : System.Text.Json.JsonSerializer.Serialize(v, jsonOptions).GetHashCode()),
+            v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<List<PlannerExecutionTranscriptEntry>>(System.Text.Json.JsonSerializer.Serialize(v, jsonOptions), jsonOptions)!);
+
+        builder.Property(x => x.Transcript)
+            .HasColumnName("transcript")
+            .HasColumnType("jsonb")
+            .HasConversion(transcriptConverter)
+            .Metadata.SetValueComparer(transcriptComparer);
     }
 }

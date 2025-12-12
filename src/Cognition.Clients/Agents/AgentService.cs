@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Text.Json;
 using Cognition.Clients.LLM;
+using Cognition.Clients.Prompts;
 using Cognition.Data.Relational;
 using Cognition.Data.Relational.Modules.Personas;
 using Cognition.Data.Relational.Modules.Tools;
@@ -87,20 +88,13 @@ public class AgentService : IAgentService
             .ToListAsync(ct);
         window.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
 
-        var chat = new List<ChatMessage>();
-        // 1) Instruction sets as distinct system messages (scoped: global/provider/model/persona)
         var instructionMsgs = await BuildInstructionMessages(personaId, providerId, modelId, ct);
-        chat.AddRange(instructionMsgs);
-        // 2) Persona baseline system message
-        if (!string.IsNullOrWhiteSpace(system)) chat.Add(new ChatMessage("system", system));
-        // Optional: include latest summary as system supplement (DB limited)
         var summary = await _db.ConversationSummaries.AsNoTracking()
             .Where(s => s.ConversationId == conversationId)
             .OrderByDescending(s => s.Timestamp)
             .FirstOrDefaultAsync(ct);
-        if (summary != null)
-            chat.Add(new ChatMessage("system", "Conversation Summary: " + summary.Content));
-        foreach (var m in window)
+
+        var history = window.Select(m =>
         {
             var role = m.Role switch
             {
@@ -108,10 +102,15 @@ public class AgentService : IAgentService
                 Cognition.Data.Relational.Modules.Common.ChatRole.System => "system",
                 _ => "user"
             };
-            chat.Add(new ChatMessage(role, m.Content));
-        }
-        // Append the new input (also in window now via persisted user message)
-        chat.Add(new ChatMessage("user", input));
+            return new ChatMessage(role, m.Content);
+        }).ToList();
+
+        var chat = _promptBuilder.BuildChatPrompt(new ChatPromptContext(
+            instructionMsgs,
+            system,
+            summary?.Content,
+            history,
+            input));
 
         var client = await _factory.CreateAsync(providerId, modelId, ct);
         string reply;
@@ -237,21 +236,27 @@ public class AgentService : IAgentService
         if (persona == null) throw new Exception($"Persona not found: {personaId}");
         var systemMsg = BuildSystemMessage(persona);
         // 2. Pull conversation history
-        var history = await _db.ConversationMessages.AsNoTracking()
+        var historyRaw = await _db.ConversationMessages.AsNoTracking()
             .Where(m => m.ConversationId == conversationId)
             .OrderBy(m => m.Timestamp)
-            .Select(m => $"{m.Role.ToString().ToLower()}: {m.Content}")
             .ToListAsync(ct);
-        // Build prompt string
-        var promptBuilder = new StringBuilder();
-        promptBuilder.AppendLine(systemMsg);
-        foreach (var line in history)
-            promptBuilder.AppendLine(line);
-        promptBuilder.AppendLine($"user: {input}");
-        var prompt = promptBuilder.ToString();
+
+        var history = historyRaw
+            .Select(m => new ChatMessage(
+                m.Role == Cognition.Data.Relational.Modules.Common.ChatRole.Assistant ? "assistant" :
+                m.Role == Cognition.Data.Relational.Modules.Common.ChatRole.System ? "system" : "user",
+                m.Content))
+            .ToList();
+
+        var chat = _promptBuilder.BuildChatPrompt(new ChatPromptContext(
+            Array.Empty<ChatMessage>(),
+            systemMsg,
+            Summary: null,
+            history,
+            input));
         // 3. Get client and generate response
         var client = await _factory.CreateAsync(provId, modId, ct);
-        var response = await client.GenerateAsync(prompt, track: true);
+        var response = await client.ChatAsync(chat, track: true);
         // 4. Persist assistant message
         var agentId = await _db.Agents.AsNoTracking().Where(a => a.PersonaId == personaId).Select(a => a.Id).FirstOrDefaultAsync(ct);
         var assistantMsg = new ConversationMessage
@@ -276,6 +281,7 @@ public class AgentService : IAgentService
     private readonly Cognition.Clients.Tools.IToolDispatcher _dispatcher;
     private readonly IServiceProvider _sp;
     private readonly ILogger<AgentService> _logger;
+    private readonly IPromptBuilder _promptBuilder;
 
 
 
@@ -777,13 +783,14 @@ private static string CompactText(string? text, int maxLength)
 }".Replace("'", "\"");
         return JSchema.Parse(schemaJson);
     }
-    public AgentService(CognitionDbContext db, ILLMClientFactory factory, Cognition.Clients.Tools.IToolDispatcher dispatcher, IServiceProvider sp, ILogger<AgentService> logger)
+    public AgentService(CognitionDbContext db, ILLMClientFactory factory, Cognition.Clients.Tools.IToolDispatcher dispatcher, IServiceProvider sp, ILogger<AgentService> logger, IPromptBuilder promptBuilder)
     {
         _db = db;
         _factory = factory;
         _dispatcher = dispatcher;
         _sp = sp;
         _logger = logger;
+        _promptBuilder = promptBuilder;
     }
 
 
