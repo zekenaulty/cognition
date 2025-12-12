@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cognition.Data.Relational.Migrations
 {
     [DbContext(typeof(CognitionDbContext))]
-    [Migration("20251211165635_SnapshotRebuild")]
-    partial class SnapshotRebuild
+    [Migration("20251212041157_SnapshotBaseline")]
+    partial class SnapshotBaseline
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
