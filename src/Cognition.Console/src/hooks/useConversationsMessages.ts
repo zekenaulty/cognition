@@ -51,6 +51,8 @@ export function useConversationsMessages(accessToken: string, agentId: string | 
   useEffect(() => {
     const loadMsgs = async () => {
       if (!accessToken || !conversationId) return;
+      // Clear immediately to avoid showing previous conversation content.
+      setMessages([]);
       // Fetch chat messages and images in parallel
       const [msgList, imgList] = await Promise.all([
         fetchMessages(accessToken, conversationId),
@@ -94,10 +96,7 @@ export function useConversationsMessages(accessToken: string, agentId: string | 
         const tb = b.timestamp ? Date.parse(b.timestamp) : 0;
         return ta - tb;
       });
-      setMessages(prev => {
-        if (combined.length === 0) return prev; // avoid dropping pending UI messages when fetch returns empty
-        return combined;
-      });
+      setMessages(combined);
     };
     loadMsgs();
   }, [accessToken, conversationId]);

@@ -46,14 +46,14 @@ namespace Cognition.Data.Relational.Migrations
                     { new Guid("10000000-0000-0000-0000-000000000006"), openAiId, "gpt-5",                 "GPT-5",                  null, false, true, null, null, null, false, null, now, null },
                     { new Guid("10000000-0000-0000-0000-000000000007"), openAiId, "gpt-5-mini",            "GPT-5 Mini",            null, false, true, null, null, null, false, null, now, null },
                     { new Guid("10000000-0000-0000-0000-000000000008"), openAiId, "gpt-5-nano",            "GPT-5 Nano",            null, false, true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000009"), openAiId, "gpt-4.1",               "GPT-4.1",               null, false, true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000010"), openAiId, "gpt-4.1-mini",          "GPT-4.1 Mini",          null, false, true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000011"), openAiId, "gpt-realtime",          "GPT Realtime",          null, true,  true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000012"), openAiId, "o4-mini",               "o4 Mini",               null, false, true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000013"), openAiId, "o4-mini-deep-research", "o4 Mini Deep Research", null, false, true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000014"), openAiId, "o3",                    "o3",                    null, false, true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000015"), openAiId, "o3-pro-2025-06-10",    "o3 Pro 2025-06-10",     null, false, true, null, null, null, false, null, now, null },
-                    { new Guid("10000000-0000-0000-0000-000000000016"), openAiId, "o3-deep-research",      "o3 Deep Research",      null, false, true, null, null, null, false, null, now, null }
+                    //{ new Guid("10000000-0000-0000-0000-000000000009"), openAiId, "gpt-4.1",               "GPT-4.1",               null, false, true, null, null, null, false, null, now, null },
+                    //{ new Guid("10000000-0000-0000-0000-000000000010"), openAiId, "gpt-4.1-mini",          "GPT-4.1 Mini",          null, false, true, null, null, null, false, null, now, null },
+                    //{ new Guid("10000000-0000-0000-0000-000000000011"), openAiId, "gpt-realtime",          "GPT Realtime",          null, true,  true, null, null, null, false, null, now, null },
+                    //{ new Guid("10000000-0000-0000-0000-000000000012"), openAiId, "o4-mini",               "o4 Mini",               null, false, true, null, null, null, false, null, now, null },
+                    //{ new Guid("10000000-0000-0000-0000-000000000013"), openAiId, "o4-mini-deep-research", "o4 Mini Deep Research", null, false, true, null, null, null, false, null, now, null },
+                    //{ new Guid("10000000-0000-0000-0000-000000000014"), openAiId, "o3",                    "o3",                    null, false, true, null, null, null, false, null, now, null },
+                    //{ new Guid("10000000-0000-0000-0000-000000000015"), openAiId, "o3-pro-2025-06-10",    "o3 Pro 2025-06-10",     null, false, true, null, null, null, false, null, now, null },
+                    //{ new Guid("10000000-0000-0000-0000-000000000016"), openAiId, "o3-deep-research",      "o3 Deep Research",      null, false, true, null, null, null, false, null, now, null }
                 }
             );
         }

@@ -11,6 +11,7 @@ export type ChatLayoutProps = {
   agents: { id: string; personaId?: string; label?: string }[];
   agentId?: string;
   onAgentChange?: (id: string) => void;
+  showAgentSelector?: boolean;
   providers: any[];
   models: any[];
   providerId: string;
@@ -42,7 +43,7 @@ export type ChatLayoutProps = {
   onRememberLast?: () => void;
 };
 
-export function ChatLayout({ agents = [], agentId, onAgentChange, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, error, loading, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange, imgPending, onGenerateImage, onNewConversation, connectionState, assistantVoiceName, assistantGender, onRegenerate, onPrevVersion, onNextVersion, onRememberLast }: ChatLayoutProps) {
+export function ChatLayout({ agents = [], agentId, onAgentChange, showAgentSelector = true, providers, models, providerId, modelId, onProviderChange, onModelChange, messages, onSend, busy, error, loading, planSteps, toolActions, conversations, conversationId, onConversationChange, imgStyles, imgStyleId, onImgStyleChange, imgPending, onGenerateImage, onNewConversation, connectionState, assistantVoiceName, assistantGender, onRegenerate, onPrevVersion, onNextVersion, onRememberLast }: ChatLayoutProps) {
   // Placeholder state for image menu, image model, image count, viewer, and input only.
   const [imgModel, setImgModel] = React.useState('dall-e-3');
   const [imgMsgCount, setImgMsgCount] = React.useState(6);
@@ -64,6 +65,7 @@ export function ChatLayout({ agents = [], agentId, onAgentChange, providers, mod
                 agents={agents}
                 agentId={agentId}
                 onAgentChange={onAgentChange}
+                showAgentSelector={showAgentSelector}
                 providers={providers}
                 models={models}
                 providerId={providerId}

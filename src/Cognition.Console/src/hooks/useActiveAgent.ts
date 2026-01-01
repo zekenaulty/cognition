@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAgentPersonaIndex } from './useAgentPersonaIndex';
-import { useUserSettings } from './useUserSettings';
 
 type Params = {
   accessToken: string;
@@ -11,12 +10,12 @@ type Params = {
 
 export function useActiveAgent({ accessToken, routeAgentId, routeConversationId }: Params) {
   const navigate = useNavigate();
-  const settings = useUserSettings();
   const { agents, loading: loadingAgents, resolvePersonaId } = useAgentPersonaIndex(accessToken);
   const [agentId, setAgentId] = useState<string>('');
   const [assistantGender, setAssistantGender] = useState<string | undefined>();
   const [assistantVoiceName, setAssistantVoiceName] = useState<string | undefined>();
   const previousAgentRef = useRef<string | undefined>();
+  const previousRouteAgentRef = useRef<string | undefined>();
 
   const activePersonaId = agentId ? resolvePersonaId(agentId) : undefined;
 
@@ -28,31 +27,26 @@ export function useActiveAgent({ accessToken, routeAgentId, routeConversationId 
     return 'Assistant';
   }, [agents, agentId]);
 
-  // Choose an agent based on route, saved setting, or first available
+  // Choose an agent based on route (authoritative) or first available when no route is provided
   useEffect(() => {
     if (!agents.length) {
       setAgentId('');
       return;
     }
     const routeCandidate = routeAgentId && agents.some(a => a.id === routeAgentId) ? routeAgentId : undefined;
-    const saved = settings.get<string>('chat.agentId');
-    const savedCandidate = saved && agents.some(a => a.id === saved) ? saved : undefined;
-    const next = routeCandidate ?? savedCandidate ?? agents[0].id;
-    if (next && next !== agentId) setAgentId(next);
-  }, [agents, routeAgentId, agentId, settings]);
-
-  // Persist agent selection and synchronize route
-  useEffect(() => {
-    if (!agentId) return;
-    settings.set('chat.agentId', agentId);
-    if (routeConversationId) {
-      if (routeAgentId !== agentId) {
-        navigate(`/chat/${agentId}/${routeConversationId}`, { replace: true });
+    const next = routeCandidate ?? agents[0].id;
+    if (next && next !== agentId) {
+      setAgentId(next);
+      // Only push a route when no route agent is provided (fresh entry)
+      if (!routeAgentId) {
+        if (routeConversationId) {
+          navigate(`/chat/${next}/${routeConversationId}`, { replace: true });
+        } else {
+          navigate(`/chat/${next}`, { replace: true });
+        }
       }
-    } else if (routeAgentId !== agentId) {
-      navigate(`/chat/${agentId}`, { replace: true });
     }
-  }, [agentId, navigate, routeAgentId, routeConversationId, settings]);
+  }, [agents, routeAgentId, routeConversationId, agentId, navigate]);
 
   // Clear conversation when agent changes without explicit route conversation
   const [resetConversationToken, setResetConversationToken] = useState(0);
@@ -60,10 +54,15 @@ export function useActiveAgent({ accessToken, routeAgentId, routeConversationId 
     if (!agentId) return;
     const previous = previousAgentRef.current;
     previousAgentRef.current = agentId;
-    if (previous && previous !== agentId && !routeConversationId) {
+    const routeChanged = routeAgentId && previousRouteAgentRef.current && previousRouteAgentRef.current !== routeAgentId;
+    if (routeAgentId) {
+      previousRouteAgentRef.current = routeAgentId;
+    }
+    const shouldReset = (previous && previous !== agentId) || (routeChanged && !routeConversationId);
+    if (shouldReset) {
       setResetConversationToken(t => t + 1);
     }
-  }, [agentId, routeConversationId]);
+  }, [agentId, routeConversationId, routeAgentId]);
 
   // Load persona details (voice/gender) for the active agent persona
   useEffect(() => {

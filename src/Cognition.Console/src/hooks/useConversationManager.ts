@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useUserSettings } from './useUserSettings';
 import { useConversationsMessages } from './useConversationsMessages';
 
 type Params = {
@@ -12,7 +11,6 @@ type Params = {
 
 export function useConversationManager({ accessToken, agentId, resetConversationToken, routeConversationId }: Params) {
   const navigate = useNavigate();
-  const settings = useUserSettings();
 
   const {
     conversations,
@@ -36,19 +34,8 @@ export function useConversationManager({ accessToken, agentId, resetConversation
     if (resetConversationToken > 0 && !routeConversationId) {
       setMessages([]);
       setConversationId(null);
-      try { settings.remove('chat.conversationId'); } catch {}
     }
-  }, [resetConversationToken, routeConversationId, setConversationId, setMessages, settings]);
-
-  // Persist conversation id locally for quick resume
-  useEffect(() => {
-    if (!agentId) return;
-    if (conversationId) {
-      settings.set('chat.conversationId', conversationId);
-    } else {
-      try { settings.remove('chat.conversationId'); } catch {}
-    }
-  }, [agentId, conversationId, settings]);
+  }, [resetConversationToken, routeConversationId, setConversationId, setMessages]);
 
   // Guard against invalid conversation access
   useEffect(() => {

@@ -8,7 +8,6 @@ import { useImageGenerator } from '../hooks/useImageGenerator';
 import { useChatProviderModel } from '../hooks/useChatProviderModel';
 import { MessageItemProps } from '../components/chat/MessageItem';
 import { normalizeRole } from '../utils/chat';
-import { useUserSettings } from '../hooks/useUserSettings';
 import { useActiveAgent } from '../hooks/useActiveAgent';
 import { useConversationManager } from '../hooks/useConversationManager';
 import { useChatHubEvents } from '../hooks/useChatHubEvents';
@@ -17,7 +16,6 @@ import { useChatHubEvents } from '../hooks/useChatHubEvents';
 export default function ChatPage() {
   const { auth } = useAuth();
   const accessToken = auth?.accessToken || '';
-  const settings = useUserSettings();
   const { agentId: routeAgentId, conversationId: routeConversationId } = useParams<{ agentId?: string; conversationId?: string }>();
 
   const [planSteps, setPlanSteps] = useState<string[]>([]);
@@ -103,6 +101,17 @@ export default function ChatPage() {
     setToolActions([]);
   }, [agentId, conversationId]);
 
+  // If the route agent changes, forcibly align agent and clear the in-memory conversation/messages
+  useEffect(() => {
+    if (routeAgentId && routeAgentId !== agentId) {
+      setAgentId(routeAgentId);
+      setMessages([]);
+      setConversationId(null);
+      setPlanSteps([]);
+      setToolActions([]);
+    }
+  }, [routeAgentId, agentId, setAgentId, setMessages, setConversationId]);
+
   // Normalize any existing messages once on mount
   useEffect(() => {
     setMessages(prev => prev.map(m => ({ ...m, role: normalizeRole(m.role) })));
@@ -149,7 +158,6 @@ export default function ChatPage() {
           const entry = { id: convId, title: null as string | null, providerId: nextProviderId ?? undefined, modelId: nextModelId ?? undefined } as any;
           return exists ? prev : [entry, ...prev];
         });
-        try { settings.set('chat.conversationId', convId); } catch {}
         try { await chatHub.connectionRef.current?.invoke('JoinConversation', convId); } catch {}
       }
 
@@ -214,11 +222,7 @@ export default function ChatPage() {
       layout={{
         agents,
         agentId,
-        onAgentChange: nextId => {
-          if (nextId && nextId !== agentId) {
-            setAgentId(nextId);
-          }
-        },
+        showAgentSelector: false,
         providers,
         models,
         providerId,
@@ -251,7 +255,6 @@ export default function ChatPage() {
           const nextModel = pickPreferredModel();
           if (nextProvider) setProviderId(nextProvider);
           if (nextModel) setModelId(nextModel);
-          try { settings.remove('chat.conversationId'); } catch {}
         },
         connectionState: hubState,
         assistantVoiceName,
