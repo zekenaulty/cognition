@@ -29,17 +29,20 @@
     <ProjectReference Include="..\Cognition.Jobs\Cognition.Jobs.csproj" />
     <ProjectReference Include="..\Cognition.Contracts\Cognition.Contracts.csproj" />
     <ProjectReference Include="..\Cognition.Data.Vectors\Cognition.Data.Vectors.csproj" />
+    <ProjectReference Include="..\Cognition.Domains.Relational\Cognition.Domains.Relational.csproj" />
+    <ProjectReference Include="..\Cognition.Domains.Documents\Cognition.Domains.Documents.csproj" />
+    <ProjectReference Include="..\Cognition.Workflows.Relational\Cognition.Workflows.Relational.csproj" />
   </ItemGroup>
 
   <!-- Build the Vite console and copy static assets into wwwroot on publish/rebuild -->
   <Target Name="BuildConsoleApp" AfterTargets="Build" Condition=" '$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Release' ">
     <PropertyGroup>
-      <ConsoleProjectRoot>$(MSBuildThisFileDirectory)..\Cognition.Console</ConsoleProjectRoot>
+      <ConsoleProjectRoot>$(MSBuildThisFileDirectory)..\Cognition.Console.Dod</ConsoleProjectRoot>
       <ConsoleDist>$(ConsoleProjectRoot)\dist</ConsoleDist>
       <ApiWwwRoot>$(MSBuildThisFileDirectory)wwwroot</ApiWwwRoot>
     </PropertyGroup>
     <RemoveDir Directories="$(ApiWwwRoot)" Condition="Exists('$(ApiWwwRoot)')" />
-    <Message Text="Building Cognition.Console (Vite) into $(ConsoleDist)" Importance="high" />
+    <Message Text="Building Cognition.Console.Dod (Vite) into $(ConsoleDist)" Importance="high" />
     <Exec WorkingDirectory="$(ConsoleProjectRoot)" Command="npm install" />
     <Exec WorkingDirectory="$(ConsoleProjectRoot)" Command="npm run build" />
     <MakeDir Directories="$(ApiWwwRoot)" />

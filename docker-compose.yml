@@ -17,6 +17,55 @@ services:
       timeout: 5s
       retries: 5
 
+  dod-postgres:
+    image: postgres:16-alpine
+    container_name: cognition-dod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DOD_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${DOD_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${DOD_POSTGRES_DB:-cognition_dod}
+    ports:
+      - "${DOD_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - dod_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DOD_POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  workflows-postgres:
+    image: postgres:16-alpine
+    container_name: cognition-workflows-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${WORKFLOWS_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${WORKFLOWS_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${WORKFLOWS_POSTGRES_DB:-cognition_workflows}
+    ports:
+      - "${WORKFLOWS_POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - workflows_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WORKFLOWS_POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ravendb:
+    image: ravendb/ravendb:6.0-ubuntu-latest
+    container_name: cognition-ravendb
+    restart: unless-stopped
+    environment:
+      RAVENDB_Setup_Mode: "None"
+      RAVENDB_Security_UnsecuredAccessAllowed: "PublicNetwork"
+      RAVENDB_License_Eula_Accepted: "true"
+    ports:
+      - "${RAVENDB_PORT:-8080}:8080"
+    volumes:
+      - ravendbdata:/var/lib/ravendb
+
   opensearch:
     image: opensearchproject/opensearch:2.14.0
     container_name: cognition-opensearch
@@ -49,3 +98,9 @@ services:
 volumes:
   pgdata:
     name: cognition-pgdata
+  dod_pgdata:
+    name: cognition-dod-pgdata
+  workflows_pgdata:
+    name: cognition-workflows-pgdata
+  ravendbdata:
+    name: cognition-ravendbdata

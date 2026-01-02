@@ -1,5 +1,8 @@
 using Cognition.Jobs;
 using Cognition.Data.Relational;
+using Cognition.Domains.Documents;
+using Cognition.Domains.Relational;
+using Cognition.Workflows.Relational;
 using Cognition.Clients;
 using Cognition.Data.Vectors.OpenSearch.OpenSearch;
 using Cognition.Clients.Tools.Fiction.Lifecycle;
@@ -76,6 +79,9 @@ builder.Services.AddRebus(config =>
 
 // Register Db + clients so jobs can use the same services as API
 builder.Services.AddCognitionDb(builder.Configuration);
+builder.Services.AddCognitionDomainsDb(builder.Configuration);
+builder.Services.AddCognitionWorkflowsDb(builder.Configuration);
+builder.Services.AddCognitionDomainsDocuments(builder.Configuration);
 builder.Services.AddCognitionClients();
 builder.Services.AddCognitionOpenSearchVectors(builder.Configuration);
 builder.Services.AddCognitionTools();

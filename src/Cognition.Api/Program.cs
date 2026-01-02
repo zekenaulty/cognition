@@ -1,5 +1,8 @@
 using System;
 using Cognition.Data.Relational;
+using Cognition.Domains.Documents;
+using Cognition.Domains.Relational;
+using Cognition.Domains.Relational.Seed;
 using Cognition.Clients;
 using Cognition.Api.Infrastructure;
 using Cognition.Api.Infrastructure.Diagnostics;
@@ -32,6 +35,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using System.Globalization;
 using System.Threading.RateLimiting;
+using Cognition.Workflows.Relational;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +45,9 @@ builder.Services.AddSignalR();
 
 // Add EF Core Postgres DbContext
 builder.Services.AddCognitionDb(builder.Configuration);
+builder.Services.AddCognitionDomainsDb(builder.Configuration);
+builder.Services.AddCognitionWorkflowsDb(builder.Configuration);
+builder.Services.AddCognitionDomainsDocuments(builder.Configuration);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddCognitionClients();
@@ -443,6 +450,22 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<CognitionDbContext>();
     try { db.Database.Migrate(); } catch { }
+}
+using (var scope = app.Services.CreateScope())
+{
+    var domainsDb = scope.ServiceProvider.GetRequiredService<CognitionDomainsDbContext>();
+    try { domainsDb.Database.Migrate(); } catch { }
+}
+using (var scope = app.Services.CreateScope())
+{
+    var workflowsDb = scope.ServiceProvider.GetRequiredService<CognitionWorkflowsDbContext>();
+    try { workflowsDb.Database.Migrate(); } catch { }
+}
+using (var scope = app.Services.CreateScope())
+{
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DomainsSeeder");
+    var domainsDb = scope.ServiceProvider.GetRequiredService<CognitionDomainsDbContext>();
+    try { await DomainsDataSeeder.SeedAsync(domainsDb, logger); } catch { }
 }
 // Seed default data (user + personas)
 using (var scope = app.Services.CreateScope())

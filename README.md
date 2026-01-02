@@ -4,22 +4,27 @@ Agent-first LLM orchestration: ASP.NET Core API, Hangfire/Rebus jobs, EF Core Po
 
 ---
 
-### What’s Inside
-- **API** (`src/Cognition.Api`) – JWT auth, Swagger, SignalR hub (`/hub/chat`), Hangfire dashboard, planners/ops diagnostics, personas/agents, chat/conversations, tools, LLM defaults, images.
-- **Jobs** (`src/Cognition.Jobs`) – Hangfire + Rebus workers for planner/backlog and tool execution; pushes hub events.
-- **Clients** (`src/Cognition.Clients`) – LLM clients (OpenAI, Gemini, Ollama), tool registry/dispatcher, agent service, image client/service, scope utilities.
-- **Data** (`src/Cognition.Data.Relational`) – EF Core DbContext, modules for LLM/providers/models, personas/agents, conversations/messages/plans/tasks, tools, prompts, images, feature flags.
-- **Console** (`src/Cognition.Console`) – Vite/React SPA built into `src/Cognition.Api/wwwroot`; SignalR chat, planner/backlog telemetry, admin pages (LLM defaults, ops).
-- **Contracts** (`src/Cognition.Contracts`) – Rebus events for plan/tool/message flows.
+### What's Inside
+- **API** (`src/Cognition.Api`) - JWT auth, Swagger, SignalR hub (`/hub/chat`), Hangfire dashboard, planners/ops diagnostics, personas/agents, chat/conversations, tools, LLM defaults, images.
+- **Jobs** (`src/Cognition.Jobs`) - Hangfire + Rebus workers for planner/backlog and tool execution; pushes hub events.
+- **Clients** (`src/Cognition.Clients`) - LLM clients (OpenAI, Gemini, Ollama), tool registry/dispatcher, agent service, image client/service, scope utilities.
+- **Data** (`src/Cognition.Data.Relational`) - EF Core DbContext, modules for LLM/providers/models, personas/agents, conversations/messages/plans/tasks, tools, prompts, images, feature flags.
+- **Domains** (`src/Cognition.Domains`) - DoD core models and value objects.
+- **Domains Relational** (`src/Cognition.Domains.Relational`) - DoD EF Core DbContext + migrations.
+- **Domains Documents** (`src/Cognition.Domains.Documents`) - RavenDB document storage for manifests/assets.
+- **Workflows** (`src/Cognition.Workflows`) - workflow graph core models.
+- **Workflows Relational** (`src/Cognition.Workflows.Relational`) - workflow EF Core persistence + migrations.
+- **Console** (`src/Cognition.Console.Dod`) - DoD-first Vite/React SPA built into `src/Cognition.Api/wwwroot`.
+- **Contracts** (`src/Cognition.Contracts`) - Rebus events for plan/tool/message flows.
 
 ---
 
 ### Current Defaults & Behavior
-- **Agent-first chat/conversations**: Conversation creation binds to `AgentId`; persona implied from agent. Provider/model defaults resolve in order: conversation settings → agent profile → global defaults (admin-set via `/api/llm/defaults`) → heuristic (Gemini Flash) as last resort.
+- **Agent-first chat/conversations**: Conversation creation binds to `AgentId`; persona implied from agent. Provider/model defaults resolve in order: conversation settings -> agent profile -> global defaults (admin-set via `/api/llm/defaults`) -> heuristic (Gemini Flash) as last resort.
 - **LLM visibility**: Public tool/provider/model surfaces hide inactive/deprecated items. Admin surfaces manage full catalog.
 - **Planner telemetry**: Admin-only diagnostics at `/api/diagnostics/planner`; alerts feed Ops webhook if configured.
 - **Scope identity**: `ScopePathBuilder`/`ScopeToken` must be used for planner/tool/search contexts; analyzer bans ad-hoc scope construction.
-- **Rate limiting**: Fixed-window quotas configurable per user/persona/agent; rate-limit partition prefers agent → conversation → persona/user.
+- **Rate limiting**: Fixed-window quotas configurable per user/persona/agent; rate-limit partition prefers agent -> conversation -> persona/user.
 
 ---
 
@@ -33,7 +38,7 @@ dotnet run --project src/Cognition.Api          # applies migrations + seeds def
 dotnet run --project src/Cognition.Jobs         # background worker
 
 # Console (dev server)
-cd src/Cognition.Console
+cd src/Cognition.Console.Dod
 npm ci
 npm run dev
 ```
@@ -43,13 +48,16 @@ API surfaces: Swagger `/swagger`, Hangfire `/hangfire`, SignalR hub `/hub/chat`,
 ---
 
 ### Configuration (env/appsettings)
-- `ConnectionStrings__Postgres` – Postgres connection.
-- `JWT__Secret` – required in Production (dev fallback blocked in prod).
+- `ConnectionStrings__Postgres` - Postgres connection (legacy data).
+- `ConnectionStrings__DomainsPostgres` - DoD Postgres connection.
+- `ConnectionStrings__WorkflowsPostgres` - Workflows Postgres connection.
+- `RavenDb__Urls__0` / `RavenDb__Database` - RavenDB document store config.
+- `JWT__Secret` - required in Production (dev fallback blocked in prod).
 - LLM keys: `OPENAI_KEY`/`OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `OLLAMA_BASE_URL` (optional base overrides).
-- `ApiRateLimiting` – permit/window/queue per user/persona/agent; `MaxRequestBodyBytes`.
-- `OpsAlerting` – webhook, routing keys, debounce, severity filters (used by planner alerts).
-- `PlannerCritique`/`PlannerQuotas` – iteration/token/queue budgets per planner/persona.
-- `OpenSearch` – vector model/index/pipeline config for embeddings.
+- `ApiRateLimiting` - permit/window/queue per user/persona/agent; `MaxRequestBodyBytes`.
+- `OpsAlerting` - webhook, routing keys, debounce, severity filters (used by planner alerts).
+- `PlannerCritique`/`PlannerQuotas` - iteration/token/queue budgets per planner/persona.
+- `OpenSearch` - vector model/index/pipeline config for embeddings.
 
 ---
 
@@ -88,6 +96,15 @@ API surfaces: Swagger `/swagger`, Hangfire `/hangfire`, SignalR hub `/hub/chat`,
 - `dotnet test` (uses shared settings/coverage; EF InMemory default).
 - Data annotation tests cover DTO validation (users/tools/personas/etc).
 - New persona access service tests use EF InMemory to assert owner vs non-owner behavior.
+
+### Verification (dev)
+- `docker compose up -d postgres dod-postgres workflows-postgres ravendb`
+- `dotnet run --project src/Cognition.Api` (applies migrations + seeds defaults)
+- `dotnet run --project src/Cognition.Jobs`
+
+### Rollback (dev)
+- Remove DoD/Workflows DI wiring in `src/Cognition.Api/Program.cs` and `src/Cognition.Jobs/Program.cs`.
+- Drop the dev data volumes: `cognition-dod-pgdata`, `cognition-workflows-pgdata`, `cognition-ravendbdata`.
 
 ---
 
