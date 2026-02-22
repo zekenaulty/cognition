@@ -1,4 +1,5 @@
 ## Cognition
+(in reallity, this solution, is just a learning, testing playground, that I used to actively work though concepts/ideas)
 
 Agent-first LLM orchestration: ASP.NET Core API, Hangfire/Rebus jobs, EF Core Postgres, and a Vite/React console. Supports chat, tools, planners, fiction workflows, and ops telemetry with scoped identities and configurable defaults.
 
